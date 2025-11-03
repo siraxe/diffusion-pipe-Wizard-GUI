@@ -1,0 +1,58 @@
+{
+    "train_models": [
+        "auraflow",
+        "chroma",
+        "cosmos",
+        "cosmos_predict2",
+        "flux",
+        "hidream",
+        "hunyuan-video",
+        "hunyuan_image",
+        "lumina_2",
+        "ltx-video",
+        "omnigen2",
+        "qwen_image",
+        "qwen_image_plus",
+        "sd3",
+        "sdxl",
+        "wan",
+        "wan22"
+    ],
+    "captions": {
+        "llava_next_7b": "LLaVA-NeXT-7B",
+        "qwen3_vl_4b": "Qwen3-VL-4B",
+        "qwen3_vl_8b": "Qwen3-VL-8B",
+        "joycaption_llava": "JoyCaption-llava"
+    },
+    "train_def_model": "qwen_image",
+    "captions_def_model": "llava_next_7b",
+    "THUMB_TARGET_W": 160,
+    "THUMB_TARGET_H": 90,
+    "COLLAGE_WIDTH": 270,
+    "COLLAGE_HEIGHT": 152,
+    "THUMB_CELL_W": 91,
+    "THUMB_CELL_H": 51,
+    "DATASETS_DIR": "workspace/datasets",
+    "DATASETS_IMG_DIR": "workspace/datasets_img",
+    "THUMBNAILS_BASE_DIR": "workspace/thumbnails",
+    "THUMBNAILS_IMG_BASE_DIR": "workspace/thumbnails_img",
+    "DEFAULT_BUCKET_SIZE_STR": "[512, 512, 49]",
+    "VIDEO_EXTENSIONS": [
+        "mp4",
+        "avi",
+        "mov",
+        "mkv",
+        "webm"
+    ],
+    "IMAGE_EXTENSIONS": [
+        "jpg",
+        "jpeg",
+        "png"
+    ],
+    "LORA_MODELS_DIR": "workspace/lora_models",
+    "FFMPEG_PATH": "flet_app/ffmpeg/bin/ffmpeg.exe",
+    "IMAGE_EDITOR_PATH": "C:/Program Files/Adobe/Adobe Photoshop 2025/Photoshop.exe",
+    "enable_audio": false,
+    "use_gpu_ffmpeg": true,
+    "project_location": "/home/user/Dpipe"
+}

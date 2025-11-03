@@ -1,0 +1,79 @@
+# Claude files
+.claude
+.codex
+
+# diff pipe
+diffusion-pipe/
+models/
+!flet_app/modules/qwen_plus_patch/models/
+dp_env/
+flet_app/settings.json
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Model files
+*.safetensors
+*.pth
+*.pt
+*.ckpt
+
+# Windows/Zone identifier files
+*Zone.Identifier
+*.Zone.Identifier
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Workspace and temporary files
+workspace/*
+!workspace/**/*_here.txt
+temp/
+tmp/
+*.tmp
+*.bak
+
+# Logs
+*.log
+logs/
+
+# Exception for qwen model files (moved to flet_app path)
+!flet_app/modules/qwen_plus_patch/models/qwen_image.py
+!flet_app/modules/qwen_plus_patch/models/qwen_image_plus.py
+

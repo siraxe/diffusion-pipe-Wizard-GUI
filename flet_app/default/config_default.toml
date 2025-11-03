@@ -1,0 +1,66 @@
+############################################
+# Default training configuration (from UI) #
+############################################
+
+# Output path for training runs. Each training run makes a new directory in here.
+output_dir = 'workspace/output/dir'
+
+# Dataset config file. This will be created next.
+dataset = ''
+
+# training settings
+epochs = 1000
+micro_batch_size_per_gpu = 1
+pipeline_stages = 1
+gradient_accumulation_steps = 1
+gradient_clipping = 1.0
+warmup_steps = 0
+lr_scheduler = 'constant'
+activation_checkpointing = 'unsloth'
+
+# eval settings
+eval_every_n_epochs = 1
+eval_before_first_step = true
+eval_micro_batch_size_per_gpu = 1
+eval_gradient_accumulation_steps = 1
+
+# misc settings
+save_every_n_epochs = 5
+checkpoint_every_n_minutes = 10
+partition_method = 'parameters'
+save_dtype = 'bfloat16'
+caching_batch_size = 1
+steps_per_print = 1
+video_clip_mode = 'single_beginning'
+
+# BLOCK SWAP (requires pipeline_stages=1)
+blocks_to_swap = 10
+disable_block_swap_for_eval = true
+
+[model]
+type = ''
+diffusers_path  = 'models/qwen_edit'
+# Leave empty to use only diffusers_path
+# transformer_path   = ''
+
+dtype = 'bfloat16'
+transformer_dtype = 'float8'
+timestep_sample_method = 'logit_normal'
+
+[optimizer]
+type = 'adamw_optimi'
+lr = 2e-5
+betas = [0.9, 0.99]
+weight_decay = 0.01
+eps = 1e-8
+
+[adapter]
+type = 'lora'
+rank = 32
+dtype = 'bfloat16'
+
+[monitoring]
+enable_wandb = false
+wandb_api_key = ''
+wandb_tracker_name = ''
+wandb_run_name = ''
