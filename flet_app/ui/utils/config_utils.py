@@ -285,6 +285,15 @@ def build_toml_config_from_ui(training_tab_container) -> str:
                     td_bool = str(td).strip().lower() in ['1','true','yes','on']
                 if td_bool:
                     t_dtype = 'nf4'
+            if mt_lower == 'longcat':
+                td = _get('float8 t_dtype', False)
+                td_bool = False
+                if isinstance(td, bool):
+                    td_bool = td
+                else:
+                    td_bool = str(td).strip().lower() in ['1','true','yes','on']
+                if td_bool:
+                    t_dtype = 'float8'
         except Exception:
             pass
         lines.append(f"transformer_dtype = {_quote(t_dtype)}")

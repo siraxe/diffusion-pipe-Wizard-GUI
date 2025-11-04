@@ -1,6 +1,8 @@
 # Claude files
 .claude
 .codex
+.qwen
+*.env
 
 # diff pipe
 diffusion-pipe/
@@ -9,6 +11,7 @@ models/
 dp_env/
 flet_app/settings.json
 LTX/
+longcat/
 
 # Python cache and compiled files
 __pycache__/
@@ -77,4 +80,8 @@ logs/
 # Exception for qwen model files (moved to flet_app path)
 !flet_app/modules/qwen_plus_patch/models/qwen_image.py
 !flet_app/modules/qwen_plus_patch/models/qwen_image_plus.py
+
+# Exception for longcat model files (stored with patch assets)
+!flet_app/modules/longcat_patch/models/
+!flet_app/modules/longcat_patch/models/*
 

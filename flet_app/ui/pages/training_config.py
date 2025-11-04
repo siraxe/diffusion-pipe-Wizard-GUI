@@ -30,6 +30,7 @@ vae_path_field_ref = ft.Ref[ft.TextField]()
 ckpt_path_wan22_field_ref = ft.Ref[ft.TextField]()
 llm_path_field_ref = ft.Ref[ft.TextField]()
 float8_e5m2_checkbox_ref = ft.Ref[ft.Checkbox]()
+longcat_float8_checkbox_ref = ft.Ref[ft.Checkbox]()
 clip_path_field_ref = ft.Ref[ft.TextField]()
 llama3_path_field_ref = ft.Ref[ft.TextField]()
 max_llama3_seq_len_field_ref = ft.Ref[ft.TextField]()
@@ -88,6 +89,7 @@ def get_training_config_page_content():
         is_hunyuan_video = (sel_norm == "hunyuan-video")
         is_hunyuan_image = (sel_norm == "hunyuan_image")
         is_hidream = (sel_norm == "hidream")
+        is_longcat = (sel_norm == "longcat")
         skip_defaults = _suppress_model_defaults
 
         # Reset a core list of model-dependent path fields on any model switch.
@@ -141,7 +143,7 @@ def get_training_config_page_content():
         if not skip_defaults:
             try:
                 if timestep_sm_dropdown_ref.current:
-                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "qwen_image", "qwen_image_plus", "auraflow"}
+                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "longcat", "qwen_image", "qwen_image_plus", "auraflow"}
                     if sel_norm in models_logit:
                         timestep_sm_dropdown_ref.current.value = "logit_normal"
                     else:
@@ -174,6 +176,8 @@ def get_training_config_page_content():
             lumina_shift_checkbox_ref.current.visible = is_lumina
         if float8_e5m2_checkbox_ref.current:
             float8_e5m2_checkbox_ref.current.visible = is_cosmos_p2
+        if longcat_float8_checkbox_ref.current:
+            longcat_float8_checkbox_ref.current.visible = is_longcat
         if llama3_path_field_ref.current:
             llama3_path_field_ref.current.visible = is_hidream
         if max_llama3_seq_len_field_ref.current:
@@ -212,12 +216,13 @@ def get_training_config_page_content():
             if checkpoint_row_ref.current:
                 checkpoint_row_ref.current.visible = is_sdxl
             if ckpt_path_row_ref.current:
-                ckpt_path_row_ref.current.visible = (is_wan22 or is_hunyuan_video or is_wan)
+                ckpt_path_row_ref.current.visible = (is_wan22 or is_hunyuan_video or is_wan or is_longcat)
             if diffusers_row_ref.current:
                 diffusers_row_ref.current.visible = (
                     (not is_sdxl)
                     and (not is_wan22)
                     and (not is_wan)
+                    and (not is_longcat)
                     and (not is_auraflow)
                     and (not is_cosmos)
                     and (not is_cosmos_p2)
@@ -269,7 +274,7 @@ def get_training_config_page_content():
                 pass
         # wan22-specific ckpt_path
         if ckpt_path_wan22_field_ref.current:
-            ckpt_path_wan22_field_ref.current.visible = is_wan22 or is_hunyuan_video or is_wan
+            ckpt_path_wan22_field_ref.current.visible = is_wan22 or is_hunyuan_video or is_wan or is_longcat
         if clip_path_field_ref.current:
             clip_path_field_ref.current.visible = is_hunyuan_video
         # Hide base path fields for SDXL
@@ -278,6 +283,7 @@ def get_training_config_page_content():
                 (not is_sdxl)
                 and (not is_wan22)
                 and (not is_wan)
+                and (not is_longcat)
                 and (not is_auraflow)
                 and (not is_cosmos)
                 and (not is_cosmos_p2)
@@ -315,6 +321,7 @@ def get_training_config_page_content():
                 (not is_sdxl)
                 and (not is_wan22)
                 and (not is_wan)
+                and (not is_longcat)
                 and (not is_chroma)
                 and (not is_qwen_plus)
                 and (not is_omnigen2)
@@ -331,6 +338,7 @@ def get_training_config_page_content():
                 (not is_sdxl)
                 and (not is_wan22)
                 and (not is_wan)
+                and (not is_longcat)
                 and (not is_chroma)
                 and (not is_qwen_plus)
                 and (not is_omnigen2)
@@ -575,6 +583,17 @@ def get_training_config_page_content():
                         vae_path_field_ref.current.value = 'models/cosmos/cosmos_cv8x8x8_1.0.safetensors'
             except Exception:
                 pass
+        # Set LongCat defaults when selected
+        if is_longcat and not skip_defaults:
+            try:
+                if ckpt_path_wan22_field_ref.current:
+                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
+                        ckpt_path_wan22_field_ref.current.value = 'models/LongCat-Video'
+                if transformer_path_field_ref.current:
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/wan/LongCat_TI2V_comfy_bf16.safetensors'
+            except Exception:
+                pass
         if e and getattr(e, 'page', None):
             e.page.update()
 
@@ -707,6 +726,7 @@ def get_training_config_page_content():
                                     settings.train_def_model == "wan22"
                                     or settings.train_def_model == "wan"
                                     or settings.train_def_model == "hunyuan-video"
+                                    or settings.train_def_model == "longcat"
                                 )
                             ),
                         ],
@@ -715,6 +735,7 @@ def get_training_config_page_content():
                             settings.train_def_model == "wan22"
                             or settings.train_def_model == "wan"
                             or settings.train_def_model == "hunyuan-video"
+                            or settings.train_def_model == "longcat"
                         )
                     ),
                     ft.ResponsiveRow(
@@ -810,6 +831,14 @@ def get_training_config_page_content():
                             visible=(settings.train_def_model == "cosmos_predict2"),
                             col=6,
                         ),
+                        ft.Checkbox(
+                            label="float8 t_dtype",
+                            value=False,
+                            scale=0.8,
+                            ref=longcat_float8_checkbox_ref,
+                            visible=(settings.train_def_model == "longcat"),
+                            col=6,
+                        ),
                         create_textfield(
                             "llm_path", "", col=6, expand=True,
                             ref=llm_path_field_ref, visible=(
@@ -838,6 +867,7 @@ def get_training_config_page_content():
                             and settings.train_def_model != "hidream"
                             and settings.train_def_model != "lumina_2"
                             and settings.train_def_model != "cosmos_predict2"
+                            and settings.train_def_model != "longcat"
                         )),
                         create_textfield("vae_path", "", col=6, expand=True, ref=vae_path_field_ref, visible=(
                             settings.train_def_model != "sdxl"
@@ -846,6 +876,7 @@ def get_training_config_page_content():
                             and settings.train_def_model != "chroma"
                             and settings.train_def_model != "omnigen2"
                             and settings.train_def_model != "flux"
+                            and settings.train_def_model != "longcat"
                         )),
                 ], spacing=2),
                     ft.ResponsiveRow(controls=[
@@ -1311,6 +1342,18 @@ def update_wan22_ckpt_visibility(is_wan22: bool, ckpt_value=None):
     try:
         if ckpt_path_wan22_field_ref.current:
             ckpt_path_wan22_field_ref.current.visible = is_wan22
+            if ckpt_value is not None:
+                ckpt_path_wan22_field_ref.current.value = str(ckpt_value)
+        if ckpt_path_wan22_field_ref.current and ckpt_path_wan22_field_ref.current.page:
+            ckpt_path_wan22_field_ref.current.page.update()
+    except Exception:
+        pass
+
+def update_longcat_ckpt_visibility(is_longcat: bool, ckpt_value=None):
+    """Update visibility and value for longcat ckpt_path field."""
+    try:
+        if ckpt_path_wan22_field_ref.current:
+            ckpt_path_wan22_field_ref.current.visible = is_longcat
             if ckpt_value is not None:
                 ckpt_path_wan22_field_ref.current.value = str(ckpt_value)
         if ckpt_path_wan22_field_ref.current and ckpt_path_wan22_field_ref.current.page:

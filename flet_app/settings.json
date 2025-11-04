@@ -8,6 +8,7 @@
         "hidream",
         "hunyuan-video",
         "hunyuan_image",
+        "longcat",
         "lumina_2",
         "ltx-video",
         "omnigen2",
@@ -54,5 +55,5 @@
     "IMAGE_EDITOR_PATH": "C:/Program Files/Adobe/Adobe Photoshop 2025/Photoshop.exe",
     "enable_audio": false,
     "use_gpu_ffmpeg": true,
-    "project_location": "/home/user/Dpipe"
+    "project_location": "/home/e/Dpipe"
 }

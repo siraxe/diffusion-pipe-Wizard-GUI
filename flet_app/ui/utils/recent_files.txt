@@ -1,3 +1,4 @@
+/home/e/Dpipe/workspace/configs/longcat_config.toml
 /home/e/Dpipe/workspace/configs/wan22_i2v_high.toml
 /home/e/Dpipe/flet_app/default/config_default.toml
 /home/e/WS/flet_app/default/config_default.toml

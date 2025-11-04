@@ -63,6 +63,12 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         if _has(ckpt):
             expanded_ckpt_path = expand_model_path(str(ckpt))
             lines.append(f"ckpt_path = '{expanded_ckpt_path}'")
+    # longcat: include ckpt_path when provided
+    if mt == 'longcat':
+        ckpt = get_value('ckpt_path', None)
+        if _has(ckpt):
+            expanded_ckpt_path = expand_model_path(str(ckpt))
+            lines.append(f"ckpt_path = '{expanded_ckpt_path}'")
 
     # auraflow
     if mt == 'auraflow':
@@ -209,6 +215,9 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
         for k in ('min_snr_gamma', 'unet_lr', 'text_encoder_1_lr', 'text_encoder_2_lr'):
             if k in model_dict:
                 label_vals[k] = model_dict.get(k)
+    elif mt_lower == 'longcat':
+        if 'ckpt_path' in model_dict:
+            label_vals['ckpt_path'] = collapse_model_path(model_dict.get('ckpt_path'))
 
     return mt
 
@@ -233,7 +242,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -244,6 +253,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_ltx = (mt in ('ltx-video', 'ltx'))
         is_lumina = (mt in ('lumina', 'lumina_2'))
         is_sdxl = (mt == 'sdxl')
+        is_longcat = (mt == 'longcat')
     except Exception:
         pass
 
@@ -258,14 +268,16 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_ltx = is_ltx or (curv in ('ltx-video', 'ltx'))
             is_lumina = is_lumina or (curv in ('lumina', 'lumina_2'))
             is_sdxl = is_sdxl or (curv == 'sdxl')
+            is_longcat = is_longcat or (curv == 'longcat')
     except Exception:
         pass
 
     # Apply visibility + any provided values
     update_wan_fields_visibility(is_wan22, label_vals.get('min_t'), label_vals.get('max_t'))
     try:
-        from flet_app.ui.pages.training_config import update_wan22_ckpt_visibility
+        from flet_app.ui.pages.training_config import update_wan22_ckpt_visibility, update_longcat_ckpt_visibility
         update_wan22_ckpt_visibility(is_wan22, label_vals.get('ckpt_path'))
+        update_longcat_ckpt_visibility(is_longcat, label_vals.get('ckpt_path'))
     except Exception:
         pass
     update_auraflow_fields_visibility(is_auraflow, label_vals.get('max_sequence_length'))

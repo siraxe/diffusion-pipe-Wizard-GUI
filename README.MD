@@ -59,6 +59,20 @@ chmod +x apply_qwen_patch.sh
 ./apply_qwen_patch.sh
 ```
 
+## Apply LongCat-Video patch (optional)
+
+To add LongCat-Video model support to diffusion-pipe:
+
+```
+chmod +x apply_longcat_patch.sh
+./apply_longcat_patch.sh
+```
+
+This script will:
+- Apply the LongCat-Video model patches to diffusion-pipe
+- Automatically download and initialize the LongCat-Video submodule
+- Update the necessary configuration files
+
 That's it , you can run it now.
 
 ```
