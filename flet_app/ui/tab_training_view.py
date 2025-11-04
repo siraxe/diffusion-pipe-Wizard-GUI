@@ -11,6 +11,7 @@ import signal
 import shutil
 import asyncio
 import traceback
+import tempfile
 from PIL import Image
 
 # =====================
@@ -154,11 +155,29 @@ async def save_training_config_to_toml(training_tab_container):
         ws_dir = os.path.abspath(os.path.join(project_root, "workspace"))
         os.makedirs(ws_dir, exist_ok=True)
 
+        def _write_atomic(path: str, text: str):
+            """Write text to path atomically to avoid partially-written configs."""
+            directory = os.path.dirname(path)
+            os.makedirs(directory, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as tmp_file:
+                    tmp_file.write(text)
+                    tmp_file.flush()
+                    os.fsync(tmp_file.fileno())
+                os.replace(tmp_path, path)
+            except Exception:
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+                raise
+
         # 1) Build and save last_data_config.toml
         data_toml_text = _build_last_data_config_text()
         data_toml_path = os.path.join(ws_dir, "last_data_config.toml")
-        with open(data_toml_path, 'w', encoding='utf-8') as f:
-            f.write(data_toml_text)
+        _write_atomic(data_toml_path, data_toml_text)
 
         # 2) Build training TOML and rewrite dataset pointer to last_data_config.toml
         train_toml_text = build_toml_config_from_ui(training_tab_container)
@@ -174,8 +193,7 @@ async def save_training_config_to_toml(training_tab_container):
 
         # 3) Save last_config.toml with updated dataset pointer
         out_path = os.path.join(ws_dir, "last_config.toml")
-        with open(out_path, 'w', encoding='utf-8') as f:
-            f.write(train_toml_text)
+        _write_atomic(out_path, train_toml_text)
 
         return out_path, train_toml_text
 

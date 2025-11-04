@@ -581,11 +581,74 @@ def get_training_config_page_content():
     page_controls = []
 
     # --- Model Configuration & Dataset Selection (Side by Side) ---
+    def _on_save_data_config_click(e: ft.ControlEvent):
+        try:
+            ds_block = dataset_block
+            selected = None
+            if ds_block and hasattr(ds_block, 'get_selected_dataset'):
+                selected = ds_block.get_selected_dataset()
+            if not selected:
+                if e and e.page:
+                    e.page.snack_bar = ft.SnackBar(content=ft.Text("Select a dataset before saving."), open=True)
+                    e.page.update()
+                return
+
+            from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+            import os
+            import json
+            try:
+                import tomllib as _toml_reader  # Python 3.11+
+            except Exception:  # pragma: no cover
+                _toml_reader = None
+
+            base_dir, dataset_type = _get_dataset_base_dir(selected)
+            clean_dataset_name = str(selected)
+            dataset_full_path = os.path.join(base_dir, clean_dataset_name)
+            parent_dir = os.path.dirname(dataset_full_path)
+            out_toml_path = os.path.join(parent_dir, f"{clean_dataset_name}.toml")
+
+            # Build TOML string with basic data config structure
+            toml_lines = []
+            toml_lines.append("resolutions = [512]")
+            toml_lines.append("")
+            toml_lines.append("enable_ar_bucket = true")
+            toml_lines.append("")
+            toml_lines.append("# Min and max aspect ratios, given as width/height ratio.")
+            toml_lines.append("min_ar = 0.5")
+            toml_lines.append("max_ar = 2.0")
+            toml_lines.append("ar_buckets = [[448, 576]]")
+            toml_lines.append("")
+            toml_lines.append("# Total number of aspect ratio buckets, evenly spaced (in log space) between min_ar and max_ar.")
+            toml_lines.append("num_ar_buckets = 9")
+            toml_lines.append("num_repeats = 1")
+            toml_lines.append("")
+            toml_lines.append("# Frame buckets (commented out by default)")
+            toml_lines.append("# frame_buckets = [1, 33]")
+            toml_lines.append("")
+            toml_lines.append("[[directory]]")
+            toml_lines.append("# The target images go in here. These are the images that the model will learn to produce.")
+            # Use the selected dataset path
+            dir_path_val = dataset_full_path
+            # Escape backslashes minimally
+            toml_lines.append(f"path = '{dir_path_val}'")
+
+            os.makedirs(parent_dir, exist_ok=True)
+            with open(out_toml_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(toml_lines) + "\n")
+
+            if e and e.page:
+                e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Saved: {out_toml_path}"), open=True)
+                e.page.update()
+        except Exception as ex:
+            if e and e.page:
+                e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Error saving: {ex}"), open=True)
+                e.page.update()
+
     # Add Save Configuration button to the dataset row (styled like Monitor)
     save_cfg_btn = ft.ElevatedButton(
         "Save Data Config",
         icon=ft.Icons.SAVE,
-        on_click=lambda e: TopBarUtils.handle_save_as(e.page),
+        on_click=_on_save_data_config_click,
     )
     dataset_block = get_training_dataset_page_content(extra_right_controls=[save_cfg_btn])
     page_controls.append(
