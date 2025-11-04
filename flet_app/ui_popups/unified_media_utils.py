@@ -85,7 +85,9 @@ def make_video_control(path: str, width: int, height: int, page: Optional[ft.Pag
         )
     resource = _build_video_media_resource(page, path)
     # Debug print removed
-    volume = 100.0 if settings.get("enable_audio", False) else 0.0
+    # On web, enforce muted playback to avoid autoplay restrictions
+    volume = 0.0 if _is_web_platform(page) else (100.0 if settings.get("enable_audio", False) else 0.0)
+    # Prefer built-in loop mode to ensure reliable looping on web
     return Video(
         playlist=[VideoMedia(resource=resource)],
         autoplay=True,
@@ -93,7 +95,7 @@ def make_video_control(path: str, width: int, height: int, page: Optional[ft.Pag
         height=height,
         expand=False,
         show_controls=False,
-        playlist_mode="none",
+        playlist_mode="loop",
         volume=volume,
     )
 

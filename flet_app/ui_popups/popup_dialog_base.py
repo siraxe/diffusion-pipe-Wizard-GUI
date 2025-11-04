@@ -9,10 +9,15 @@ import flet as ft
 # GUI-Building Functions
 # =====================
 
-def build_title_bar(title: str, on_close, prefix_controls=None) -> ft.Row:
-    """Builds the title bar row for the dialog, including optional prefix controls and a close button."""
+def build_title_bar(title: str, on_close, prefix_controls=None, suffix_controls=None) -> ft.Row:
+    """Builds the title bar row for the dialog, including optional prefix/suffix controls and a close button."""
     prefix_controls_container = ft.Row(
         controls=prefix_controls if prefix_controls is not None else [],
+        tight=True,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER
+    )
+    suffix_controls_container = ft.Row(
+        controls=suffix_controls if suffix_controls is not None else [],
         tight=True,
         vertical_alignment=ft.CrossAxisAlignment.CENTER
     )
@@ -25,11 +30,11 @@ def build_title_bar(title: str, on_close, prefix_controls=None) -> ft.Row:
     )
     close_button = ft.IconButton(ft.Icons.CLOSE, on_click=on_close)
     title_row = ft.Row(
-        controls=[prefix_controls_container, title_text_control, close_button],
+        controls=[prefix_controls_container, title_text_control, suffix_controls_container, close_button],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         vertical_alignment=ft.CrossAxisAlignment.CENTER
     )
-    return title_row, prefix_controls_container, title_text_control, close_button
+    return title_row, prefix_controls_container, suffix_controls_container, title_text_control, close_button
 
 def build_dialog_content(content: ft.Control) -> ft.Container:
     """Wraps the dialog's main content in a container for easy updating."""
@@ -113,7 +118,7 @@ class PopupDialogBase(ft.Container):
     def _build_gui(self):
         """Initializes and builds all GUI controls for the dialog."""
         # Title bar and controls
-        self.title_row, self.title_bar_prefix_controls_container, self.title_text_control, self.close_button = build_title_bar(
+        self.title_row, self.title_bar_prefix_controls_container, self.title_bar_suffix_controls_container, self.title_text_control, self.close_button = build_title_bar(
             self._initial_title, self.hide_dialog
         )
         # Content container
@@ -127,7 +132,7 @@ class PopupDialogBase(ft.Container):
         # Stack (background + dialog)
         self.content = build_dialog_stack(self.background_layer, self.actual_dialog)
 
-    def show_dialog(self, content: ft.Control = None, title: str = None, new_width: int = None, title_prefix_controls: list[ft.Control] = None, e=None, page: ft.Page = None):
+    def show_dialog(self, content: ft.Control = None, title: str = None, new_width: int = None, title_prefix_controls: list[ft.Control] = None, title_suffix_controls: list[ft.Control] = None, e=None, page: ft.Page = None):
         """
         Shows the dialog, optionally updating its content, title, width, and prefix controls.
         """
@@ -145,6 +150,11 @@ class PopupDialogBase(ft.Container):
             self.title_bar_prefix_controls_container.controls = title_prefix_controls
         else:
             self.title_bar_prefix_controls_container.controls = []
+        # Update suffix controls
+        if title_suffix_controls is not None:
+            self.title_bar_suffix_controls_container.controls = title_suffix_controls
+        else:
+            self.title_bar_suffix_controls_container.controls = []
         # Update content
         if content is not None:
             self.dialog_content_container.content = content

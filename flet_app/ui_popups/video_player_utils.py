@@ -16,6 +16,10 @@ except ImportError:
     class FallbackSettings:
         FFMPEG_PATH = "ffmpeg" # Default to ffmpeg in PATH
         # Define other settings if needed, or handle their absence
+
+        def get(self, name: str, default=None):
+            """Allow attribute-style settings to behave like dict lookups."""
+            return getattr(self, name, default)
     app_settings = FallbackSettings()
 
 MIN_OVERLAY_SIZE = 20 # Minimum size for the overlay during resize (used in calculations)
@@ -401,12 +405,14 @@ def crop_video_from_overlay(
     overlay_w_norm: float, overlay_h_norm: float, # Normalized 0-1 relative to displayed video
     displayed_video_w: int, displayed_video_h: int, # Actual pixel size of video as displayed
     video_orig_w: int, video_orig_h: int,
-    player_content_w: int, player_content_h: int # Dimensions of the container holding the video player
+    player_content_w: int, player_content_h: int, # Dimensions of the container holding the video player
+    overlay_angle_rad: float = 0.0,
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Crops a video based on normalized overlay coordinates.
     The overlay coordinates are relative to the *displayed* video within the player.
-    Handles scaling calculations to map displayed coordinates to original video coordinates.
+    Handles scaling calculations to map displayed coordinates to original video coordinates
+    and applies rotation when an overlay angle is provided.
     Returns (success, message, output_path_or_none).
     """
     ffmpeg_exe = _get_ffmpeg_exe_path()
@@ -472,12 +478,59 @@ def crop_video_from_overlay(
 
     temp_output_path = _get_temp_output_path(current_video_path, "cropped_overlay")
     
-    vf_filters = []
+    angle = overlay_angle_rad or 0.0
+    use_rotation = abs(angle) > 1e-4
+
+    vf_filters: List[str] = []
     # Pre-scaling if original video is smaller than target crop (unlikely with overlay but for consistency)
     # This part is more relevant for crop_video_to_dimensions. For overlay, we crop what's selected.
     # However, if the selected area *implies* an upscale, FFmpeg handles it with 'crop'.
 
-    vf_filters.append(f"crop={target_crop_w}:{target_crop_h}:{target_crop_x}:{target_crop_y}")
+    if use_rotation:
+        center_x = target_crop_x + (target_crop_w / 2.0)
+        center_y = target_crop_y + (target_crop_h / 2.0)
+        diag = math.hypot(target_crop_w, target_crop_h)
+        pre_side = max(target_crop_w, target_crop_h, math.ceil(diag))
+        if pre_side % 2:
+            pre_side += 1
+        half_pre = pre_side / 2.0
+
+        pad_left = max(0, math.ceil(half_pre - center_x))
+        pad_right = max(0, math.ceil(center_x + half_pre - video_orig_w))
+        pad_top = max(0, math.ceil(half_pre - center_y))
+        pad_bottom = max(0, math.ceil(center_y + half_pre - video_orig_h))
+
+        if pad_left or pad_right or pad_top or pad_bottom:
+            pad_w = video_orig_w + pad_left + pad_right
+            pad_h = video_orig_h + pad_top + pad_bottom
+            vf_filters.append(f"pad={pad_w}:{pad_h}:{pad_left}:{pad_top}:color=black")
+            center_x += pad_left
+            center_y += pad_top
+            src_w = pad_w
+            src_h = pad_h
+        else:
+            src_w = video_orig_w
+            src_h = video_orig_h
+
+        crop_x = center_x - half_pre
+        crop_y = center_y - half_pre
+        crop_x = max(0.0, min(crop_x, src_w - pre_side))
+        crop_y = max(0.0, min(crop_y, src_h - pre_side))
+
+        vf_filters.append(
+            f"crop={pre_side}:{pre_side}:{int(crop_x)}:{int(crop_y)}"
+        )
+
+        vf_filters.append(
+            f"rotate={-angle:.10f}:ow='rotw(iw)':oh='roth(ih)':fillcolor=black"
+        )
+
+        vf_filters.append(
+            f"crop={target_crop_w}:{target_crop_h}:(iw-{target_crop_w})/2:(ih-{target_crop_h})/2"
+        )
+    else:
+        vf_filters.append(f"crop={target_crop_w}:{target_crop_h}:{target_crop_x}:{target_crop_y}")
+
     vf_filters.append("pad=ceil(iw/2)*2:ceil(ih/2)*2") # Ensure final dimensions are even
 
     command = [

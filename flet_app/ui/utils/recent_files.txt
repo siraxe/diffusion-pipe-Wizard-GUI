@@ -1,4 +1,2 @@
-/home/e/WS/workspace/configs/qqq.toml
-/home/e/WS/workspace/configs/chroma_config.toml
+/home/e/Dpipe/flet_app/default/config_default.toml
 /home/e/WS/flet_app/default/config_default.toml
-/home/e/WS/workspace/configs/chroma_config2.toml

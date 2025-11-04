@@ -275,7 +275,8 @@ def crop_image_from_overlay(
     overlay_w_norm: float, overlay_h_norm: float,
     displayed_image_w: int, displayed_image_h: int,
     image_orig_w: int, image_orig_h: int,
-    player_content_w: int, player_content_h: int
+    player_content_w: int, player_content_h: int,
+    overlay_angle_rad: float = 0.0,
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Crops an image based on overlay coordinates from the UI.
@@ -327,7 +328,95 @@ def crop_image_from_overlay(
     crop_w_orig = min(crop_w_orig, image_orig_w - crop_x_orig)
     crop_h_orig = min(crop_h_orig, image_orig_h - crop_y_orig)
 
-    return crop_image(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig)
+    # Handle rotation if angle is significant
+    if abs(overlay_angle_rad) > 0.01:  # Only apply rotation if angle is more than ~0.5 degrees
+        return crop_image_with_rotation(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig, overlay_angle_rad)
+    else:
+        return crop_image(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig)
+
+def crop_image_with_rotation(
+    image_path: str,
+    x: int, y: int, width: int, height: int,
+    angle_rad: float,
+    output_path: Optional[str] = None
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    Crop an image with rotation support.
+    Crops a larger area to contain the rotated rectangle, applies rotation, then final crop.
+    Returns (success, message, output_path_or_none)
+    """
+    try:
+        result = load_image(image_path)
+        if result is None:
+            return False, f"Failed to load image {image_path}", None
+            
+        img, _ = result
+        h, w = img.shape[:2]
+        
+        # Ensure the initial crop rectangle is within image bounds
+        x1, y1 = max(0, x), max(0, y)
+        x2, y2 = min(w, x + width), min(h, y + height)
+        
+        if x1 >= x2 or y1 >= y2:
+            return False, "Invalid crop dimensions", None
+            
+        # Calculate the bounding box needed for the rotated rectangle
+        # This follows the same logic as the video crop implementation
+        crop_w = x2 - x1
+        crop_h = y2 - y1
+        center_x = x1 + crop_w / 2
+        center_y = y1 + crop_h / 2
+        
+        # Calculate the diagonal of the crop rectangle (minimum square needed)
+        diagonal = int(np.sqrt(crop_w**2 + crop_h**2))
+        
+        # Calculate the larger square crop area
+        half_pre = diagonal / 2
+        pre_x = max(0.0, center_x - half_pre)
+        pre_y = max(0.0, center_y - half_pre)
+        pre_x2 = min(w, center_x + half_pre)
+        pre_y2 = min(h, center_y + half_pre)
+        
+        # Crop the larger area first
+        pre_crop = img[int(pre_y):int(pre_y2), int(pre_x):int(pre_x2)]
+        
+        # Create rotation matrix
+        angle_deg = np.degrees(-angle_rad)  # Negative for correct direction
+        pre_h, pre_w = pre_crop.shape[:2]
+        center = (pre_w // 2, pre_h // 2)
+        rotation_matrix = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+        
+        # Apply rotation
+        rotated = cv2.warpAffine(pre_crop, rotation_matrix, (pre_w, pre_h), borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+        
+        # Calculate final crop from the center of rotated image
+        final_x = (pre_w - crop_w) // 2
+        final_y = (pre_h - crop_h) // 2
+        final_x2 = final_x + crop_w
+        final_y2 = final_y + crop_h
+        
+        # Ensure final crop coordinates are valid
+        final_x = max(0, final_x)
+        final_y = max(0, final_y)
+        final_x2 = min(pre_w, final_x2)
+        final_y2 = min(pre_h, final_y2)
+        
+        final_cropped = rotated[final_y:final_y2, final_x:final_x2]
+        
+        if output_path is None:
+            name, ext = os.path.splitext(os.path.basename(image_path))
+            temp_dir = os.path.join(os.path.dirname(image_path), "temp_processing")
+            os.makedirs(temp_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, f"{name}_cropped_rotated{ext}")
+            
+        if not save_image(final_cropped, output_path):
+            return False, f"Failed to save rotated cropped image to {output_path}", None
+            
+        return True, "Image cropped with rotation successfully", output_path
+        
+    except Exception as e:
+        return False, f"Error cropping image with rotation: {e}", None
+
 
 def crop_image_to_dimensions(
     image_path: str, 

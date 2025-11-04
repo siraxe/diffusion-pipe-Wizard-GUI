@@ -8,6 +8,7 @@ models/
 !flet_app/modules/qwen_plus_patch/models/
 dp_env/
 flet_app/settings.json
+LTX/
 
 # Python cache and compiled files
 __pycache__/

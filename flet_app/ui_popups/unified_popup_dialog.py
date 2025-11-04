@@ -26,6 +26,11 @@ from . import image_editor
 from . import video_editor
 from flet_app.ui._styles import create_textfield, BTN_STYLE2
 from .unified_context_menu import build_context_menu
+from .area_editor import (
+    apply_clean_from_overlay as area_apply_clean,
+    apply_crop_from_overlay as area_apply_crop,
+    toggle_area_editor as area_toggle_editor,
+)
 
 
 DIALOG_WIDTH = max(IMAGE_PLAYER_DIALOG_WIDTH, VIDEO_PLAYER_DIALOG_WIDTH)
@@ -148,68 +153,466 @@ def open_unified_popup_dialog(
     overlay_visible: bool = False
     overlay_visual: Optional[ft.Container] = None
     overlay_control: Optional[ft.GestureDetector] = None
+    overlay_hover_container: Optional[ft.Container] = None
+    rotate_hint_badge: Optional[ft.Container] = None
+    mouse_over_area: bool = False
+    overlay_angle: float = 0.0
+    rotation_mode: bool = False
+    rotation_center = {"x": 0.0, "y": 0.0}
+    rotation_offset: float = 0.0
+    # Persisted overlay geometry across media switches
+    overlay_saved = {"left": None, "top": None, "w": None, "h": None}
 
     overlay_pan_start = {"x": 0.0, "y": 0.0}
-    overlay_initial = {"left": 0.0, "top": 0.0}
+    overlay_initial = {"left": 0.0, "top": 0.0, "w": 0.0, "h": 0.0}
+    overlay_interaction_mode: str = "none"  # 'pan' or resize_tl/tr/bl/br
+    overlay_corner_threshold = 16
+    overlay_bounds = {"w": 0, "h": 0}
+    overlay_parent_stack = {"stack": None}  # set to media_stack_inner when built
+    overlay_drag_active = {"val": False}
+    video_restart_guard = {"pending": False}
+    overlay_current_rotate = {"rot": None}
+    overlay_resize_state = {"pivot_local": (0.0, 0.0), "handle_local": (0.0, 0.0), "center_x": 0.0, "center_y": 0.0}
 
     def _on_overlay_pan_start(e: ft.DragStartEvent):
-        nonlocal overlay_control
+        nonlocal overlay_control, overlay_interaction_mode
         if not overlay_control:
             return
+        overlay_drag_active["val"] = True
         overlay_pan_start["x"] = e.global_x
         overlay_pan_start["y"] = e.global_y
-        overlay_initial["left"] = overlay_control.left or 0
-        overlay_initial["top"] = overlay_control.top or 0
+        cw = float(overlay_control.width or 0)
+        ch = float(overlay_control.height or 0)
+        overlay_initial["left"] = float(overlay_control.left or 0)
+        overlay_initial["top"] = float(overlay_control.top or 0)
+        overlay_initial["w"] = cw
+        overlay_initial["h"] = ch
+        # Decide interaction: near corners -> resize, otherwise pan
+        try:
+            lx = float(getattr(e, 'local_x', 0) or 0)
+            ly = float(getattr(e, 'local_y', 0) or 0)
+        except Exception:
+            lx = ly = 0.0
+        # Transform mouse coordinates to account for rotation
+        try:
+            import math
+            # Get rectangle center
+            cx = cw / 2.0
+            cy = ch / 2.0
+            # Apply inverse rotation to get coordinates in unrotated rectangle space
+            ca = math.cos(-overlay_angle)
+            sa = math.sin(-overlay_angle)
+            # Transform to relative coordinates
+            rx = (lx - cx) * ca - (ly - cy) * sa
+            ry = (lx - cx) * sa + (ly - cy) * ca
+        except Exception:
+            rx, ry = lx - cw/2.0, ly - ch/2.0
+        t = overlay_corner_threshold
+        # Check corner detection with relative coordinates
+        if rx < -(cw/2.0) + t and ry < -(ch/2.0) + t:
+            overlay_interaction_mode = 'resize_tl'
+        elif rx > (cw/2.0) - t and ry < -(ch/2.0) + t:
+            overlay_interaction_mode = 'resize_tr'
+        elif rx < -(cw/2.0) + t and ry > (ch/2.0) - t:
+            overlay_interaction_mode = 'resize_bl'
+        elif rx > (cw/2.0) - t and ry > (ch/2.0) - t:
+            overlay_interaction_mode = 'resize_br'
+        else:
+            overlay_interaction_mode = 'pan'
+        try:
+            half_w = overlay_initial["w"] / 2.0
+            half_h = overlay_initial["h"] / 2.0
+            center_x0 = overlay_initial["left"] + half_w
+            center_y0 = overlay_initial["top"] + half_h
+            if overlay_interaction_mode.startswith('resize'):
+                sign_x = 1.0 if rx >= 0 else -1.0
+                sign_y = 1.0 if ry >= 0 else -1.0
+                handle_local = (sign_x * half_w, sign_y * half_h)
+                pivot_local = (-handle_local[0], -handle_local[1])
+                overlay_resize_state["pivot_local"] = pivot_local
+                overlay_resize_state["handle_local"] = handle_local
+            else:
+                overlay_resize_state["pivot_local"] = (0.0, 0.0)
+                overlay_resize_state["handle_local"] = (0.0, 0.0)
+            overlay_resize_state["center_x"] = center_x0
+            overlay_resize_state["center_y"] = center_y0
+        except Exception:
+            pass
 
     def _on_overlay_pan_update(e: ft.DragUpdateEvent):
-        nonlocal overlay_control
+        nonlocal overlay_control, overlay_visual, overlay_interaction_mode
         if not overlay_control:
             return
-        dx = e.global_x - overlay_pan_start["x"]
-        dy = e.global_y - overlay_pan_start["y"]
-        new_left = (overlay_initial["left"] + dx)
-        new_top = (overlay_initial["top"] + dy)
-        # Clamp minimally to non-negative
-        if new_left < 0: new_left = 0
-        if new_top < 0: new_top = 0
+        dx = float(e.global_x - overlay_pan_start["x"])
+        dy = float(e.global_y - overlay_pan_start["y"])
+        mode = overlay_interaction_mode
+        init_left = overlay_initial["left"]
+        init_top = overlay_initial["top"]
+        init_w = overlay_initial["w"]
+        init_h = overlay_initial["h"]
+        new_left = init_left
+        new_top = init_top
+        new_w = init_w
+        new_h = init_h
+        if mode == 'pan':
+            new_left += dx
+            new_top += dy
+        elif mode.startswith('resize'):
+            try:
+                import math
+                ca = math.cos(-overlay_angle)
+                sa = math.sin(-overlay_angle)
+                local_dx = dx * ca - dy * sa
+                local_dy = dx * sa + dy * ca
+            except Exception:
+                local_dx, local_dy = dx, dy
+            pivot_local_x, pivot_local_y = overlay_resize_state.get("pivot_local", (0.0, 0.0))
+            handle_local_x, handle_local_y = overlay_resize_state.get("handle_local", (0.0, 0.0))
+            center_x0 = overlay_resize_state.get("center_x", init_left + init_w / 2.0)
+            center_y0 = overlay_resize_state.get("center_y", init_top + init_h / 2.0)
+            new_handle_x = handle_local_x + local_dx
+            new_handle_y = handle_local_y + local_dy
+            handle_sign_x = -1.0 if handle_local_x < 0 else 1.0
+            handle_sign_y = -1.0 if handle_local_y < 0 else 1.0
+            min_size = 20.0
+            if handle_sign_x < 0:
+                width_val = pivot_local_x - new_handle_x
+                if width_val < min_size:
+                    width_val = min_size
+                    new_handle_x = pivot_local_x - width_val
+            else:
+                width_val = new_handle_x - pivot_local_x
+                if width_val < min_size:
+                    width_val = min_size
+                    new_handle_x = pivot_local_x + width_val
+            if handle_sign_y < 0:
+                height_val = pivot_local_y - new_handle_y
+                if height_val < min_size:
+                    height_val = min_size
+                    new_handle_y = pivot_local_y - height_val
+            else:
+                height_val = new_handle_y - pivot_local_y
+                if height_val < min_size:
+                    height_val = min_size
+                    new_handle_y = pivot_local_y + height_val
+            new_w = max(min_size, abs(width_val))
+            new_h = max(min_size, abs(height_val))
+            new_center_local_x = (pivot_local_x + new_handle_x) / 2.0
+            new_center_local_y = (pivot_local_y + new_handle_y) / 2.0
+            try:
+                import math
+                ca_fwd = math.cos(overlay_angle)
+                sa_fwd = math.sin(overlay_angle)
+            except Exception:
+                ca_fwd = 1.0
+                sa_fwd = 0.0
+            delta_cx = new_center_local_x * ca_fwd - new_center_local_y * sa_fwd
+            delta_cy = new_center_local_x * sa_fwd + new_center_local_y * ca_fwd
+            new_center_x = center_x0 + delta_cx
+            new_center_y = center_y0 + delta_cy
+            new_left = new_center_x - new_w / 2.0
+            new_top = new_center_y - new_h / 2.0
+        else:
+            new_left += dx
+            new_top += dy
+        vw = float(overlay_bounds["w"]) or 0
+        vh = float(overlay_bounds["h"]) or 0
+        if vw > 0 and vh > 0:
+            if new_left < 0:
+                new_left = 0
+            if new_top < 0:
+                new_top = 0
+            if new_left + new_w > vw:
+                if mode in ('pan', 'resize_tr', 'resize_br'):
+                    new_left = vw - new_w
+                else:
+                    new_w = max(20.0, vw - new_left)
+            if new_top + new_h > vh:
+                if mode in ('pan', 'resize_bl', 'resize_br'):
+                    new_top = vh - new_h
+                else:
+                    new_h = max(20.0, vh - new_top)
         overlay_control.left = new_left
         overlay_control.top = new_top
-        overlay_control.update()
+        overlay_control.width = new_w
+        overlay_control.height = new_h
+        overlay_saved["left"] = new_left
+        overlay_saved["top"] = new_top
+        overlay_saved["w"] = new_w
+        overlay_saved["h"] = new_h
+        try:
+            if overlay_visual is not None:
+                try:
+                    overlay_visual.width = new_w
+                    overlay_visual.height = new_h
+                except Exception:
+                    pass
+            if overlay_control is not None and overlay_control.page:
+                overlay_control.update()
+                parent = overlay_parent_stack.get("stack") if isinstance(overlay_parent_stack, dict) else None
+                if parent is not None and parent.page:
+                    parent.update()
+        except Exception:
+            pass
+    def _on_overlay_pan_end(e: ft.DragEndEvent):
+        nonlocal overlay_interaction_mode
+        overlay_interaction_mode = 'none'
+        overlay_drag_active["val"] = False
 
     # Context menu state inside media stack
     context_menu_ctrl: Optional[ft.Container] = None
     def _ensure_overlay(view_w: int, view_h: int):
-        nonlocal overlay_visual, overlay_control
+        nonlocal overlay_visual, overlay_control, overlay_hover_container, overlay_current_rotate
+        HANDLE_SIZE = 16
+
+        def _clamp_overlay():
+            if not overlay_control:
+                return
+            l = float(overlay_control.left or 0)
+            t = float(overlay_control.top or 0)
+            w = float(overlay_control.width or 0)
+            h = float(overlay_control.height or 0)
+            if l < 0: l = 0
+            if t < 0: t = 0
+            if l + w > view_w: l = max(0.0, view_w - w)
+            if t + h > view_h: t = max(0.0, view_h - h)
+            overlay_control.left = l
+            overlay_control.top = t
+
+        initial_rotate = None
+        rotate_cls = None
         if overlay_visual is None:
-            overlay_visual = ft.Container(
-                width=min(200, view_w),
-                height=min(200, view_h),
+            base_rect = ft.Container(
                 border=ft.border.all(2, ft.Colors.RED_ACCENT_700),
                 bgcolor=ft.Colors.with_opacity(0.2, ft.Colors.WHITE),
+            )
+
+            resize_start = {"l": 0.0, "t": 0.0, "w": 0.0, "h": 0.0, "gx": 0.0, "gy": 0.0}
+
+            def _rs_start(e: ft.DragStartEvent):
+                if not overlay_control:
+                    return
+                resize_start["gx"] = e.global_x
+                resize_start["gy"] = e.global_y
+                resize_start["l"] = float(overlay_control.left or 0)
+                resize_start["t"] = float(overlay_control.top or 0)
+                resize_start["w"] = float(overlay_control.width or 0)
+                resize_start["h"] = float(overlay_control.height or 0)
+
+            def _apply_bounds_and_update():
+                _clamp_overlay()
+                try:
+                    if getattr(overlay_control, 'page', None):
+                        overlay_control.update()
+                except Exception:
+                    pass
+
+            def _rs_update_tl(e: ft.DragUpdateEvent):
+                if not overlay_control:
+                    return
+                dx = e.global_x - resize_start["gx"]
+                dy = e.global_y - resize_start["gy"]
+                try:
+                    import math
+                    ca = math.cos(-overlay_angle)
+                    sa = math.sin(-overlay_angle)
+                    rdx = dx * ca - dy * sa
+                    rdy = dx * sa + dy * ca
+                except Exception:
+                    rdx, rdy = dx, dy
+                new_l = resize_start["l"] + rdx
+                new_t = resize_start["t"] + rdy
+                new_w = resize_start["w"] - rdx
+                new_h = resize_start["h"] - rdy
+                if new_w < 20:
+                    new_l = resize_start["l"] + (resize_start["w"] - 20)
+                    new_w = 20
+                if new_h < 20:
+                    new_t = resize_start["t"] + (resize_start["h"] - 20)
+                    new_h = 20
+                overlay_control.left = new_l
+                overlay_control.top = new_t
+                overlay_control.width = new_w
+                overlay_control.height = new_h
+                _apply_bounds_and_update()
+
+            def _rs_update_tr(e: ft.DragUpdateEvent):
+                if not overlay_control:
+                    return
+                dx = e.global_x - resize_start["gx"]
+                dy = e.global_y - resize_start["gy"]
+                try:
+                    import math
+                    ca = math.cos(-overlay_angle)
+                    sa = math.sin(-overlay_angle)
+                    rdx = dx * ca - dy * sa
+                    rdy = dx * sa + dy * ca
+                except Exception:
+                    rdx, rdy = dx, dy
+                new_t = resize_start["t"] + rdy
+                new_w = resize_start["w"] + rdx
+                new_h = resize_start["h"] - rdy
+                if new_w < 20:
+                    new_w = 20
+                if new_h < 20:
+                    new_t = resize_start["t"] + (resize_start["h"] - 20)
+                    new_h = 20
+                overlay_control.top = new_t
+                overlay_control.width = new_w
+                overlay_control.height = new_h
+                _apply_bounds_and_update()
+
+            def _rs_update_bl(e: ft.DragUpdateEvent):
+                if not overlay_control:
+                    return
+                dx = e.global_x - resize_start["gx"]
+                dy = e.global_y - resize_start["gy"]
+                try:
+                    import math
+                    ca = math.cos(-overlay_angle)
+                    sa = math.sin(-overlay_angle)
+                    rdx = dx * ca - dy * sa
+                    rdy = dx * sa + dy * ca
+                except Exception:
+                    rdx, rdy = dx, dy
+                new_l = resize_start["l"] + rdx
+                new_w = resize_start["w"] - rdx
+                new_h = resize_start["h"] + rdy
+                if new_w < 20:
+                    new_l = resize_start["l"] + (resize_start["w"] - 20)
+                    new_w = 20
+                if new_h < 20:
+                    new_h = 20
+                overlay_control.left = new_l
+                overlay_control.width = new_w
+                overlay_control.height = new_h
+                _apply_bounds_and_update()
+
+            def _rs_update_br(e: ft.DragUpdateEvent):
+                if not overlay_control:
+                    return
+                dx = e.global_x - resize_start["gx"]
+                dy = e.global_y - resize_start["gy"]
+                try:
+                    import math
+                    ca = math.cos(-overlay_angle)
+                    sa = math.sin(-overlay_angle)
+                    rdx = dx * ca - dy * sa
+                    rdy = dx * sa + dy * ca
+                except Exception:
+                    rdx, rdy = dx, dy
+                new_w = resize_start["w"] + rdx
+                new_h = resize_start["h"] + rdy
+                if new_w < 20:
+                    new_w = 20
+                if new_h < 20:
+                    new_h = 20
+                overlay_control.width = new_w
+                overlay_control.height = new_h
+                _apply_bounds_and_update()
+
+            def _make_handle(on_update):
+                return ft.GestureDetector(
+                    content=ft.Container(width=HANDLE_SIZE, height=HANDLE_SIZE, bgcolor=ft.Colors.RED_700, border_radius=ft.border_radius.all(2)),
+                    on_pan_start=_rs_start,
+                    on_pan_update=on_update,
+                    drag_interval=0,
+                )
+
+            # Rotational hint badge control (text only, no dark background)
+            nonlocal rotate_hint_badge
+            rotate_hint_badge = ft.Container(
+                content=ft.Text("⭮", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                alignment=ft.alignment.top_center,
+                padding=6,
+                margin=ft.margin.only(top=4),
+                # No background color for a clean look
+                visible=False,
+            )
+
+            overlay_visual = ft.Stack(
+                [
+                    base_rect,
+                    ft.Container(_make_handle(_rs_update_tl), alignment=ft.alignment.top_left, width=0, height=0),
+                    ft.Container(_make_handle(_rs_update_tr), alignment=ft.alignment.top_right, width=0, height=0),
+                    ft.Container(_make_handle(_rs_update_bl), alignment=ft.alignment.bottom_left, width=0, height=0),
+                    ft.Container(_make_handle(_rs_update_br), alignment=ft.alignment.bottom_right, width=0, height=0),
+                    # Rotational hint badge placed on top of the area (shown only when mouse is outside)
+                    rotate_hint_badge,
+                ],
+                width=min(200, view_w),
+                height=min(200, view_h),
                 visible=overlay_visible,
             )
+            rotate_cls = None
+            initial_rotate = None
+            try:
+                rotate_cls = getattr(getattr(ft, 'transform', None), 'Rotate', None) or getattr(ft, 'Rotate', None)
+                if rotate_cls is not None:
+                    initial_rotate = rotate_cls(angle=overlay_angle, alignment=ft.alignment.center)
+            except Exception:
+                rotate_cls = None
+                initial_rotate = None
         if overlay_control is None:
-            # Center initial overlay
-            init_w = int(min(200, view_w))
-            init_h = int(min(200, view_h))
-            init_left = (view_w - init_w) / 2
-            init_top = (view_h - init_h) / 2
-            overlay_control = ft.GestureDetector(
+            # Determine initial geometry using saved values if present
+            sw = overlay_saved.get("w")
+            sh = overlay_saved.get("h")
+            sl = overlay_saved.get("left")
+            st = overlay_saved.get("top")
+            init_w = int(sw) if isinstance(sw, (int, float)) and sw and sw > 0 else int(min(200, view_w))
+            init_h = int(sh) if isinstance(sh, (int, float)) and sh and sh > 0 else int(min(200, view_h))
+            init_left = float(sl) if isinstance(sl, (int, float)) else (view_w - init_w) / 2
+            init_top = float(st) if isinstance(st, (int, float)) else (view_h - init_h) / 2
+            # Clamp to bounds
+            if init_left < 0: init_left = 0
+            if init_top < 0: init_top = 0
+            if init_left + init_w > view_w: init_left = max(0.0, view_w - init_w)
+            if init_top + init_h > view_h: init_top = max(0.0, view_h - init_h)
+            try:
+                overlay_visual.width = init_w
+                overlay_visual.height = init_h
+            except Exception:
+                pass
+            def _on_overlay_hover(e: ft.HoverEvent):
+                nonlocal mouse_over_area
+                mouse_over_area = (str(getattr(e, 'data', '')).lower() == 'true')
+                try:
+                    if rotate_hint_badge is not None:
+                        rotate_hint_badge.visible = bool(overlay_visible and not mouse_over_area)
+                        if getattr(rotate_hint_badge, 'page', None):
+                            rotate_hint_badge.update()
+                except Exception:
+                    pass
+
+            overlay_hover_container = ft.Container(
                 content=overlay_visual,
+                bgcolor=ft.Colors.TRANSPARENT,  # Transparent area for overlay
+                on_hover=_on_overlay_hover,
+            )
+            overlay_control = ft.GestureDetector(
+                content=overlay_hover_container,
                 left=init_left,
                 top=init_top,
                 width=init_w,
                 height=init_h,
                 on_pan_start=_on_overlay_pan_start,
                 on_pan_update=_on_overlay_pan_update,
+                on_pan_end=_on_overlay_pan_end,
                 drag_interval=0,
                 visible=overlay_visible,
+                mouse_cursor=getattr(ft.MouseCursor, 'MOVE', None),
             )
+            overlay_current_rotate["rot"] = initial_rotate
+            if initial_rotate is not None:
+                try:
+                    overlay_control.rotate = initial_rotate
+                except Exception:
+                    pass
 
     def refresh():
         nonlocal index
         nonlocal caption_tf, neg_caption_tf, caption_timer, neg_caption_timer
-        nonlocal overlay_visible, overlay_visual, overlay_control
+        nonlocal overlay_visible, overlay_visual, overlay_control, overlay_hover_container, overlay_current_rotate
         nonlocal monitor_thread
         _stop_monitor_if_any()
         path = items[index]
@@ -237,6 +640,7 @@ def open_unified_popup_dialog(
         # Build media view
         viewer_w = DIALOG_WIDTH - 40
         viewer_h = max(IMAGE_PLAYER_DIALOG_HEIGHT, VIDEO_PLAYER_DIALOG_HEIGHT) - 40
+        overlay_bounds["w"], overlay_bounds["h"] = viewer_w, viewer_h
         # Initialize caption defaults to avoid UnboundLocalError
         cap_text = ""
         neg_text = ""
@@ -323,12 +727,136 @@ def open_unified_popup_dialog(
         caption_tf.on_change = on_caption_change
         neg_caption_tf.on_change = on_neg_caption_change
 
-        # Overlay stack wrapping the media
+        # Build independent overlay layer the same size as media area
+        # Recreate overlay instances per media switch to avoid stale attachments
+        try:
+            # keep saved geometry, reset controls so they get rebuilt
+            overlay_visual_ref = overlay_visual
+            overlay_control_ref = overlay_control
+        except Exception:
+            overlay_visual_ref = None; overlay_control_ref = None
+        overlay_visual = None
+        overlay_control = None
         _ensure_overlay(viewer_w, viewer_h)
-        media_stack_inner = ft.Stack([
-            ft.Container(content=media_view, alignment=ft.alignment.center, width=viewer_w, height=viewer_h),
-            overlay_control if overlay_control else ft.Container(width=0, height=0),
+        video_container = ft.Container(content=media_view, alignment=ft.alignment.center, width=viewer_w, height=viewer_h)
+        overlay_layer_stack = ft.Stack([
+            overlay_control if overlay_control else ft.Container(width=0, height=0)
         ], width=viewer_w, height=viewer_h)
+        def _rotation_pan_start(e: ft.DragStartEvent):
+            nonlocal rotation_mode
+            nonlocal rotation_offset
+            try:
+                if not overlay_visible or overlay_control is None:
+                    rotation_mode = False
+                    return
+                lx = float(getattr(e, 'local_x', 0.0))
+                ly = float(getattr(e, 'local_y', 0.0))
+                # Determine if start is outside the ROTATED overlay rect
+                l = float(overlay_control.left or 0)
+                t = float(overlay_control.top or 0)
+                w = float(overlay_control.width or 0)
+                h = float(overlay_control.height or 0)
+                # Rotate point into unrotated rect's frame
+                cx = l + w / 2.0
+                cy = t + h / 2.0
+                import math
+                ca = math.cos(-overlay_angle)
+                sa = math.sin(-overlay_angle)
+                rx = (lx - cx) * ca - (ly - cy) * sa
+                ry = (lx - cx) * sa + (ly - cy) * ca
+                inside = (-w/2.0 <= rx <= w/2.0) and (-h/2.0 <= ry <= h/2.0)
+                rotation_mode = not inside
+                if rotation_mode:
+                    rotation_center["x"] = cx
+                    rotation_center["y"] = cy
+                    # Establish offset so rotation continues from current angle without jump
+                    angle0 = math.atan2(ly - cy, lx - cx)
+                    rotation_offset = overlay_angle - angle0
+            except Exception:
+                rotation_mode = False
+
+        def _rotation_pan_update(e: ft.DragUpdateEvent):
+            nonlocal overlay_angle
+            try:
+                if not rotation_mode or overlay_visual is None:
+                    return
+                lx = float(getattr(e, 'local_x', 0.0))
+                ly = float(getattr(e, 'local_y', 0.0))
+                dx = lx - rotation_center["x"]
+                dy = ly - rotation_center["y"]
+                import math
+                angle = math.atan2(dy, dx)
+                overlay_angle = angle + rotation_offset
+                rot_cls = getattr(getattr(ft, 'transform', None), 'Rotate', None) or getattr(ft, 'Rotate', None)
+                if rot_cls is not None:
+                    new_rotate = rot_cls(angle=overlay_angle, alignment=ft.alignment.center)
+                    overlay_current_rotate['rot'] = new_rotate
+                    if overlay_control is not None:
+                        overlay_control.rotate = new_rotate
+                        if getattr(overlay_control, 'page', None):
+                            overlay_control.update()
+                if getattr(overlay_visual, 'page', None):
+                    overlay_visual.update()
+            except Exception:
+                pass
+
+        def _rotation_pan_end(e: ft.DragEndEvent):
+            nonlocal rotation_mode
+            rotation_mode = False
+
+        overlay_layer_container = ft.GestureDetector(
+            # Keep default cursor; visual ⭮ badge indicates rotation
+            mouse_cursor=getattr(ft.MouseCursor, 'BASIC', None),
+            content=ft.Container(
+                content=overlay_layer_stack,
+                width=viewer_w,
+                height=viewer_h,
+                bgcolor=ft.Colors.TRANSPARENT,  # Transparent area for overlay
+            ),
+            on_pan_start=_rotation_pan_start,
+            on_pan_update=_rotation_pan_update,
+            on_pan_end=_rotation_pan_end,
+            drag_interval=0,
+        )
+        media_stack_inner = ft.Stack([
+            video_container,
+            overlay_layer_container,
+        ], width=viewer_w, height=viewer_h)
+        try:
+            overlay_parent_stack["stack"] = overlay_layer_stack
+        except Exception:
+            pass
+        # Sync overlay visual with control and visibility when switching media
+        try:
+            if overlay_visual is not None and overlay_control is not None:
+                try:
+                    cw = float(overlay_control.width or 0)
+                    ch = float(overlay_control.height or 0)
+                    if cw <= 0 or ch <= 0:
+                        cw = min(200, viewer_w); ch = min(200, viewer_h)
+                        overlay_control.width = cw; overlay_control.height = ch
+                    overlay_visual.width = cw
+                    overlay_visual.height = ch
+                except Exception:
+                    pass
+                # Preserve current visibility state
+                overlay_visual.visible = bool(overlay_visible)
+                overlay_control.visible = bool(overlay_visible)
+                current_rot = overlay_current_rotate.get('rot') if isinstance(overlay_current_rotate, dict) else None
+                if current_rot is not None:
+                    try:
+                        if overlay_control is not None:
+                            overlay_control.rotate = current_rot
+                            if getattr(overlay_control, 'page', None):
+                                overlay_control.update()
+                    except Exception:
+                        pass
+            # Nudge overlay layer to repaint independently of video
+            # No dynamic cursor updates; we show a visual ⭮ badge instead
+            if overlay_layer_stack.page:
+                overlay_layer_stack.update()
+        except Exception:
+            pass
         def _open_context_menu(e: ft.ControlEvent):
             nonlocal context_menu_ctrl
             try:
@@ -406,26 +934,16 @@ def open_unified_popup_dialog(
             except Exception as ex:
                 # Debug print removed
                 pass
-        def _on_long_press_start(e):
-            try:
-                # Use long press to open context menu at press location
-                _open_context_menu(e)
-            except Exception as ex:
-                # Debug print removed
-                pass
+        # Provide a programmatic way to open context menu from an icon.
+        def _open_context_menu_at(cx: float, cy: float):
+            class _E:
+                def __init__(self, x, y):
+                    self.local_x = x
+                    self.local_y = y
+            _open_context_menu(_E(cx, cy))
 
-        def _on_tap(e):
-            try:
-                _hide_context_menu()
-            except Exception as ex:
-                # Debug print removed
-                pass
-
-        media_stack = ft.GestureDetector(
-            content=media_stack_inner,
-            on_long_press_start=_on_long_press_start,
-            on_tap=_on_tap,
-        )
+        # Remove media-area gestures entirely to avoid interfering with Area Editor.
+        media_stack = media_stack_inner
 
         # Arrange media + caption fields
         fields_row = ft.ResponsiveRow([
@@ -476,112 +994,101 @@ def open_unified_popup_dialog(
 
         def toggle_area_editor(e):
             nonlocal overlay_visible
-            overlay_visible = not overlay_visible
+            nonlocal overlay_layer_container
+            overlay_visible, _ = area_toggle_editor(
+                page,
+                overlay_control,
+                overlay_visible,
+                overlay_angle,
+            )
             if overlay_control:
+                # Ensure sane size and position when showing
+                if overlay_visible:
+                    try:
+                        cw = float(overlay_control.width or 0)
+                        ch = float(overlay_control.height or 0)
+                        if cw < 20 or ch < 20:
+                            cw = min(200, overlay_bounds.get("w") or viewer_w)
+                            ch = min(200, overlay_bounds.get("h") or viewer_h)
+                            overlay_control.width = cw
+                            overlay_control.height = ch
+                        # recentre if off-bounds
+                        if (overlay_control.left is None) or (overlay_control.top is None):
+                            overlay_control.left = max(0, (viewer_w - cw) / 2)
+                            overlay_control.top = max(0, (viewer_h - ch) / 2)
+                    except Exception:
+                        pass
                 overlay_control.visible = overlay_visible
-                overlay_control.update()
+                try:
+                    if getattr(overlay_control, 'page', None):
+                        overlay_control.update()
+                except Exception:
+                    pass
+                # Overlay is on its own layer; no z-index juggling needed
+            rot_cls = getattr(getattr(ft, 'transform', None), 'Rotate', None) or getattr(ft, 'Rotate', None)
+            new_rotate = None
+            if rot_cls is not None:
+                try:
+                    new_rotate = rot_cls(angle=overlay_angle, alignment=ft.alignment.center)
+                except Exception:
+                    new_rotate = None
+            applied_rotate = False
+            if new_rotate is not None:
+                overlay_current_rotate['rot'] = new_rotate
+                if overlay_control is not None:
+                    try:
+                        overlay_control.rotate = new_rotate
+                        if getattr(overlay_control, 'page', None):
+                            overlay_control.update()
+                    except Exception:
+                        pass
+                applied_rotate = True
+            if not applied_rotate:
+                existing_rot = overlay_current_rotate.get('rot') if isinstance(overlay_current_rotate, dict) else None
+                if existing_rot is not None and overlay_control is not None:
+                    try:
+                        overlay_control.rotate = existing_rot
+                        if getattr(overlay_control, 'page', None):
+                            overlay_control.update()
+                    except Exception:
+                        pass
             if overlay_visual:
                 overlay_visual.visible = overlay_visible
-                overlay_visual.update()
+                try:
+                    # Keep visual size in sync
+                    try:
+                        overlay_visual.width = float(overlay_control.width or 0)
+                        overlay_visual.height = float(overlay_control.height or 0)
+                    except Exception:
+                        pass
+                    if getattr(overlay_visual, 'page', None):
+                        overlay_visual.update()
+                except Exception:
+                    pass
+            # Update rotate badge visibility depending on pointer state
+            try:
+                if rotate_hint_badge is not None:
+                    rotate_hint_badge.visible = bool(overlay_visible and not mouse_over_area)
+                    if getattr(rotate_hint_badge, 'page', None):
+                        rotate_hint_badge.update()
+            except Exception:
+                pass
+            # No dynamic cursor change; we keep default and rely on ⭮ badge
+            # Do NOT rebuild the entire dialog here to avoid restarting video
+            try:
+                parent = overlay_parent_stack.get("stack") if isinstance(overlay_parent_stack, dict) else None
+                if parent is not None and parent.page:
+                    parent.update()
+            except Exception:
+                pass
 
         def apply_crop_from_overlay(e):
-            # Read overlay rect
-            if not overlay_control or not overlay_visible:
-                page.snack_bar = ft.SnackBar(ft.Text("Open Area Editor first."), open=True); page.update(); return
-            left = int(overlay_control.left or 0)
-            top = int(overlay_control.top or 0)
-            ow = int(overlay_control.width or 0)
-            oh = int(overlay_control.height or 0)
-            if ow <= 0 or oh <= 0:
-                page.snack_bar = ft.SnackBar(ft.Text("Invalid overlay dimensions."), open=True); page.update(); return
-            if is_img:
-                md = ipu.get_image_metadata(path)
-                if not md:
-                    page.snack_bar = ft.SnackBar(ft.Text("Image metadata unavailable."), open=True); page.update(); return
-                # Compute effective displayed image dims
-                eff_w, eff_h, off_x, off_y = ipu.calculate_contained_image_dimensions(md['width'], md['height'], viewer_w, viewer_h)
-                success, msg, temp_out = ipu.crop_image_from_overlay(
-                    current_image_path=path,
-                    overlay_x_norm=left,
-                    overlay_y_norm=top,
-                    overlay_w_norm=ow,
-                    overlay_h_norm=oh,
-                    displayed_image_w=eff_w,
-                    displayed_image_h=eff_h,
-                    image_orig_w=md['width'],
-                    image_orig_h=md['height'],
-                    player_content_w=viewer_w,
-                    player_content_h=viewer_h,
-                )
-            else:
-                md = vpu.get_video_metadata(path)
-                if not md:
-                    page.snack_bar = ft.SnackBar(ft.Text("Video metadata unavailable."), open=True); page.update(); return
-                success, msg, temp_out = vpu.crop_video_from_overlay(
-                    current_video_path=path,
-                    overlay_x_norm=left,
-                    overlay_y_norm=top,
-                    overlay_w_norm=ow,
-                    overlay_h_norm=oh,
-                    displayed_video_w=viewer_w,
-                    displayed_video_h=viewer_h,
-                    video_orig_w=md['width'],
-                    video_orig_h=md['height'],
-                    player_content_w=viewer_w,
-                    player_content_h=viewer_h,
-                )
-            if success and temp_out and os.path.exists(temp_out):
-                try:
-                    os.replace(temp_out, path)
-                    page.snack_bar = ft.SnackBar(ft.Text(msg or "Cropped from area."), open=True)
-                    refresh()  # reload viewer
-                except Exception as ex:
-                    page.snack_bar = ft.SnackBar(ft.Text(f"Error finalizing crop: {ex}"), open=True)
-                    if os.path.exists(temp_out):
-                        try: os.remove(temp_out)
-                        except Exception: pass
-                finally:
-                    page.update()
-            else:
-                page.snack_bar = ft.SnackBar(ft.Text(msg or "Crop failed."), open=True); page.update()
+            if area_apply_crop(page, path, overlay_control, overlay_visible, viewer_w, viewer_h, overlay_angle):
+                refresh()
 
         def apply_clean_from_overlay(e):
-            if is_img:
-                return
-            if not overlay_control or not overlay_visible:
-                page.snack_bar = ft.SnackBar(ft.Text("Open Area Editor first."), open=True); page.update(); return
-            left = int(overlay_control.left or 0)
-            top = int(overlay_control.top or 0)
-            ow = int(overlay_control.width or 0)
-            oh = int(overlay_control.height or 0)
-            md = vpu.get_video_metadata(path)
-            if not md:
-                page.snack_bar = ft.SnackBar(ft.Text("Video metadata unavailable."), open=True); page.update(); return
-            success, msg, temp_out = vpu.clean_video_from_overlay(
-                current_video_path=path,
-                overlay_x_norm=left,
-                overlay_y_norm=top,
-                overlay_w_norm=ow,
-                overlay_h_norm=oh,
-                displayed_video_w=viewer_w,
-                displayed_video_h=viewer_h,
-                video_orig_w=md['width'],
-                video_orig_h=md['height'],
-            )
-            if success and temp_out and os.path.exists(temp_out):
-                try:
-                    os.replace(temp_out, path)
-                    page.snack_bar = ft.SnackBar(ft.Text(msg or "Clean applied."), open=True)
-                    refresh()
-                except Exception as ex:
-                    page.snack_bar = ft.SnackBar(ft.Text(f"Error finalizing clean: {ex}"), open=True)
-                    if os.path.exists(temp_out):
-                        try: os.remove(temp_out)
-                        except Exception: pass
-                finally:
-                    page.update()
-            else:
-                page.snack_bar = ft.SnackBar(ft.Text(msg or "Clean failed."), open=True); page.update()
+            if not is_img and area_apply_clean(page, path, overlay_control, overlay_visible, viewer_w, viewer_h):
+                refresh()
 
         area_btn = ft.ElevatedButton("Area Editor", on_click=toggle_area_editor, style=BTN_STYLE2)
         apply_crop_btn = ft.ElevatedButton("Apply Crop", on_click=apply_crop_from_overlay, style=BTN_STYLE2)
@@ -662,12 +1169,20 @@ def open_unified_popup_dialog(
             def _on_completed(e):
                 try:
                     s = int(frame_range_slider.start_value or 0)
-                    if local_video_player and fps > 0:
-                        ms = int((s / fps) * 1000)
-                        local_video_player.seek(ms)
+                    if not local_video_player or fps <= 0:
+                        return
+                    ms = int((s / fps) * 1000)
+                    # Always loop immediately; Area Editor runs on its own layer and repaint path
+                    try:
+                        is_playing_now = bool(local_video_player.is_playing())
+                    except Exception:
+                        is_playing_now = True
+                    local_video_player.seek(ms)
+                    if is_playing_now:
                         local_video_player.play()
-                        if local_video_player.page:
-                            local_video_player.update()
+                    if local_video_player.page:
+                        local_video_player.update()
+                    # Overlay lives on separate layer; nothing to re-order
                 except Exception:
                     pass
 
@@ -921,16 +1436,30 @@ def open_unified_popup_dialog(
                 pass
         editing_row = ft.ResponsiveRow([left_col, slider_col], spacing=10)
 
-        content_container.on_click = lambda e: _hide_context_menu()
+        # Do not attach on_click to content container to avoid pointer button effect
         content_container.content = ft.Column([
             media_stack,
             fields_row,
             editing_row,
         ], spacing=10, tight=True)
+        # Add edit icon on right side next to X; clicking opens the same dropdown
+        edit_menu_btn = ft.IconButton(ft.Icons.MORE_VERT, tooltip="Edit menu")
+        def _on_edit_menu_click(e):
+            try:
+                # Toggle: if menu is visible, hide it; otherwise open it
+                if context_menu_ctrl and getattr(context_menu_ctrl, 'visible', False):
+                    _hide_context_menu()
+                else:
+                    _open_context_menu_at(max(10, viewer_w - 140), 40)
+            except Exception:
+                pass
+        edit_menu_btn.on_click = _on_edit_menu_click
+
         dialog.show_dialog(
             content=content_container,
             title=title,
             title_prefix_controls=prefix_controls,
+            title_suffix_controls=[edit_menu_btn],
             new_width=DIALOG_WIDTH,
             page=page,
         )
@@ -1029,27 +1558,3 @@ def open_unified_popup_dialog(
     dialog._on_dismiss_callback = _on_dismiss
     refresh()
     page.update()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
