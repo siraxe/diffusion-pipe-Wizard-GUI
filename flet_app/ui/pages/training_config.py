@@ -1,4 +1,5 @@
 import flet as ft
+from contextlib import contextmanager
 # import yaml # Removed as hardcoded config data is reduced
 from .._styles import create_textfield, create_dropdown, add_section_title # Import helper functions
 from .training_dataset_block import get_training_dataset_page_content
@@ -49,6 +50,19 @@ clip_row_ref = ft.Ref[ft.ResponsiveRow]()
 timestep_sm_dropdown_ref = ft.Ref[ft.Dropdown]()
 transformer_dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
 
+_suppress_model_defaults = False
+
+@contextmanager
+def suppress_model_defaults():
+    """Disable auto-default population temporarily (e.g., when loading from existing configs)."""
+    global _suppress_model_defaults
+    prev = _suppress_model_defaults
+    _suppress_model_defaults = True
+    try:
+        yield
+    finally:
+        _suppress_model_defaults = prev
+
 def get_training_config_page_content():
     """Generates Flet controls with hardcoded configuration values, grouped by section."""
 
@@ -74,44 +88,46 @@ def get_training_config_page_content():
         is_hunyuan_video = (sel_norm == "hunyuan-video")
         is_hunyuan_image = (sel_norm == "hunyuan_image")
         is_hidream = (sel_norm == "hidream")
+        skip_defaults = _suppress_model_defaults
 
         # Reset a core list of model-dependent path fields on any model switch.
         # Presets for specific models (below) will then repopulate as needed.
-        try:
-            if diffusers_path_field_ref.current:
-                diffusers_path_field_ref.current.value = ""
-            if transformer_path_field_ref.current:
-                transformer_path_field_ref.current.value = ""
-            if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
-                if transformer_path_full_ref.current:
-                    transformer_path_full_ref.current.value = ""
-            if llm_path_field_ref.current:
-                llm_path_field_ref.current.value = ""
-            if text_encoder_path_field_ref.current:
-                text_encoder_path_field_ref.current.value = ""
-            if vae_path_field_ref.current:
-                vae_path_field_ref.current.value = ""
-            if ckpt_path_wan22_field_ref.current:
-                ckpt_path_wan22_field_ref.current.value = ""
-            if clip_path_field_ref.current:
-                clip_path_field_ref.current.value = ""
-            if llama3_path_field_ref.current:
-                llama3_path_field_ref.current.value = ""
-            if max_llama3_seq_len_field_ref.current:
-                max_llama3_seq_len_field_ref.current.value = ""
-            if hidream_4bit_checkbox_ref.current:
-                hidream_4bit_checkbox_ref.current.value = True
-            if hidream_tdtype_checkbox_ref.current:
-                hidream_tdtype_checkbox_ref.current.value = False
-            if byt5_path_field_ref.current:
-                byt5_path_field_ref.current.value = ""
-            if single_file_path_field_ref.current:
-                single_file_path_field_ref.current.value = ""
-            if t5_path_field_ref.current:
-                t5_path_field_ref.current.value = ""
-        except Exception:
-            # Be resilient to any missing/hidden controls
-            pass
+        if not skip_defaults:
+            try:
+                if diffusers_path_field_ref.current:
+                    diffusers_path_field_ref.current.value = ""
+                if transformer_path_field_ref.current:
+                    transformer_path_field_ref.current.value = ""
+                if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
+                    if transformer_path_full_ref.current:
+                        transformer_path_full_ref.current.value = ""
+                if llm_path_field_ref.current:
+                    llm_path_field_ref.current.value = ""
+                if text_encoder_path_field_ref.current:
+                    text_encoder_path_field_ref.current.value = ""
+                if vae_path_field_ref.current:
+                    vae_path_field_ref.current.value = ""
+                if ckpt_path_wan22_field_ref.current:
+                    ckpt_path_wan22_field_ref.current.value = ""
+                if clip_path_field_ref.current:
+                    clip_path_field_ref.current.value = ""
+                if llama3_path_field_ref.current:
+                    llama3_path_field_ref.current.value = ""
+                if max_llama3_seq_len_field_ref.current:
+                    max_llama3_seq_len_field_ref.current.value = ""
+                if hidream_4bit_checkbox_ref.current:
+                    hidream_4bit_checkbox_ref.current.value = True
+                if hidream_tdtype_checkbox_ref.current:
+                    hidream_tdtype_checkbox_ref.current.value = False
+                if byt5_path_field_ref.current:
+                    byt5_path_field_ref.current.value = ""
+                if single_file_path_field_ref.current:
+                    single_file_path_field_ref.current.value = ""
+                if t5_path_field_ref.current:
+                    t5_path_field_ref.current.value = ""
+            except Exception:
+                # Be resilient to any missing/hidden controls
+                pass
         if min_t_field_ref.current:
             min_t_field_ref.current.visible = is_wan22
         if max_t_field_ref.current:
@@ -122,30 +138,32 @@ def get_training_config_page_content():
             flux_shift_checkbox_ref.current.visible = (is_chroma or is_flux or is_sd3 or is_omnigen2 or is_hidream)
 
         # Set default timestep_sm per model selection
-        try:
-            if timestep_sm_dropdown_ref.current:
-                models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "qwen_image", "qwen_image_plus", "auraflow"}
-                if sel_norm in models_logit:
-                    timestep_sm_dropdown_ref.current.value = "logit_normal"
-                else:
-                    timestep_sm_dropdown_ref.current.value = "None"
-                if timestep_sm_dropdown_ref.current.page:
-                    timestep_sm_dropdown_ref.current.update()
-        except Exception:
-            pass
+        if not skip_defaults:
+            try:
+                if timestep_sm_dropdown_ref.current:
+                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "qwen_image", "qwen_image_plus", "auraflow"}
+                    if sel_norm in models_logit:
+                        timestep_sm_dropdown_ref.current.value = "logit_normal"
+                    else:
+                        timestep_sm_dropdown_ref.current.value = "None"
+                    if timestep_sm_dropdown_ref.current.page:
+                        timestep_sm_dropdown_ref.current.update()
+            except Exception:
+                pass
 
         # Set default transformer_dtype per model selection
-        try:
-            if transformer_dtype_dropdown_ref.current:
-                models_none = {"sdxl", "lumina_2", "omnigen2"}
-                if sel_norm in models_none:
-                    transformer_dtype_dropdown_ref.current.value = "None"
-                else:
-                    transformer_dtype_dropdown_ref.current.value = "float8"
-                if transformer_dtype_dropdown_ref.current.page:
-                    transformer_dtype_dropdown_ref.current.update()
-        except Exception:
-            pass
+        if not skip_defaults:
+            try:
+                if transformer_dtype_dropdown_ref.current:
+                    models_none = {"sdxl", "lumina_2", "omnigen2"}
+                    if sel_norm in models_none:
+                        transformer_dtype_dropdown_ref.current.value = "None"
+                    else:
+                        transformer_dtype_dropdown_ref.current.value = "float8"
+                    if transformer_dtype_dropdown_ref.current.page:
+                        transformer_dtype_dropdown_ref.current.update()
+            except Exception:
+                pass
         if bypass_g_emb_checkbox_ref.current:
             bypass_g_emb_checkbox_ref.current.visible = is_flux
         if ffc_p_field_ref.current:
@@ -183,9 +201,10 @@ def get_training_config_page_content():
             te2_lr_field_ref.current.visible = is_sdxl
         if checkpoint_path_field_ref.current:
             checkpoint_path_field_ref.current.visible = is_sdxl
-            if is_sdxl:
+            if is_sdxl and not skip_defaults:
                 try:
-                    checkpoint_path_field_ref.current.value = 'models/sdxl/sd_xl_base_1.0_0.9vae.safetensors'
+                    if not checkpoint_path_field_ref.current.value or checkpoint_path_field_ref.current.value.strip() == '':
+                        checkpoint_path_field_ref.current.value = 'models/sdxl/sd_xl_base_1.0_0.9vae.safetensors'
                 except Exception:
                     pass
         # Keep rows collapsed by updating their containers as well
@@ -320,88 +339,97 @@ def get_training_config_page_content():
                 and (not is_ltx)
                 and (not is_sd3)
             )
-        if is_auraflow:
+        if is_auraflow and not skip_defaults:
             try:
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/auraflow/pony-v7-base.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/auraflow/pony-v7-base.safetensors'
                 if text_encoder_path_field_ref.current:
-                    text_encoder_path_field_ref.current.value = 'models/auraflow/umt5_auraflow.fp16.safetensors'
+                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
+                        text_encoder_path_field_ref.current.value = 'models/auraflow/umt5_auraflow.fp16.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/auraflow/sdxl_vae.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/auraflow/sdxl_vae.safetensors'
             except Exception:
                 pass
-        # Set auraflow default paths when selected
-        if is_auraflow:
-            try:
-                if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/auraflow/pony-v7-base.safetensors'
-                if text_encoder_path_field_ref.current:
-                    text_encoder_path_field_ref.current.value = 'models/auraflow/umt5_auraflow.fp16.safetensors'
-                if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/auraflow/sdxl_vae.safetensors'
-            except Exception:
-                pass
+
         # Set wan22 defaults when selected
-        if is_wan22:
+        if is_wan22 and not skip_defaults:
             try:
                 if ckpt_path_wan22_field_ref.current:
-                    ckpt_path_wan22_field_ref.current.value = 'models/Wan2.2-T2V-A14B'
+                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
+                        ckpt_path_wan22_field_ref.current.value = 'models/Wan2.2-T2V-A14B'
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/wan2.2_t2v_low_noise_14B_fp16.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/wan2.2_t2v_low_noise_14B_fp16.safetensors'
                 if llm_path_field_ref.current:
-                    llm_path_field_ref.current.value = 'models/umt5_xxl_fp16.safetensors'
+                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
+                        llm_path_field_ref.current.value = 'models/umt5_xxl_fp16.safetensors'
             except Exception:
                 pass
         # Set wan (2.1) defaults when selected
-        if is_wan:
+        if is_wan and not skip_defaults:
             try:
                 if ckpt_path_wan22_field_ref.current:
-                    ckpt_path_wan22_field_ref.current.value = 'models/Wan2.1-T2V-1.3B'
+                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
+                        ckpt_path_wan22_field_ref.current.value = 'models/Wan2.1-T2V-1.3B'
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/wan/wan2.1_t2v_1.3B_bf16.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/wan/wan2.1_t2v_1.3B_bf16.safetensors'
                 if llm_path_field_ref.current:
-                    llm_path_field_ref.current.value = 'models/wan/wrapper/umt5-xxl-enc-bf16.safetensors'
+                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
+                        llm_path_field_ref.current.value = 'models/wan/wrapper/umt5-xxl-enc-bf16.safetensors'
             except Exception:
                 pass
         # Set chroma defaults when selected
-        if is_chroma:
+        if is_chroma and not skip_defaults:
             try:
                 if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = 'models/chroma/FLUX.1-dev'
+                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                        diffusers_path_field_ref.current.value = 'models/chroma/FLUX.1-dev'
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/chroma/Chroma1-HD.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/chroma/Chroma1-HD.safetensors'
                 if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
                     if transformer_path_full_ref.current:
-                        transformer_path_full_ref.current.value = 'models/chroma/Chroma1-HD.safetensors'
+                        if not transformer_path_full_ref.current.value or transformer_path_full_ref.current.value.strip() == '':
+                            if not transformer_path_full_ref.current.value or transformer_path_full_ref.current.value.strip() == '':
+                                transformer_path_full_ref.current.value = 'models/chroma/Chroma1-HD.safetensors'
             except Exception:
                 pass
         # Set LTX-Video defaults when selected
-        if is_ltx:
+        if is_ltx and not skip_defaults:
             try:
                 if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = 'models/LTX-Video'
+                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                        diffusers_path_field_ref.current.value = 'models/LTX-Video'
                 if single_file_path_field_ref.current:
-                    single_file_path_field_ref.current.value = 'models/LTX-Video/ltx-video-2b-v0.9.1.safetensors'
+                    if not single_file_path_field_ref.current.value or single_file_path_field_ref.current.value.strip() == '':
+                        single_file_path_field_ref.current.value = 'models/LTX-Video/ltx-video-2b-v0.9.1.safetensors'
             except Exception:
                 pass
         # Set SD3 defaults when selected
-        if is_sd3:
+        if is_sd3 and not skip_defaults:
             try:
                 if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = 'models/stable-diffusion-3.5-medium'
+                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                        diffusers_path_field_ref.current.value = 'models/stable-diffusion-3.5-medium'
                 if flux_shift_checkbox_ref.current:
                     flux_shift_checkbox_ref.current.value = True
             except Exception:
                 pass
         # Set lumina_2 defaults when selected
-        if sel_norm == 'lumina_2':
+        if sel_norm == 'lumina_2' and not skip_defaults:
             try:
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/lumina2/lumina_2_model_bf16.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/lumina2/lumina_2_model_bf16.safetensors'
                 if llm_path_field_ref.current:
-                    llm_path_field_ref.current.value = 'models/lumina2/gemma_2_2b_fp16.safetensors'
+                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
+                        llm_path_field_ref.current.value = 'models/lumina2/gemma_2_2b_fp16.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/lumina2/flux_vae.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/lumina2/flux_vae.safetensors'
                 if lumina_shift_checkbox_ref.current:
                     lumina_shift_checkbox_ref.current.value = True
             except Exception:
@@ -409,75 +437,96 @@ def get_training_config_page_content():
         # Set Qwen Image defaults when selected
         # qwen_image and qwen_image_plus share many fields but have different defaults for
         # diffusers_path and transformer_path per request.
-        if is_qwen_any:
+        if is_qwen_any and not skip_defaults:
             try:
                 if is_qwen_plus:
                     if diffusers_path_field_ref.current:
-                        diffusers_path_field_ref.current.value = 'models/Qwen-Image-Edit-2509'
+                        if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                            diffusers_path_field_ref.current.value = 'models/Qwen-Image-Edit-2509'
                     if transformer_path_field_ref.current:
-                        transformer_path_field_ref.current.value = ''
+                        if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                            transformer_path_field_ref.current.value = ''
                 else:
                     if diffusers_path_field_ref.current:
-                        diffusers_path_field_ref.current.value = 'models/Qwen-Image'
+                        if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                            diffusers_path_field_ref.current.value = 'models/Qwen-Image'
                     if transformer_path_field_ref.current:
-                        transformer_path_field_ref.current.value = 'models/qwen/qwen_image_bf16.safetensors'
+                        if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                            transformer_path_field_ref.current.value = 'models/qwen/qwen_image_bf16.safetensors'
                 if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
                     if transformer_path_full_ref.current:
-                        transformer_path_full_ref.current.value = ''
+                        if not transformer_path_full_ref.current.value or transformer_path_full_ref.current.value.strip() == '':
+                            transformer_path_full_ref.current.value = ''
                 if text_encoder_path_field_ref.current:
-                    text_encoder_path_field_ref.current.value = 'models/qwen/qwen_2.5_vl_7b.safetensors'
+                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
+                        text_encoder_path_field_ref.current.value = 'models/qwen/qwen_2.5_vl_7b.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/qwen/diffusion_pytorch_model.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/qwen/diffusion_pytorch_model.safetensors'
             except Exception:
                 pass
         # Set Hunyuan-Video defaults when selected
-        if is_hunyuan_video:
+        if is_hunyuan_video and not skip_defaults:
             try:
                 if ckpt_path_wan22_field_ref.current:
-                    ckpt_path_wan22_field_ref.current.value = 'models/HunyuanVideo/ckpts'
+                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
+                        ckpt_path_wan22_field_ref.current.value = 'models/HunyuanVideo/ckpts'
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/hunyuan/hunyuan_video_720_cfgdistill_fp8_e4m3fn.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/hunyuan/hunyuan_video_720_cfgdistill_fp8_e4m3fn.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/hunyuan/hunyuan_video_vae_bf16.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/hunyuan/hunyuan_video_vae_bf16.safetensors'
                 if llm_path_field_ref.current:
-                    llm_path_field_ref.current.value = 'models/hunyuan/llava-llama-3-8b-text-encoder-tokenizer'
+                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
+                        llm_path_field_ref.current.value = 'models/hunyuan/llava-llama-3-8b-text-encoder-tokenizer'
                 if clip_path_field_ref.current:
-                    clip_path_field_ref.current.value = 'models/hunyuan/clip-vit-large-patch14'
+                    if not clip_path_field_ref.current.value or clip_path_field_ref.current.value.strip() == '':
+                        clip_path_field_ref.current.value = 'models/hunyuan/clip-vit-large-patch14'
             except Exception:
                 pass
         # Set Hunyuan Image defaults when selected
-        if str(sel).strip().lower() == 'hunyuan_image':
+        if is_hunyuan_image and not skip_defaults:
             try:
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/hunyuan/hunyuanimage2.1.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/hunyuan/hunyuanimage2.1.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/hunyuan/hunyuan_image_2.1_vae_fp16.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/hunyuan/hunyuan_image_2.1_vae_fp16.safetensors'
                 if text_encoder_path_field_ref.current:
-                    text_encoder_path_field_ref.current.value = 'models/qwen_2.5_vl_7b.safetensors'
+                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
+                        text_encoder_path_field_ref.current.value = 'models/qwen_2.5_vl_7b.safetensors'
                 if byt5_path_field_ref.current:
-                    byt5_path_field_ref.current.value = 'models/byt5_small_glyphxl_fp16.safetensors'
+                    if not byt5_path_field_ref.current.value or byt5_path_field_ref.current.value.strip() == '':
+                        byt5_path_field_ref.current.value = 'models/byt5_small_glyphxl_fp16.safetensors'
             except Exception:
                 pass
         # Set Flux defaults when selected
-        if is_flux:
+        if is_flux and not skip_defaults:
             try:
                 if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = 'models/FLUX.1-dev'
+                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                        diffusers_path_field_ref.current.value = 'models/FLUX.1-dev'
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/flux-dev-single-files/flux1-kontext-dev.safetensors'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/flux-dev-single-files/flux1-kontext-dev.safetensors'
                 if flux_shift_checkbox_ref.current:
                     flux_shift_checkbox_ref.current.value = True
             except Exception:
                 pass
         # Set HiDream defaults when selected
-        if str(sel).strip().lower() == "hidream":
+        if is_hidream and not skip_defaults:
             try:
                 if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = 'models/HiDream-I1-Full'
+                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                        diffusers_path_field_ref.current.value = 'models/HiDream-I1-Full'
                 if llama3_path_field_ref.current:
-                    llama3_path_field_ref.current.value = 'models/Meta-Llama-3.1-8B-Instruct'
+                    if not llama3_path_field_ref.current.value or llama3_path_field_ref.current.value.strip() == '':
+                        llama3_path_field_ref.current.value = 'models/Meta-Llama-3.1-8B-Instruct'
                 if max_llama3_seq_len_field_ref.current:
-                    max_llama3_seq_len_field_ref.current.value = '128'
+                    if not max_llama3_seq_len_field_ref.current.value or max_llama3_seq_len_field_ref.current.value.strip() == '':
+                        max_llama3_seq_len_field_ref.current.value = '128'
                 if flux_shift_checkbox_ref.current:
                     flux_shift_checkbox_ref.current.value = True
                 if hidream_4bit_checkbox_ref.current:
@@ -487,36 +536,43 @@ def get_training_config_page_content():
             except Exception:
                 pass
         # Set OmniGen2 defaults when selected
-        if is_omnigen2:
+        if is_omnigen2 and not skip_defaults:
             try:
                 if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = 'models/OmniGen2'
+                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
+                        diffusers_path_field_ref.current.value = 'models/OmniGen2'
                 if flux_shift_checkbox_ref.current:
                     flux_shift_checkbox_ref.current.value = True
             except Exception:
                 pass
         # Set Cosmos Predict2 defaults when selected
-        if is_cosmos_p2:
+        if is_cosmos_p2 and not skip_defaults:
             try:
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/Cosmos-Predict2-2B-Text2Image.pt'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/Cosmos-Predict2-2B-Text2Image.pt'
                 if t5_path_field_ref.current:
-                    t5_path_field_ref.current.value = 'models/oldt5_xxl_fp16.safetensors'
+                    if not t5_path_field_ref.current.value or t5_path_field_ref.current.value.strip() == '':
+                        t5_path_field_ref.current.value = 'models/oldt5_xxl_fp16.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/wan_2.1_vae.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/wan_2.1_vae.safetensors'
                 if float8_e5m2_checkbox_ref.current:
                     float8_e5m2_checkbox_ref.current.value = False
             except Exception:
                 pass
         # Set Cosmos defaults when selected
-        if is_cosmos:
+        if is_cosmos and not skip_defaults:
             try:
                 if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = 'models/cosmos/cosmos-1.0-diffusion-7b-text2world.pt'
+                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
+                        transformer_path_field_ref.current.value = 'models/cosmos/cosmos-1.0-diffusion-7b-text2world.pt'
                 if text_encoder_path_field_ref.current:
-                    text_encoder_path_field_ref.current.value = 'models/cosmos/oldt5_xxl_fp16.safetensors'
+                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
+                        text_encoder_path_field_ref.current.value = 'models/cosmos/oldt5_xxl_fp16.safetensors'
                 if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = 'models/cosmos/cosmos_cv8x8x8_1.0.safetensors'
+                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
+                        vae_path_field_ref.current.value = 'models/cosmos/cosmos_cv8x8x8_1.0.safetensors'
             except Exception:
                 pass
         if e and getattr(e, 'page', None):

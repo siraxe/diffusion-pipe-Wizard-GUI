@@ -494,16 +494,33 @@ def update_ui_from_toml(training_tab_container, toml_data: dict):
         except Exception:
             pass
 
+    def _apply_all():
+        try:
+            _apply_values_recursive(training_tab_container.config_page_content)
+        except Exception:
+            pass
+        try:
+            dataset_content = getattr(training_tab_container, 'dataset_page_content', None)
+            if dataset_content is not None:
+                _apply_values_recursive(dataset_content)
+        except Exception:
+            pass
+
+    suppress_defaults_ctx = None
     try:
-        _apply_values_recursive(training_tab_container.config_page_content)
+        from flet_app.ui.pages import training_config as _training_config_module  # Delayed import to avoid cycles
+        suppress_defaults_ctx = getattr(_training_config_module, 'suppress_model_defaults', None)
     except Exception:
-        pass
-    try:
-        dataset_content = getattr(training_tab_container, 'dataset_page_content', None)
-        if dataset_content is not None:
-            _apply_values_recursive(dataset_content)
-    except Exception:
-        pass
+        suppress_defaults_ctx = None
+
+    if suppress_defaults_ctx:
+        try:
+            with suppress_defaults_ctx():
+                _apply_all()
+        except Exception:
+            _apply_all()
+    else:
+        _apply_all()
 
     # Also update bottom bar output_dir field if available
     try:
