@@ -185,20 +185,62 @@ def handle_crop_all_videos(
         if not dialog_refreshed_for_current_video:
             page.update()
 
-def cut_to_frames(page: ft.Page, current_video_path: str, start_frame: int, end_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable]): 
+def cut_to_frames(page: ft.Page, current_video_path: str, start_frame: int, end_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], refresh_dialog_callback: Optional[Callable] = None, thumbnail_update_callback: Optional[Callable] = None):
     success, msg, temp_output_path = vpu.cut_video_by_frames(current_video_path, start_frame, end_frame)
     if success and temp_output_path:
         try:
             shutil.move(temp_output_path, current_video_path)
             _generic_video_operation_ui_update(page, current_video_path, video_list, on_caption_updated_callback, msg)
+
+            # For cut operations, we need to specifically regenerate the thumbnail
+            # because we're replacing the original file, not creating a new one
+            def force_regenerate_cut_thumbnail():
+                """Force regeneration of thumbnail for the cut video"""
+                try:
+                    # Import settings to get paths
+                    from flet_app.settings import settings
+
+                    # Extract dataset name from video path
+                    # Video path format: /path/to/DATASETS_DIR/dataset_name/video.mp4
+                    if current_video_path.startswith(settings.DATASETS_DIR):
+                        relative_path = os.path.relpath(current_video_path, settings.DATASETS_DIR)
+                        path_parts = relative_path.split(os.sep)
+                        dataset_name = path_parts[0] if path_parts else None
+                    else:
+                        dataset_name = None
+                    if dataset_name:
+                        # Construct old thumbnail path
+                        video_name = os.path.basename(current_video_path)
+                        thumbnail_name = f"{os.path.splitext(video_name)[0]}.jpg"
+                        old_thumbnail_path = os.path.join(settings.THUMBNAILS_BASE_DIR, dataset_name, thumbnail_name)
+
+                        # Remove old thumbnail to force regeneration
+                        if os.path.exists(old_thumbnail_path):
+                            os.remove(old_thumbnail_path)
+
+                        # Call the normal thumbnail update callback
+                        if thumbnail_update_callback:
+                            thumbnail_update_callback()
+
+                except Exception:
+                    # Fallback to normal thumbnail update
+                    if thumbnail_update_callback:
+                        thumbnail_update_callback()
+
+            # Force regenerate the specific thumbnail for the cut video
+            force_regenerate_cut_thumbnail()
+
+            # Refresh the dialog to show the updated video
+            if refresh_dialog_callback:
+                refresh_dialog_callback()
         except Exception as e:
             if page: page.snack_bar = ft.SnackBar(ft.Text(f"Error moving cut file: {e}"), open=True); page.update()
             if os.path.exists(temp_output_path): os.remove(temp_output_path)
     else:
         if page: page.snack_bar = ft.SnackBar(ft.Text(msg), open=True); page.update()
 
-def split_to_video(page: ft.Page, current_video_path: str, split_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], video_player_instance_from_dialog_state: Optional[Video]): 
-    if split_frame <= 0: 
+def split_to_video(page: ft.Page, current_video_path: str, split_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], video_player_instance_from_dialog_state: Optional[Video], refresh_dialog_callback: Optional[Callable] = None, thumbnail_update_callback: Optional[Callable] = None):
+    if split_frame <= 0:
         if page: page.snack_bar = ft.SnackBar(ft.Text("Split frame must be greater than 0."), open=True); page.update()
         return
 
@@ -207,16 +249,16 @@ def split_to_video(page: ft.Page, current_video_path: str, split_frame: int, vid
     if success and temp_path1 and temp_path2:
         original_dir = os.path.dirname(current_video_path)
         base_name, ext = os.path.splitext(os.path.basename(current_video_path))
-        
-        final_path1 = current_video_path 
-        
+
+        final_path1 = current_video_path
+
         counter = 1
         final_path2_base = os.path.join(original_dir, f"{base_name}_splitP2")
         final_path2 = f"{final_path2_base}{ext}"
         while os.path.exists(final_path2):
             final_path2 = f"{final_path2_base}_{counter}{ext}"
             counter += 1
-            if counter > 100: 
+            if counter > 100:
                 if page: page.snack_bar = ft.SnackBar(ft.Text("Could not find a unique name for split part 2."), open=True); page.update()
                 if os.path.exists(temp_path1): os.remove(temp_path1)
                 if os.path.exists(temp_path2): os.remove(temp_path2)
@@ -229,8 +271,14 @@ def split_to_video(page: ft.Page, current_video_path: str, split_frame: int, vid
             vpu.update_video_info_json(final_path2)
 
             if page: page.snack_bar = ft.SnackBar(ft.Text(f"Video split. Original updated, new: {os.path.basename(final_path2)}"), open=True)
-            
-            # Unified popup handles current view; no legacy dialog refresh
+
+            # Update thumbnails to reflect changes in dataset (new video added)
+            if thumbnail_update_callback:
+                thumbnail_update_callback()
+
+            # Refresh the dialog to show the updated video (part 1)
+            if refresh_dialog_callback:
+                refresh_dialog_callback()
 
             if on_caption_updated_callback:
                 on_caption_updated_callback()

@@ -346,10 +346,12 @@ async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS
                 skipped_files += 1
                 continue
 
-            # Change FPS using ffmpeg
+            # Change FPS using ffmpeg with stream copy and no audio
             ffmpeg_cmd = [
-                ffmpeg_exe, "-y", "-i", input_video_path, 
-                "-r", str(target_fps_float), 
+                ffmpeg_exe, "-y", "-i", input_video_path,
+                "-r", str(target_fps_float),
+                "-c:v", "copy",           # Fast video stream copy (no re-encoding)
+                "-an",                    # No audio (faster processing)
                 temp_output_video_path
             ]
             print(f"Running: {' '.join(ffmpeg_cmd)}")

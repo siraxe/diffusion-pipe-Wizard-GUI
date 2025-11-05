@@ -286,6 +286,14 @@ def _get_ffmpeg_exe_path() -> str:
     # Ensure plain "ffmpeg" is always a fallback candidate
     candidates.append("ffmpeg")
 
+    # In WSL, explicitly check common ffmpeg locations first
+    if _running_in_wsl():
+        candidates.extend([
+            "/usr/bin/ffmpeg",
+            "/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg"
+        ])
+
     seen: set[str] = set()
     for raw_candidate in candidates:
         if not raw_candidate or raw_candidate in seen:
@@ -320,6 +328,19 @@ def _get_ffmpeg_exe_path() -> str:
         print("Warning: Could not resolve configured FFmpeg binary. Falling back to 'ffmpeg' in PATH.")
 
     return _RESOLVED_FFMPEG_PATH
+
+def get_web_video_encoding_flags() -> List[str]:
+    """
+    Returns standardized video encoding flags for web compatibility.
+    These settings ensure excellent quality and universal web browser support.
+    """
+    return [
+        "-c:v", "libx264",        # H.264 codec (universal web support)
+        "-preset", "medium",      # Good balance of speed and quality
+        "-crf", "18",             # Excellent quality for web
+        "-pix_fmt", "yuv420p",   # Web-compatible pixel format
+        "-movflags", "+faststart" # Optimize for web streaming
+    ]
 
 def _get_video_codec_and_flags() -> List[str]:
     """
@@ -356,8 +377,8 @@ def _get_video_codec_and_flags() -> List[str]:
 
         print("No suitable GPU encoder found or configured. Falling back to CPU (libx264).")
     
-    # Fallback to CPU (libx264)
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
+    # Fallback to CPU (libx264) - use web-compatible settings
+    return get_web_video_encoding_flags()
 
 def _run_ffmpeg_process(command: List[str]) -> Tuple[bool, str, str]:
     """
@@ -719,38 +740,43 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
         return False, f"FFmpeg error during time remap: {stderr.strip()}", None
 
 def cut_video_by_frames(
-    current_video_path: str, 
-    start_frame: int, 
+    current_video_path: str,
+    start_frame: int,
     end_frame: int
 ) -> Tuple[bool, str, Optional[str]]:
     """
-    Cuts video from start_frame to end_frame.
+    Cuts video from start_frame to end_frame using frame-accurate cutting.
+    Uses re-encoding to avoid corruption from stream copy seeking.
     Returns (success, message, output_path_or_none).
     """
     ffmpeg_exe = _get_ffmpeg_exe_path()
     metadata = get_video_metadata(current_video_path)
     if not metadata or not metadata.get('fps') or metadata['fps'] <= 0:
         return False, "Could not get valid FPS for cutting by frames.", None
-    
+
     fps = metadata['fps']
     if start_frame > end_frame: # Changed from >= to > to allow single-frame cuts if needed
         return False, "Start frame must be less than or equal to end frame.", None
 
+    # For frame-accurate cutting, we need to use both seek and frame filtering
+    # This avoids corruption from stream copy at non-keyframes
     start_time = start_frame / fps
     # Calculate duration to include the end_frame
-    duration = (end_frame - start_frame + 1) / fps 
+    duration = (end_frame - start_frame + 1) / fps
+    frame_count = end_frame - start_frame + 1
 
     temp_output_path = _get_temp_output_path(current_video_path, "cut")
     command = [
-        ffmpeg_exe, "-y", 
-        "-i", current_video_path, 
+        ffmpeg_exe, "-y",
         "-ss", str(start_time),   # Seek to start time
-        "-t", str(duration),      # Cut for the calculated duration
-        *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        "-c:a", "copy", # Copy audio stream
+        "-i", current_video_path,
+        "-vf", f"select='between(n,0,{frame_count-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
+        "-vframes", str(frame_count),  # Ensure exact frame count
+        "-an",                    # No audio (faster processing)
+        *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
         temp_output_path
     ]
-    
+
     success, _, stderr = _run_ffmpeg_process(command)
     if success and os.path.exists(temp_output_path):
         return True, f"Video cut from frame {start_frame} to {end_frame}.", temp_output_path
@@ -760,11 +786,11 @@ def cut_video_by_frames(
 
 
 def split_video_by_frame(
-    current_video_path: str, 
+    current_video_path: str,
     split_frame: int
 ) -> Tuple[bool, str, Optional[str], Optional[str]]:
     """
-    Splits a video into two parts at split_frame.
+    Splits a video into two parts at split_frame using frame-accurate cutting.
     The first part is from frame 0 to split_frame-1.
     The second part is from split_frame to the end.
     Returns (success, message, output_path_part1_or_none, output_path_part2_or_none).
@@ -773,37 +799,42 @@ def split_video_by_frame(
     metadata = get_video_metadata(current_video_path)
     if not metadata or not metadata.get('fps') or metadata['fps'] <= 0 or not metadata.get('total_frames'):
         return False, "Could not get valid metadata for splitting.", None, None
-    
+
     fps = metadata['fps']
     total_frames = metadata['total_frames']
 
     if split_frame <= 0 or split_frame >= total_frames:
         return False, "Split frame must be within the video's frame range (exclusive of 0 and total_frames).", None, None
 
-    # Part 1: 0 to split_frame (exclusive of split_frame itself for time calc)
-    start_time_1 = 0
-    end_time_1 = split_frame / fps 
+    # Part 1: 0 to split_frame-1 (frame_count = split_frame)
+    frame_count_1 = split_frame
     temp_output_path_1 = _get_temp_output_path(current_video_path, "split_part1")
     command1 = [
         ffmpeg_exe, "-y", "-i", current_video_path,
-        "-ss", str(start_time_1), "-to", str(end_time_1),
-        *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        "-c:a", "copy", temp_output_path_1
+        "-vf", f"select='between(n,0,{frame_count_1-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
+        "-vframes", str(frame_count_1),  # Ensure exact frame count
+        "-an",                    # No audio (faster processing)
+        *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
+        temp_output_path_1
     ]
     success1, _, stderr1 = _run_ffmpeg_process(command1)
     if not (success1 and os.path.exists(temp_output_path_1)):
         if os.path.exists(temp_output_path_1): os.remove(temp_output_path_1)
         return False, f"FFmpeg error during split (part 1): {stderr1.strip()}", None, None
 
-    # Part 2: split_frame to end
-    start_time_2 = split_frame / fps
-    # No -to needed, goes to end of stream
+    # Part 2: split_frame to end (frame_count = total_frames - split_frame)
+    frame_count_2 = total_frames - split_frame
+    start_frame_2 = split_frame
     temp_output_path_2 = _get_temp_output_path(current_video_path, "split_part2")
     command2 = [
-        ffmpeg_exe, "-y", "-i", current_video_path,
-        "-ss", str(start_time_2),
-        *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        "-c:a", "copy", temp_output_path_2
+        ffmpeg_exe, "-y",
+        "-ss", str(start_frame_2 / fps),  # Seek to start frame
+        "-i", current_video_path,
+        "-vf", f"select='between(n,0,{frame_count_2-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
+        "-vframes", str(frame_count_2),  # Ensure exact frame count
+        "-an",                    # No audio (faster processing)
+        *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
+        temp_output_path_2
     ]
     success2, _, stderr2 = _run_ffmpeg_process(command2)
     if not (success2 and os.path.exists(temp_output_path_2)):

@@ -32,6 +32,33 @@ from .area_editor import (
     toggle_area_editor as area_toggle_editor,
 )
 
+# Import for thumbnail updates - using a different approach to avoid circular imports
+def update_thumbnails_callback_factory(page_context):
+    """Factory function to create thumbnail update callback without circular imports"""
+    try:
+        # Import inside the function to avoid circular import issues
+        from flet_app.ui.dataset_manager.dataset_layout_tab import update_thumbnails, thumbnails_grid_ref
+
+        def callback():
+            if update_thumbnails and thumbnails_grid_ref and thumbnails_grid_ref.current:
+                try:
+                    update_thumbnails(page_ctx=page_context, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+
+                    # Also explicitly update the grid control
+                    if thumbnails_grid_ref.current.page:
+                        thumbnails_grid_ref.current.update()
+
+                except Exception:
+                    pass  # Silently handle thumbnail update errors
+
+        return callback
+    except ImportError:
+
+        def fallback_callback():
+            pass  # Silently handle import failure
+
+        return fallback_callback
+
 
 DIALOG_WIDTH = max(IMAGE_PLAYER_DIALOG_WIDTH, VIDEO_PLAYER_DIALOG_WIDTH)
 # Match legacy dialog height and leave extra space for prompts + tools (no scrollbar)
@@ -1204,10 +1231,13 @@ def open_unified_popup_dialog(
                 spacing=5,
                 col={"md": 6, "lg": 7, "sm": 12},
             )
+            # Create thumbnail update callback using factory to avoid circular imports
+            update_thumbnails_callback = update_thumbnails_callback_factory(page)
+
             # Row 2: Split, Cut to Frames, Cut All Videos to, Num field
             num_to_cut_to = create_textfield(label="num", value=str(original_frames // 2 if original_frames > 1 else 150), keyboard_type=ft.KeyboardType.NUMBER)
-            split_btn = ft.ElevatedButton("Split", on_click=lambda e: page.run_thread(video_editor.split_to_video, page, path, int(frame_range_slider.start_value or 0), items, None, local_video_player), style=BTN_STYLE2)
-            cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=lambda e: page.run_thread(video_editor.cut_to_frames, page, path, int(frame_range_slider.start_value or 0), int(frame_range_slider.end_value or original_frames), items, None), style=BTN_STYLE2)
+            split_btn = ft.ElevatedButton("Split", on_click=lambda e: page.run_thread(video_editor.split_to_video, page, path, int(frame_range_slider.start_value or 0), items, None, local_video_player, refresh, update_thumbnails_callback), style=BTN_STYLE2)
+            cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=lambda e: page.run_thread(video_editor.cut_to_frames, page, path, int(frame_range_slider.start_value or 0), int(frame_range_slider.end_value or original_frames), items, None, refresh, update_thumbnails_callback), style=BTN_STYLE2)
             cut_all_btn = ft.ElevatedButton("Cut All Videos to", on_click=lambda e: page.run_thread(video_editor.cut_all_videos_to_max, page, path, items, int(num_to_cut_to.value or 0), None), style=BTN_STYLE2)
             row2 = ft.ResponsiveRow([
                 ft.Container(split_btn, col={"md": 3, "lg": 3, "sm": 12}),
