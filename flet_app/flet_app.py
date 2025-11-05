@@ -169,6 +169,8 @@ if __name__ == "__main__":
     print(f"- Local: {local_url}")
     print(f"- Bound: {bound_url}")
     print("- Output files: http://localhost:8550/output/")
+    print("- Datasets: http://localhost:8550/datasets/")
+    print("- Thumbnails: http://localhost:8550/thumbnails/")
     print("Press Ctrl+C to stop.")
 
     # Add static file serving for output directory
@@ -198,4 +200,9 @@ if __name__ == "__main__":
         # Then run the main app
         main(page)
 
-    ft.app(target=app_wrapper, host=host, port=port, view=view)
+    # Set up assets directory to serve workspace files
+    project_location = settings.get("project_location", ".")
+    workspace_dir = Path(project_location) / "workspace"
+    assets_dir = str(workspace_dir) if workspace_dir.exists() else None
+
+    ft.app(target=app_wrapper, host=host, port=port, view=view, assets_dir=assets_dir)
