@@ -157,7 +157,7 @@ def main(page: ft.Page):
     page.update()
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8550"))
     open_browser = os.getenv("OPEN_BROWSER", "0") == "1"
 
