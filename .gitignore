@@ -12,6 +12,7 @@ dp_env/
 flet_app/settings.json
 LTX/
 longcat/
+ai-toolkit/
 
 # Python cache and compiled files
 __pycache__/
