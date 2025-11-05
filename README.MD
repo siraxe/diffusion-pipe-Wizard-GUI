@@ -61,7 +61,8 @@ chmod +x apply_qwen_patch.sh
 
 ## Apply LongCat-Video patch (optional)
 
-To add LongCat-Video model support to diffusion-pipe:
+Thanks to https://github.com/tdrussell/diffusion-pipe/pull/453
+you  add LongCat-Video model support to diffusion-pipe:
 
 ```
 chmod +x apply_longcat_patch.sh
