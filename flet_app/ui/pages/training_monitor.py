@@ -648,211 +648,95 @@ def get_training_monitor_page_content():
                 download_name = generate_download_name(adapter_file, loss_value)
                 print(f"[Download] Generated download name: {download_name} (loss included: {bool(loss_value)})")
 
-                # Generate direct download URL using main Flet server (port 8550)
+                # Start simple HTTP server for file download
                 try:
+                    import threading
+                    import http.server
+                    import socketserver
                     import subprocess
                     from urllib.parse import quote
 
-                    # Get relative path from file to create URL
-                    relative_path = str(adapter_file).replace("\\", "/")
-                    # Get the actual server IP address
-                    def get_server_ip():
-                        import os
-                        import subprocess
-                        import re
-                        import json
-
-                        # FIRST: Try to extract from current browser session (most reliable)
+                    def start_file_server():
+                        """Start HTTP server to serve the file with download headers."""
                         try:
-                            if hasattr(content, "page") and content.page:
-                                # Get the current page URL from the browser
-                                page_url = getattr(content.page, 'url', None)
-                                if page_url:
-                                    print(f"[Download] Detected current page URL: {page_url}")
-                                    # Extract hostname from current page URL
-                                    match = re.search(r'https?://([^:/]+)', page_url)
-                                    if match:
-                                        hostname = match.group(1)
-                                        print(f"[Download] Using browser-detected host: {hostname}")
-                                        return hostname
-                        except Exception as e:
-                            print(f"[Download] Browser URL detection failed: {e}")
+                            # Get WSL IP address for Windows access
+                            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=5)
+                            wsl_ip = result.stdout.strip().split()[0] if result.returncode == 0 else 'localhost'
 
-                        # SECOND: Check if there's a custom server URL configured
-                        custom_host = os.getenv("FLET_SERVER_HOST", os.getenv("SERVER_HOST", ""))
-                        if custom_host:
-                            print(f"[Download] Using configured server host: {custom_host}")
-                            return custom_host
+                            # Create HTTP server that serves the file
+                            class DownloadHandler(http.server.SimpleHTTPRequestHandler):
+                                def do_GET(self):
+                                    if self.path.startswith('/download'):
+                                        try:
+                                            # Extract filename from URL
+                                            filename = self.path[10:]  # Remove '/download/'
+                                            if filename == download_name:
+                                                # Serve the file with download headers
+                                                self.send_response(200)
+                                                self.send_header('Content-Type', 'application/octet-stream')
+                                                self.send_header('Content-Disposition', f'attachment; filename="{download_name}"')
+                                                self.send_header('Content-Length', str(os.path.getsize(adapter_file)))
+                                                self.end_headers()
 
-                        # THIRD: Try to detect tunnel service URLs
-                        try:
-                            # Check for common tunnel services in environment variables
-                            tunnel_urls = []
-
-                            # SimplePod.ai and similar services often set these variables
-                            tunnel_vars = ["SIMPLEPOD_URL", "TUNNEL_URL", "PUBLIC_URL", "EXTERNAL_URL"]
-                            for var in tunnel_vars:
-                                url = os.getenv(var)
-                                if url:
-                                    tunnel_urls.append(url)
-
-                            # Try to extract from ngrok (if running)
-                            try:
-                                result = subprocess.run(["curl", "-s", "http://localhost:4040/api/tunnels"],
-                                                      capture_output=True, text=True, timeout=3)
-                                if result.returncode == 0:
-                                    tunnels = json.loads(result.stdout)
-                                    for tunnel in tunnels.get("tunnels", []):
-                                        if tunnel.get("proto") == "http":
-                                            tunnel_urls.append(tunnel["public_url"])
-                            except:
-                                pass
-
-                            # Try to extract from cloudflared (if running)
-                            try:
-                                result = subprocess.run(["curl", "-s", "http://localhost:42591/metrics"],
-                                                      capture_output=True, text=True, timeout=3)
-                                if result.returncode == 0:
-                                    # Parse cloudflare tunnel metrics for URL
-                                    lines = result.stdout.split('\n')
-                                    for line in lines:
-                                        if 'tunnel_host' in line:
-                                            # Extract hostname from metrics
-                                            host = line.split('tunnel_host="')[1].split('"')[0]
-                                            tunnel_urls.append(f"https://{host}")
-                            except:
-                                pass
-
-                            # Parse and return the first valid URL's hostname
-                            for url in tunnel_urls:
-                                if url and ('http://' in url or 'https://' in url):
-                                    # Extract hostname from URL
-                                    match = re.search(r'https?://([^:/]+)', url)
-                                    if match:
-                                        hostname = match.group(1)
-                                        print(f"[Download] Detected tunnel host: {hostname}")
-                                        return hostname
-
-                        except Exception as e:
-                            print(f"[Download] Tunnel detection failed: {e}")
-
-                        # Default to localhost for direct connections
-                        # This prevents IP obfuscation issues with multiple network interfaces
-                        return "localhost"
-
-                    server_ip = get_server_ip()
-
-                    # Get the correct port for download URLs (handle port forwarding scenarios)
-                    def get_server_port():
-                        import os
-                        import re
-
-                        # FIRST: Try to extract from current browser session (most reliable)
-                        try:
-                            if hasattr(content, "page") and content.page:
-                                # Get the current page URL from the browser
-                                page_url = getattr(content.page, 'url', None)
-                                if page_url:
-                                    print(f"[Download] Detected current page URL for port: {page_url}")
-                                    # Extract port from current page URL
-                                    match = re.search(r'https?://[^:/]+:(\d+)', page_url)
-                                    if match:
-                                        port = match.group(1)
-                                        print(f"[Download] Using browser-detected port: {port}")
-                                        return port
+                                                with open(adapter_file, 'rb') as f:
+                                                    self.wfile.write(f.read())
+                                                return
+                                        except Exception as e:
+                                            self.send_error(500, f"Error serving file: {e}")
                                     else:
-                                        # Use default ports based on protocol
-                                        if page_url.startswith('https://'):
-                                            print(f"[Download] Using default HTTPS port: 443")
-                                            return "443"
-                                        elif page_url.startswith('http://'):
-                                            print(f"[Download] Using default HTTP port: 80")
-                                            return "80"
-                        except Exception as e:
-                            print(f"[Download] Browser port detection failed: {e}")
+                                        self.send_error(404, "File not found")
 
-                        # SECOND: Check if there's a custom external port configured
-                        custom_port = os.getenv("FLET_SERVER_PORT", os.getenv("SERVER_PORT", ""))
-                        if custom_port:
-                            print(f"[Download] Using configured server port: {custom_port}")
-                            return custom_port
+                                def log_message(self, format, *args):
+                                    # Suppress server logging
+                                    pass
 
-                        # THIRD: Try to detect port from tunnel service URLs
-                        try:
-                            tunnel_urls = []
+                            # Start server on a random port
+                            with socketserver.TCPServer(("0.0.0.0", 0), DownloadHandler) as httpd:
+                                port = httpd.server_address[1]
+                                server_url = f"http://{wsl_ip}:{port}/download/{quote(download_name)}"
 
-                            # Check for common tunnel services in environment variables
-                            tunnel_vars = ["SIMPLEPOD_URL", "TUNNEL_URL", "PUBLIC_URL", "EXTERNAL_URL"]
-                            for var in tunnel_vars:
-                                url = os.getenv(var)
-                                if url:
-                                    tunnel_urls.append(url)
+                                print(f"[Download] Server started: {server_url}")
 
-                            # Parse and return the port from the first valid URL
-                            for url in tunnel_urls:
-                                if url and ('http://' in url or 'https://' in url):
-                                    # Extract port from URL, default to 443 for https, 80 for http
-                                    match = re.search(r'https?://[^:/]+:(\d+)', url)
-                                    if match:
-                                        port = match.group(1)
-                                        print(f"[Download] Detected tunnel port: {port}")
-                                        return port
-                                    else:
-                                        # Use default ports based on protocol
-                                        if url.startswith('https://'):
-                                            print(f"[Download] Using default HTTPS port: 443")
-                                            return "443"
-                                        elif url.startswith('http://'):
-                                            print(f"[Download] Using default HTTP port: 80")
-                                            return "80"
+                                # Open browser after short delay using same method as Monitor button
+                                def open_browser():
+                                    import time
+                                    time.sleep(0.5)
+                                    try:
+                                        # Use same method as Monitor button - launch_url through content.page
+                                        if hasattr(content, 'page') and content.page:
+                                            content.page.launch_url(server_url)
+                                            print(f"[Download] Browser opened with URL: {server_url}")
+                                        else:
+                                            # Fallback to Windows browser if page context not available
+                                            subprocess.run(['cmd.exe', '/c', 'start', server_url], check=False)
+                                            print(f"[Download] Fallback browser opened with URL: {server_url}")
+                                    except Exception as e:
+                                        print(f"[Download] Browser opening failed: {e}")
+                                        # Final fallback to webbrowser
+                                        import webbrowser
+                                        webbrowser.open(server_url)
+                                        print(f"[Download] Final fallback browser opened with URL: {server_url}")
+
+                                threading.Thread(target=open_browser, daemon=True).start()
+
+                                # Serve the file (handle one request then shutdown)
+                                httpd.handle_request()
+                                httpd.server_close()
+                                print(f"[Download] Server shut down")
 
                         except Exception as e:
-                            print(f"[Download] Tunnel port detection failed: {e}")
+                            print(f"[Download] Server error: {e}")
 
-                        # Default to Flet server port
-                        return "8550"
+                    # Start server in separate thread
+                    server_thread = threading.Thread(target=start_file_server, daemon=True)
+                    server_thread.start()
 
-                    server_port = get_server_port()
-
-                    # adapter_file is already in workspace/output, so we extract the path after output/
-                    if "/output/" in str(adapter_file):
-                        relative_path = str(adapter_file).split("/output/", 1)[1]
-                        server_url = f"http://{server_ip}:{server_port}/output/{quote(relative_path)}"
-                    else:
-                        # Fallback: create download name and construct URL
-                        server_url = f"http://{server_ip}:{server_port}/output/{quote(download_name)}"
-
-                    print(f"[Download] Model available at: {server_url}")
-
-                    # Open browser after short delay
-                    def open_browser():
-                        import time
-                        time.sleep(0.5)
-                        try:
-                            # Use same method as Monitor button - launch_url through content.page
-                            if hasattr(content, "page") and content.page:
-                                content.page.launch_url(server_url)
-                                print(f"[Download] Browser opened with URL: {server_url}")
-                            else:
-                                # Fallback to Windows browser if page context not available
-                                subprocess.run(["cmd.exe", "/c", "start", server_url], check=False)
-                                print(f"[Download] Fallback browser opened with URL: {server_url}")
-                        except Exception as e:
-                            print(f"[Download] Browser opening failed: {e}")
-                            # Final fallback to webbrowser
-                            import webbrowser
-                            webbrowser.open(server_url)
-                            print(f"[Download] Final fallback browser opened with URL: {server_url}")
-
-                    import threading
-                    threading.Thread(target=open_browser, daemon=True).start()
+                    print(f"[Download] Server starting for {download_name}")
 
                 except Exception as download_error:
-                    print(f"[Download] URL generation failed: {download_error}")
+                    print(f"[Download] HTTP server failed: {download_error}")
                     import traceback
                     print(f"[Download] Traceback: {traceback.format_exc()}")
-
-
 
             except Exception as e:
                 # Handle download errors

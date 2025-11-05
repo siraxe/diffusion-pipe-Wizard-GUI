@@ -157,7 +157,7 @@ def main(page: ft.Page):
     page.update()
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "0.0.0.0")
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8550"))
     open_browser = os.getenv("OPEN_BROWSER", "0") == "1"
 
@@ -169,8 +169,6 @@ if __name__ == "__main__":
     print(f"- Local: {local_url}")
     print(f"- Bound: {bound_url}")
     print("- Output files: http://localhost:8550/output/")
-    print("- Datasets: http://localhost:8550/datasets/")
-    print("- Thumbnails: http://localhost:8550/thumbnails/")
     print("Press Ctrl+C to stop.")
 
     # Add static file serving for output directory
@@ -200,9 +198,4 @@ if __name__ == "__main__":
         # Then run the main app
         main(page)
 
-    # Set up assets directory to serve workspace files
-    project_location = settings.get("project_location", ".")
-    workspace_dir = Path(project_location) / "workspace"
-    assets_dir = str(workspace_dir) if workspace_dir.exists() else None
-
-    ft.app(target=app_wrapper, host=host, port=port, view=view, assets_dir=assets_dir)
+    ft.app(target=app_wrapper, host=host, port=port, view=view)
