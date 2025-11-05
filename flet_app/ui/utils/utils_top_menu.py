@@ -113,7 +113,16 @@ class TopBarUtils:
             if hasattr(page, f'selected_image_path_{target_control_key.lower()}'):
                 setattr(page, f'selected_image_path_{target_control_key.lower()}', image_path_norm)
 
-            image_display_target.src = image_path_norm
+            # Convert local paths to web URLs for web access
+            if image_path_norm.startswith("/workspace/"):
+                # Convert /workspace/datasets/CAKE/image.jpg to /datasets/CAKE/image.jpg
+                # This will be served by Flet's assets_dir
+                image_display_target.src = image_path_norm.replace("/workspace/", "/")
+            elif "workspace/" in image_path_norm:
+                # Convert workspace/datasets/CAKE/image.jpg to /datasets/CAKE/image.jpg
+                image_display_target.src = "/" + image_path_norm.split("workspace/", 1)[1]
+            else:
+                image_display_target.src = image_path_norm
             image_display_target.visible = True
 
             # Optional: Ensure the image is visible and properly sized (Flet's fit usually handles this)
