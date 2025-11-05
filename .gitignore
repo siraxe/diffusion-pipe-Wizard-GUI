@@ -13,6 +13,8 @@ flet_app/settings.json
 LTX/
 longcat/
 ai-toolkit/
+vid_test/
+flet-video/
 
 # Python cache and compiled files
 __pycache__/
@@ -66,7 +68,7 @@ venv.bak/
 Thumbs.db
 desktop.ini
 
-# Workspace and temporary files
+# assets and temporary files
 workspace/*
 !workspace/**/*_here.txt
 temp/
@@ -82,7 +84,7 @@ logs/
 !flet_app/modules/qwen_plus_patch/models/qwen_image.py
 !flet_app/modules/qwen_plus_patch/models/qwen_image_plus.py
 
-# Exception for longcat model files (stored with patch assets)
+# Exception for longcat model files (stored with patch workspace)
 !flet_app/modules/longcat_patch/models/
 !flet_app/modules/longcat_patch/models/*
 

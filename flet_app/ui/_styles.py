@@ -93,12 +93,12 @@ POPUP_ACTIONS_ALIGNMENT = ft.MainAxisAlignment.END
 POPUP_BORDER_RADIUS = ft.border_radius.all(10) # Example radius, adjust as needed
 
 # Image Player Dialog Dimensions
-IMAGE_PLAYER_DIALOG_WIDTH = 640
-IMAGE_PLAYER_DIALOG_HEIGHT = 480
+IMAGE_PLAYER_DIALOG_WIDTH = 750
+IMAGE_PLAYER_DIALOG_HEIGHT = 450
 
 # Video Player Dialog Dimensions (re-added for video player)
-VIDEO_PLAYER_DIALOG_WIDTH = 640
-VIDEO_PLAYER_DIALOG_HEIGHT = 480
+VIDEO_PLAYER_DIALOG_WIDTH = 750
+VIDEO_PLAYER_DIALOG_HEIGHT = 450
 
 # --- Button Styles ---
 BTN_STYLE = ft.ButtonStyle(
@@ -132,3 +132,4 @@ def create_styled_button(text, on_click=None, col=None, width=BUTTON_WIDTH, heig
         col=col,
         **kwargs
     )
+

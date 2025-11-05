@@ -61,6 +61,7 @@ def create_thumbnail_container(
     video_name = os.path.basename(video_path)
     info = video_info.get(video_name, {})
     width, height, frames = info.get("width", "?"), info.get("height", "?"), info.get("frames", "?")
+    fps = info.get("fps", "?")
     cap_val, cap_color = ("yes", ft.Colors.GREEN) if has_caption else ("no", ft.Colors.RED)
 
     def _handle_thumbnail_click(e_click):
@@ -126,7 +127,8 @@ def create_thumbnail_container(
                     ft.Text(spans=[
                         ft.TextSpan("[cap - ", style=ft.TextStyle(color=ft.Colors.GREY_500, size=10)),
                         ft.TextSpan(cap_val, style=ft.TextStyle(color=cap_color, size=10)),
-                        ft.TextSpan("]", style=ft.TextStyle(color=ft.Colors.GREY_500, size=10)),
+                        ft.TextSpan("] - ", style=ft.TextStyle(color=ft.Colors.GREY_500, size=10)),
+                        ft.TextSpan(f"{fps} fps", style=ft.TextStyle(color=ft.Colors.BLUE, size=10)),
                     ], size=10),
                     ft.Text(f"[{width}x{height} - {frames} frames]", size=10, color=ft.Colors.GREY_500),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, tight=True),

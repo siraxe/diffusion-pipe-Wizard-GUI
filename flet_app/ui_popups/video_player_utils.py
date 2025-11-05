@@ -329,33 +329,103 @@ def _get_ffmpeg_exe_path() -> str:
 
     return _RESOLVED_FFMPEG_PATH
 
+# ============================================================================
+# CENTRALIZED VIDEO ENCODING SETTINGS - SINGLE SOURCE OF TRUTH
+# ============================================================================
+
+class VideoEncodingSettings:
+    """Centralized video encoding settings to maintain consistency across the application."""
+
+    # Base quality settings (used by all encoders)
+    CRF_QUALITY = 18              # EXCELLENT quality (lower is better, 18 is great)
+    TARGET_BITRATE = "4M"         # Target 4 Mbps bitrate for high quality
+    MAX_BITRATE = "6M"            # Maximum bitrate for streaming
+    BUFFER_SIZE = "12M"           # Buffer size for rate control
+    KEYFRAME_INTERVAL = 32        # Keyframe every 2 seconds at 16fps (important for web)
+    PIXEL_FORMAT = "yuv420p"      # Web-compatible pixel format
+    WEB_OPTIMIZATION = "+faststart" # Optimize for web streaming
+    PROFILE = "high"              # High profile for better compression
+    LEVEL = "4.0"                 # Compatible level for most devices
+
+    @classmethod
+    def get_base_encoding_flags(cls) -> List[str]:
+        """Get the base encoding flags used by all encoders."""
+        return [
+            "-pix_fmt", cls.PIXEL_FORMAT,
+            "-movflags", cls.WEB_OPTIMIZATION,
+            "-g", str(cls.KEYFRAME_INTERVAL),
+            "-b:v", cls.TARGET_BITRATE,
+            "-maxrate", cls.MAX_BITRATE,
+            "-bufsize", cls.BUFFER_SIZE,
+            "-profile:v", cls.PROFILE,
+            "-level", cls.LEVEL
+        ]
+
+    @classmethod
+    def get_cpu_encoding_flags(cls) -> List[str]:
+        """Get CPU (libx264) encoding flags."""
+        return [
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", str(cls.CRF_QUALITY)
+        ] + cls.get_base_encoding_flags()
+
+    @classmethod
+    def get_nvenc_encoding_flags(cls) -> List[str]:
+        """Get NVIDIA NVENC encoding flags."""
+        return [
+            "-c:v", "h264_nvenc",
+            "-preset", "p5",
+            "-tune", "hq",
+            "-rc", "vbr_hq",
+            "-cq", str(cls.CRF_QUALITY)
+        ] + cls.get_base_encoding_flags()
+
+    @classmethod
+    def get_amd_encoding_flags(cls) -> List[str]:
+        """Get AMD AMF encoding flags."""
+        return [
+            "-c:v", "h264_amf",
+            "-quality", "balanced",
+            "-qp_i", str(cls.CRF_QUALITY),  # I-frame quality
+            "-qp_p", str(cls.CRF_QUALITY)   # P-frame quality
+        ] + cls.get_base_encoding_flags()
+
+    @classmethod
+    def get_intel_qsv_encoding_flags(cls) -> List[str]:
+        """Get Intel QSV encoding flags."""
+        return [
+            "-c:v", "h264_qsv",
+            "-preset", "veryfast",
+            "-q", str(cls.CRF_QUALITY)
+        ] + cls.get_base_encoding_flags()
+
+# ============================================================================
+# LEGACY COMPATIBILITY FUNCTIONS (use centralized settings)
+# ============================================================================
+
 def get_web_video_encoding_flags() -> List[str]:
     """
-    Returns standardized video encoding flags for web compatibility.
+    LEGACY: Returns standardized video encoding flags for web compatibility.
     These settings ensure excellent quality and universal web browser support.
+    DEPRECATED: Use VideoEncodingSettings.get_cpu_encoding_flags() instead.
     """
-    return [
-        "-c:v", "libx264",        # H.264 codec (universal web support)
-        "-preset", "medium",      # Good balance of speed and quality
-        "-crf", "18",             # Excellent quality for web
-        "-pix_fmt", "yuv420p",   # Web-compatible pixel format
-        "-movflags", "+faststart" # Optimize for web streaming
-    ]
+    return VideoEncodingSettings.get_cpu_encoding_flags()
 
 def _get_video_codec_and_flags() -> List[str]:
     """
     Determines the best video codec and associated flags based on settings.
     Prioritizes GPU codecs if use_gpu_ffmpeg is true.
+    Uses centralized VideoEncodingSettings for consistency.
     """
     if app_settings.get("use_gpu_ffmpeg", False):
         # Try NVIDIA (NVENC)
         try:
             # Check if nvenc is available by running a dummy command
-            # This is a simplified check; a more robust one would parse `ffmpeg -encoders`
             subprocess.run([_get_ffmpeg_exe_path(), "-hide_banner", "-encoders"], capture_output=True, check=True, text=True)
             if "h264_nvenc" in subprocess.run([_get_ffmpeg_exe_path(), "-encoders"], capture_output=True, text=True).stdout:
                 print("Using NVIDIA (NVENC) for GPU acceleration.")
-                return ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr_hq", "-cq", "18"]
+                return VideoEncodingSettings.get_nvenc_encoding_flags()
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass # NVENC not found or ffmpeg not configured for it
 
@@ -363,7 +433,7 @@ def _get_video_codec_and_flags() -> List[str]:
         try:
             if "h264_amf" in subprocess.run([_get_ffmpeg_exe_path(), "-encoders"], capture_output=True, text=True).stdout:
                 print("Using AMD (AMF) for GPU acceleration.")
-                return ["-c:v", "h264_amf", "-quality", "balanced", "-qp_i", "18", "-qp_p", "18"]
+                return VideoEncodingSettings.get_amd_encoding_flags()
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass # AMF not found
 
@@ -371,14 +441,14 @@ def _get_video_codec_and_flags() -> List[str]:
         try:
             if "h264_qsv" in subprocess.run([_get_ffmpeg_exe_path(), "-encoders"], capture_output=True, text=True).stdout:
                 print("Using Intel (QSV) for GPU acceleration.")
-                return ["-c:v", "h264_qsv", "-preset", "veryfast", "-q", "18"]
+                return VideoEncodingSettings.get_intel_qsv_encoding_flags()
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass # QSV not found
 
         print("No suitable GPU encoder found or configured. Falling back to CPU (libx264).")
-    
+
     # Fallback to CPU (libx264) - use web-compatible settings
-    return get_web_video_encoding_flags()
+    return VideoEncodingSettings.get_cpu_encoding_flags()
 
 def _run_ffmpeg_process(command: List[str]) -> Tuple[bool, str, str]:
     """
@@ -695,43 +765,61 @@ def reverse_video(current_video_path: str) -> Tuple[bool, str, Optional[str]]:
 def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) -> Tuple[bool, str, Optional[str]]:
     """
     Remaps video timing by a speed multiplier (e.g., 0.5 for half speed, 2.0 for double speed).
+    This is a proper time remap that changes the speed of the video, not just its length.
     Returns (success, message, output_path_or_none).
     """
     if speed_multiplier <= 0:
         return False, "Speed multiplier must be positive.", None
 
-    ffmpeg_exe = _get_ffmpeg_exe_path()
-    metadata = get_video_metadata(current_video_path)
-    if not metadata or not metadata.get('fps'):
-        return False, "Could not get original video FPS for remapping.", None
-    
-    original_fps = metadata['fps']
-    
-    # setpts changes presentation timestamps. 1/speed_multiplier for setpts.
-    # e.g. speed_multiplier = 2 (double speed) => setpts=0.5*PTS
-    # e.g. speed_multiplier = 0.5 (half speed) => setpts=2*PTS
-    pts_factor = 1.0 / speed_multiplier
-    
-    # atempo filter for audio, range 0.5-100.0. Chain for larger changes.
-    # For simplicity, handling common cases. More complex audio speed adjustment might be needed.
-    audio_filter = f"atempo={speed_multiplier}"
-    if speed_multiplier > 2.0: # Chain atempo for > 2x speed up
-        audio_filter = f"atempo=2.0,atempo={speed_multiplier/2.0}" # Example for up to 4x
-    elif speed_multiplier < 0.5: # Chain atempo for < 0.5x slow down
-         audio_filter = f"atempo=0.5,atempo={speed_multiplier/0.5}" # Example for down to 0.25x
+    # If speed is effectively 1.0, do nothing.
+    if math.isclose(speed_multiplier, 1.0):
+        return True, "Speed is 1.0, no remapping needed.", current_video_path
 
+    ffmpeg_exe = _get_ffmpeg_exe_path()
+
+    # Video filter: setpts changes presentation timestamps to speed up/slow down.
+    # A factor < 1.0 speeds up, > 1.0 slows down.
+    pts_factor = 1.0 / speed_multiplier
+    video_filter = f"setpts={pts_factor:.4f}*PTS"
+
+    # Audio filter: atempo changes audio speed. Valid range is [0.5, 100.0].
+    # We need to chain filters if the desired speed is outside this range.
+    speed = speed_multiplier
+    atempo_filters = []
+    # The UI slider is limited to 0.1-2.0, but we write robust code for wider range.
+    while speed > 100.0:
+        atempo_filters.append("atempo=100.0")
+        speed /= 100.0
+    # Chaining for slowdown must be done carefully.
+    temp_speed = speed
+    while temp_speed < 0.5:
+        atempo_filters.append("atempo=0.5")
+        temp_speed /= 0.5
+    atempo_filters.append(f"atempo={temp_speed:.4f}")
 
     temp_output_path = _get_temp_output_path(current_video_path, "remapped")
+
     command = [
         ffmpeg_exe, "-y", "-i", current_video_path,
-        "-vf", f"setpts={pts_factor}*PTS",
-        "-af", audio_filter,
-        "-r", str(original_fps), # Keep original FPS, duration changes
-        *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        # Audio codec might need to be specified if not aac, or if issues with atempo
-        "-c:a", "aac", "-b:a", "128k", 
-        temp_output_path
+        "-vf", video_filter,
     ]
+
+    # Add audio filter only if it was generated and is not trivial
+    if atempo_filters and not math.isclose(speed_multiplier, 1.0):
+        audio_filter_str = ",".join(atempo_filters)
+        command.extend(["-af", audio_filter_str])
+        # Re-encoding audio is necessary when changing speed
+        command.extend(["-c:a", "aac", "-b:a", "128k"])
+    else:
+        # If no audio filter, just copy the audio stream
+        command.extend(["-c:a", "copy"])
+
+    # Add the rest of the command. Note: -r is removed as it can conflict with setpts.
+    command.extend([
+        *_get_video_codec_and_flags(),
+        temp_output_path
+    ])
+
     success, _, stderr = _run_ffmpeg_process(command)
     if success and os.path.exists(temp_output_path):
         return True, f"Video time remapped by factor {speed_multiplier}.", temp_output_path
@@ -929,3 +1017,56 @@ def clean_video_from_overlay(
     else:
         if os.path.exists(temp_output_path): os.remove(temp_output_path) # Clean up
         return False, f"FFmpeg error during clean crop: {stderr.strip()}", None
+
+
+def find_nearest_keyframe_before(video_path: str, target_time: float) -> Tuple[bool, float, str]:
+    """
+    Finds the nearest keyframe (I-frame) at or before the target time using ffprobe.
+    This is much more reliable than parsing ffmpeg's stderr.
+    """
+    try:
+        # ffprobe is generally in the same directory as ffmpeg
+        ffmpeg_exe = _get_ffmpeg_exe_path()
+        ffprobe_exe = ffmpeg_exe.replace("ffmpeg", "ffprobe")
+
+        # Command to get timestamps of all keyframes
+        command = [
+            ffprobe_exe,
+            "-v", "error",
+            "-skip_frame", "nokey",
+            "-select_streams", "v:0",
+            "-show_entries", "frame=pkt_pts_time",
+            "-of", "csv=p=0",
+            video_path
+        ]
+
+        # Run ffprobe
+        process = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True, creationflags=subprocess.CREATE_NO_WINDOW if
+                                   os.name == 'nt' else 0)
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            return False, 0.0, f"ffprobe failed: {stderr.strip()}"
+
+        # Parse the output to get a list of keyframe times
+        # The output is a simple list of timestamps, one per line.
+        keyframe_times = [float(t) for t in stdout.strip().split() if t]
+        if not keyframe_times:
+            # If no keyframes are found (e.g., for a single-image video), treat frame 0 as the only keyframe.
+            return True, 0.0, ""
+
+        # Find the best keyframe at or before the target time
+        best_keyframe_time = 0.0
+        # The list is already sorted, so we can iterate and find the last one <= target_time
+        for kt in keyframe_times:
+            if kt <= target_time:
+                best_keyframe_time = kt
+            else:
+                break # Stop once we pass the target time
+
+        return True, best_keyframe_time, ""
+
+    except Exception as e:
+        return False, 0.0, f"Error finding keyframe with ffprobe: {str(e)}"
+

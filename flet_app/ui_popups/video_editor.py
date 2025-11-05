@@ -484,3 +484,354 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
                 print(f"Cleaned up mask file: {mask_image_path}")
             except Exception as e_del:
                 print(f"Error deleting mask file {mask_image_path}: {e_del}")
+
+def split_selected_videos_into_chunks(page: ft.Page, seconds_per_chunk: int, thumbnail_update_callback: Optional[Callable] = None, force_reencode: bool = False):
+    """
+    Splits selected videos into chunks of specified seconds.
+    Uses stream copy for fast processing and updates thumbnails afterward.
+    """
+    print(f"Starting chunking process with {seconds_per_chunk} seconds per chunk")
+
+    # Import needed functions
+    try:
+        from flet_app.ui.dataset_manager.dataset_layout_tab import video_files_list, thumbnails_grid_ref
+        from flet_app.ui.dataset_manager.dataset_actions import _get_selected_filenames
+        print(f"Imported video_files_list: {video_files_list}")
+    except ImportError as e:
+        print(f"Import error: {e}")
+        if page: page.snack_bar = ft.SnackBar(ft.Text("Error: Could not access selected videos."), open=True); page.update()
+        return
+
+    if seconds_per_chunk <= 0:
+        print(f"Invalid seconds value: {seconds_per_chunk}")
+        if page: page.snack_bar = ft.SnackBar(ft.Text("Please enter a valid number of seconds (> 0)."), open=True); page.update()
+        return
+
+    # Get selected video filenames from thumbnail grid
+    selected_filenames = []
+    if thumbnails_grid_ref and thumbnails_grid_ref.current:
+        selected_filenames = _get_selected_filenames(thumbnails_grid_ref.current)
+        print(f"Selected filenames: {selected_filenames}")
+
+    if not selected_filenames:
+        print("No videos selected")
+        if page:
+            page.snack_bar = ft.SnackBar(
+                ft.Text("❌ No videos selected. Please select videos in the main dataset view before using 'Slice to'.\n\n💡 If you want to split the current video you're viewing, use the 'Split' button inside the video player dialog instead."),
+                open=True,
+                duration=10000  # Show for 10 seconds
+            );
+            page.update()
+        return
+
+    # Get selected video paths
+    selected_videos = []
+    videos_list = video_files_list.get("value", [])
+    print(f"Available videos in list: {len(videos_list)}")
+
+    for video_path in videos_list:
+        video_name = os.path.basename(video_path)
+        if video_name in selected_filenames:
+            selected_videos.append(video_path)
+            print(f"Found selected video: {video_name}")
+
+    print(f"Total selected videos to process: {len(selected_videos)}")
+
+    if not selected_videos:
+        print("No valid selected videos found")
+        if page: page.snack_bar = ft.SnackBar(ft.Text("No valid selected videos found."), open=True); page.update()
+        return
+
+    # Process each selected video
+    total_processed = 0
+    for video_path in selected_videos:
+        try:
+            print(f"Processing video: {video_path}")
+            success, result_msg = _split_single_video_into_chunks(video_path, seconds_per_chunk, force_reencode)
+            print(f"Result for {video_path}: success={success}, msg={result_msg}")
+
+            if success:
+                total_processed += 1
+                if page: page.snack_bar = ft.Text(f"Chunked: {os.path.basename(video_path)} - {result_msg}"); page.update()
+            else:
+                if page: page.snack_bar = ft.Text(f"Failed to chunk {os.path.basename(video_path)}: {result_msg}"); page.update()
+        except Exception as e:
+            print(f"Error processing {os.path.basename(video_path)}: {e}")
+            if page: page.snack_bar = ft.Text(f"Error processing {os.path.basename(video_path)}: {e}"); page.update()
+
+    # Final status and thumbnail update
+    if total_processed > 0:
+        print(f"Successfully processed {total_processed} videos")
+        if page: page.snack_bar = ft.SnackBar(ft.Text(f"Successfully chunked {total_processed} video(s)!"), open=True); page.update()
+
+        # Update thumbnails
+        if thumbnail_update_callback:
+            print("Calling thumbnail update callback")
+            thumbnail_update_callback()
+        else:
+            print("No thumbnail update callback provided")
+    else:
+        print("No videos were successfully chunked")
+        if page: page.snack_bar = ft.SnackBar(ft.Text("No videos were successfully chunked."), open=True); page.update()
+
+def _split_single_video_into_chunks(video_path: str, seconds_per_chunk: int, force_reencode: bool = False) -> Tuple[bool, str]:
+    """
+    Splits a single video into chunks of specified seconds using efficient method without re-encoding.
+    Returns (success, message).
+    """
+    try:
+        from . import video_player_utils as vpu
+
+        # Get video metadata
+        metadata = vpu.get_video_metadata(video_path)
+        if not metadata or not metadata.get('fps') or not metadata.get('total_frames'):
+            return False, "Could not get video metadata"
+
+        # Calculate duration from fps and frame count
+        total_duration = metadata['total_frames'] / metadata['fps']
+
+        if total_duration <= seconds_per_chunk:
+            return False, "Video is shorter than specified chunk size"
+
+        # Calculate chunk count - always include a chunk for any remaining time
+        full_chunks = int(total_duration // seconds_per_chunk)
+        remainder_duration = total_duration % seconds_per_chunk
+        
+        if remainder_duration > 0:
+            chunk_count = full_chunks + 1
+        else:
+            chunk_count = full_chunks
+            # If the video divides evenly, we still need at least one chunk
+            if chunk_count == 0:
+                chunk_count = 1
+
+        # Prepare output directory
+        video_dir = os.path.dirname(video_path)
+        video_name = os.path.basename(video_path)
+        base_name, ext = os.path.splitext(video_name)
+        temp_dir = os.path.join(video_dir, "temp_processing")
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # Split video into chunks using the efficient method without re-encoding
+        chunk_files = []
+        
+        from .video_player_utils import _get_ffmpeg_exe_path
+        ffmpeg_exe = _get_ffmpeg_exe_path()
+        
+        for i in range(chunk_count):
+            start_time = i * seconds_per_chunk
+            
+            # Calculate end time for this chunk
+            if i == chunk_count - 1:  # Last chunk - go to end of video
+                # Calculate the actual duration for the last chunk (may include small remainder)
+                actual_duration = total_duration - start_time
+                command = [
+                    ffmpeg_exe, "-y",
+                    "-ss", str(start_time),  # Seek before input for speed (may snap to keyframe)
+                    "-i", video_path,
+                    "-t", str(actual_duration),
+                    "-c", "copy",  # Copy both audio and video streams
+                    "-avoid_negative_ts", "make_zero",
+                    "-fflags", "+genpts"
+                ]
+            else:  # Not the last chunk - cut for seconds_per_chunk duration
+                command = [
+                    ffmpeg_exe, "-y",
+                    "-ss", str(start_time),  # Seek before input for speed (may snap to keyframe)
+                    "-i", video_path,
+                    "-t", str(seconds_per_chunk),
+                    "-c", "copy",  # Copy both audio and video streams
+                    "-avoid_negative_ts", "make_zero",
+                    "-fflags", "+genpts"
+                ]
+            
+            # Create chunk filename with zero-padding for chronological order
+            chunk_filename = f"{base_name}_chunk_{str(i+1).zfill(3)}{ext}"
+            chunk_path = os.path.join(temp_dir, chunk_filename)
+            command.append(chunk_path)
+            
+            # Execute FFmpeg command
+            if i == chunk_count - 1:
+                actual_duration = total_duration - start_time
+                print(f"Chunk {i+1}: Cutting from {start_time:.2f}s for {actual_duration:.2f}s (to end)")
+            else:
+                print(f"Chunk {i+1}: Cutting from {start_time:.2f}s for {seconds_per_chunk:.2f}s")
+                
+            success, stdout, stderr = vpu._run_ffmpeg_process(command)
+            
+            if not success or not os.path.exists(chunk_path):
+                error_msg = f"Failed to create chunk {i+1}: FFmpeg error"
+                if stderr:
+                    error_msg += f" - {stderr.strip()}"
+                return False, error_msg
+
+            chunk_files.append(chunk_path)
+
+        # Move chunks to final directory and validate each
+        final_chunk_paths = []
+        for chunk_path in chunk_files:
+            # Validate the chunk
+            if not _validate_video_chunk(chunk_path):
+                print(f"Warning: Chunk {chunk_path} failed validation, skipping...")
+                continue
+
+            final_path = os.path.join(video_dir, os.path.basename(chunk_path))
+            if os.path.exists(final_path):
+                # If file exists, add counter
+                base, ext = os.path.splitext(final_path)
+                counter = 1
+                while os.path.exists(f"{base}_{counter}{ext}"):
+                    counter += 1
+                final_path = f"{base}_{counter}{ext}"
+
+            shutil.move(chunk_path, final_path)
+            final_chunk_paths.append(final_path)
+
+            # Update video info for new chunk
+            vpu.update_video_info_json(final_path)
+
+        # Clean up temp directory
+        try:
+            # Remove all remaining files in temp directory
+            for file in os.listdir(temp_dir):
+                file_path = os.path.join(temp_dir, file)
+                os.remove(file_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
+
+        if not final_chunk_paths:
+            return False, "No valid chunks were created"
+
+        return True, f"Created {len(final_chunk_paths)} chunks"
+
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+
+def _validate_video_chunk(chunk_path: str) -> bool:
+    """
+    Validates that a video chunk is playable and has proper structure.
+    Returns True if the chunk is valid, False otherwise.
+    """
+    if not os.path.exists(chunk_path) or os.path.getsize(chunk_path) == 0:
+        return False
+
+    try:
+        import cv2
+        cap = cv2.VideoCapture(chunk_path)
+        if not cap.isOpened():
+            print(f"Video validation failed: could not open {chunk_path}")
+            return False
+
+        # Check if we can read at least one frame
+        ret, frame = cap.read()
+        if not ret:
+            print(f"Video validation failed: could not read first frame from {chunk_path}")
+            cap.release()
+            return False
+
+        # Check if we can get the video properties
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        cap.release()
+
+        # Validate that the properties are reasonable
+        if fps <= 0 or width <= 0 or height <= 0:
+            print(f"Video validation failed: invalid properties for {chunk_path} (fps={fps}, w={width}, h={height})")
+            return False
+
+        # Check if frame count is reasonable for the duration (min 1 frame for very short clips)
+        if frame_count <= 0:
+            print(f"Video validation failed: no frames in {chunk_path}")
+            return False
+
+        # Additional check: try to read a few more frames to ensure it's not corrupted
+        cap = cv2.VideoCapture(chunk_path)
+        frame_count_check = 0
+        for _ in range(min(10, frame_count)):  # Check up to 10 frames
+            ret, _ = cap.read()
+            if not ret:
+                break
+            frame_count_check += 1
+        cap.release()
+
+        # If we couldn't read any additional frames after the first one, it's likely corrupted
+        if frame_count_check < 2 and frame_count > 10:  # If video should have more frames but we can't read them
+            print(f"Video validation failed: could only read {frame_count_check} frames from {chunk_path} (expected more)")
+            return False
+
+        # Additional validation: Check if the video has proper duration based on frame count and fps
+        expected_duration = frame_count / fps
+        print(f"Video validation: {chunk_path} - FPS: {fps}, Frames: {frame_count}, Expected duration: {expected_duration:.2f}s")
+
+        return True
+
+    except Exception as e:
+        print(f"Video validation error for {chunk_path}: {e}")
+        return False
+
+
+def concatenate_video_chunks(video_dir: str, base_name: str, ext: str, output_path: str) -> Tuple[bool, str]:
+    """
+    Concatenates video chunks using the efficient method without re-encoding.
+    Creates a text file with file entries and uses FFmpeg concat demuxer.
+    Returns (success, message).
+    """
+    try:
+        from . import video_player_utils as vpu
+        from .video_player_utils import _get_ffmpeg_exe_path
+        ffmpeg_exe = _get_ffmpeg_exe_path()
+        
+        # Find all chunk files that match the pattern
+        chunk_files = []
+        for filename in sorted(os.listdir(video_dir)):
+            if filename.startswith(f"{base_name}_chunk_") and filename.endswith(ext):
+                chunk_path = os.path.join(video_dir, filename)
+                if os.path.exists(chunk_path):
+                    chunk_files.append(chunk_path)
+        
+        if not chunk_files:
+            return False, "No chunk files found to concatenate"
+        
+        # Create a temporary list file for FFmpeg
+        list_file_path = os.path.join(video_dir, f"{base_name}_concat_list.txt")
+        with open(list_file_path, 'w', encoding='utf-8') as list_file:
+            for chunk_path in chunk_files:
+                # Use forward slashes or escape backslashes for FFmpeg
+                escaped_path = chunk_path.replace("\\", "/")
+                list_file.write(f"file '{escaped_path}'\n")
+        
+        # FFmpeg concat command using the concat demuxer (no re-encoding)
+        concat_command = [
+            ffmpeg_exe,
+            "-f", "concat",
+            "-safe", "0",
+            "-i", list_file_path,
+            "-c", "copy",  # Copy streams without re-encoding
+            "-avoid_negative_ts", "make_zero",
+            output_path
+        ]
+        
+        print(f"Concatenating {len(chunk_files)} chunks to {output_path}")
+        success, stdout, stderr = vpu._run_ffmpeg_process(concat_command)
+        
+        # Clean up the temporary list file
+        if os.path.exists(list_file_path):
+            os.remove(list_file_path)
+        
+        if success and os.path.exists(output_path):
+            # Update video info for the concatenated file
+            vpu.update_video_info_json(output_path)
+            return True, f"Successfully concatenated {len(chunk_files)} chunks into {os.path.basename(output_path)}"
+        else:
+            error_msg = "Failed to concatenate chunks"
+            if stderr:
+                error_msg += f": {stderr.strip()}"
+            return False, error_msg
+
+    except Exception as e:
+        return False, f"Error during concatenation: {str(e)}"

@@ -13,6 +13,8 @@ import shutil
 import time
 
 from flet_app.settings import settings
+# Import centralized video encoding settings
+from flet_app.ui_popups import video_player_utils as vpu
 from flet_app.ui_popups.delete_caption_dialog import show_delete_caption_dialog
 from flet_app.ui.dataset_manager.dataset_utils import (
     load_dataset_config, save_dataset_config,
@@ -279,34 +281,59 @@ async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS
             e.page.update()
         return
 
-    ffmpeg_exe = settings.FFMPEG_PATH
-    ffprobe_exe = ""
-    if os.path.isabs(ffmpeg_exe) or os.path.sep in ffmpeg_exe:
-        ffmpeg_dir = os.path.dirname(ffmpeg_exe)
-        ffprobe_basename = "ffprobe.exe" if ffmpeg_exe.lower().endswith(".exe") else "ffprobe"
-        ffprobe_exe = os.path.join(ffmpeg_dir, ffprobe_basename)
-    else: # Assumed to be a command in PATH
-        ffprobe_exe = "ffprobe.exe" if ffmpeg_exe.lower().endswith(".exe") else "ffprobe"
+    # Import the proper FFmpeg path resolution function
+    try:
+        from flet_app.ui_popups.video_player_utils import _get_ffmpeg_exe_path
+        ffmpeg_exe = _get_ffmpeg_exe_path()
+
+        # Determine ffprobe path based on ffmpeg path
+        if os.path.isabs(ffmpeg_exe):
+            ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+            ffprobe_exe = os.path.join(ffmpeg_dir, "ffprobe" + (".exe" if os.name == "nt" else ""))
+        else:
+            ffprobe_exe = "ffprobe"
+    except ImportError:
+        # Fallback to settings if import fails
+        ffmpeg_exe = settings.FFMPEG_PATH
+        if os.path.isabs(ffmpeg_exe) or os.path.sep in ffmpeg_exe:
+            ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+            ffprobe_basename = "ffprobe.exe" if ffmpeg_exe.lower().endswith(".exe") else "ffprobe"
+            ffprobe_exe = os.path.join(ffmpeg_dir, ffprobe_basename)
+        else:
+            ffprobe_exe = "ffprobe"
 
     video_exts = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.flv', '.gif']
     processed_files = 0
     failed_files = 0
     skipped_files = 0
 
-    # Show initial processing message
-    if e.page:
-        e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Processing videos in {current_dataset_name} to {target_fps_float} FPS..."), open=True)
-        e.page.update()
+    # Get all video files in dataset
+    all_video_files_in_dataset = [f for f in os.listdir(dataset_folder_path) if os.path.splitext(f)[1].lower() in video_exts]
 
-    video_files_in_dataset = [f for f in os.listdir(dataset_folder_path) if os.path.splitext(f)[1].lower() in video_exts]
+    # Get selected videos from thumbnails
+    selected_files_from_thumbnails = _get_selected_filenames(thumbnails_grid_ref_obj.current)
 
-    if not video_files_in_dataset:
+    if selected_files_from_thumbnails:
+        print(f"[DEBUG] Processing {len(selected_files_from_thumbnails)} selected videos for FPS change.")
+        # Ensure selected files are video files to prevent processing non-video files
+        video_files_to_process = sorted([f for f in selected_files_from_thumbnails if f in all_video_files_in_dataset])
         if e.page:
-            e.page.snack_bar = ft.SnackBar(content=ft.Text("No video files found in the dataset."), open=True)
+            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Processing {len(video_files_to_process)} selected videos in {current_dataset_name} to {target_fps_float} FPS..."), open=True)
+            e.page.update()
+    else:
+        print("[DEBUG] No videos selected, processing all videos in dataset.")
+        video_files_to_process = sorted(all_video_files_in_dataset)
+        if e.page:
+            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Processing all videos in {current_dataset_name} to {target_fps_float} FPS..."), open=True)
+            e.page.update()
+
+    if not video_files_to_process:
+        if e.page:
+            e.page.snack_bar = ft.SnackBar(content=ft.Text("No video files found to process."), open=True)
             e.page.update()
         return
 
-    for video_file_name in video_files_in_dataset:
+    for video_file_name in video_files_to_process:
         input_video_path = os.path.join(dataset_folder_path, video_file_name)
         base, ext = os.path.splitext(video_file_name)
         temp_output_video_path = os.path.join(dataset_folder_path, f"{base}_tempfps{ext}")
@@ -346,11 +373,11 @@ async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS
                 skipped_files += 1
                 continue
 
-            # Change FPS using ffmpeg with stream copy and no audio
+            # Change FPS using ffmpeg with re-encoding (required for actual FPS change)
             ffmpeg_cmd = [
                 ffmpeg_exe, "-y", "-i", input_video_path,
                 "-r", str(target_fps_float),
-                "-c:v", "copy",           # Fast video stream copy (no re-encoding)
+                *vpu.VideoEncodingSettings.get_cpu_encoding_flags(),
                 "-an",                    # No audio (faster processing)
                 temp_output_video_path
             ]

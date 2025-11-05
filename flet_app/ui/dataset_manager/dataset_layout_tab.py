@@ -189,7 +189,7 @@ def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView | None
         folders_exist = get_dataset_folders() is not None and len(get_dataset_folders()) > 0
         grid_control.controls.append(ft.Text("Select a dataset to view media." if folders_exist else "No datasets found."))
     else:
-        thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, DATASETS_TYPE["value"])
+        thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, DATASETS_TYPE["value"], force_refresh)
         video_files_list["value"] = list(thumbnail_paths_map.keys())
         dataset_captions = load_dataset_captions(current_selection)
 
@@ -413,10 +413,44 @@ def _build_latent_test_section(update_thumbnails_func):
 
 def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield: ft.TextField, rename_files_button: ft.ElevatedButton,
                          caption_to_txt_button: ft.ElevatedButton,caption_to_json_button:  ft.ElevatedButton):
+    # Create slicing controls in same style as change FPS
+    slice_seconds_textfield = create_textfield(
+        "seconds",
+        "60",
+        expand=True,
+        hint_text="seconds",
+        col=4
+    )
+
+    # Add re-encoding checkbox
+    reencode_checkbox = ft.Checkbox(
+        label="Re-encode",
+        value=False,
+        tooltip="Enable re-encoding for better compatibility (slower but more reliable)",
+        label_style=ft.TextStyle(size=12)
+    )
+
+    slice_to_button = create_styled_button(
+        "Slice to:",
+        tooltip="Slice selected videos into chunks",
+        expand=True,
+        col=8,
+        on_click=lambda e: _on_slice_to_click(e, slice_seconds_textfield, reencode_checkbox)
+    )
+
+    # Create slice section following the same pattern as change_fps_section
+    slice_section = ft.ResponsiveRow([
+        ft.Container(content=slice_to_button, col=6,),
+        ft.Container(content=slice_seconds_textfield, col=4,),
+        ft.Container(content=reencode_checkbox, col=2,),
+    ], spacing=5)
+
     return build_expansion_tile(
         title="Batch files",
         controls=[
             change_fps_section,
+            ft.Divider(thickness=1),
+            slice_section,
             ft.Divider(thickness=1),
             rename_textfield,
             rename_files_button,
@@ -446,6 +480,52 @@ def _build_bottom_status_bar():
     )
     bottom_app_bar_ref = bottom_app_bar
     return bottom_app_bar
+
+# ======================================================================================
+# Event Handlers
+# ======================================================================================
+
+def _on_slice_to_click(e: ft.ControlEvent, seconds_textfield: ft.TextField, reencode_checkbox: ft.Checkbox):
+    """Handle Slice to button click"""
+    # Debug: Show that the function is being called
+    print("Slice to button clicked!")
+
+    try:
+        seconds_value = int(seconds_textfield.value or "60")
+        reencode_enabled = reencode_checkbox.value
+        print(f"Seconds value: {seconds_value}, Re-encode: {reencode_enabled}")
+
+        # Show immediate feedback
+        mode_text = "re-encoding" if reencode_enabled else "smart stream copy"
+        e.page.snack_bar = ft.SnackBar(ft.Text(f"Processing chunking for {seconds_value} seconds ({mode_text})..."), open=True)
+        e.page.update()
+
+        # Create thumbnail update callback
+        def thumbnail_update_callback():
+            """Update thumbnails after chunking"""
+            try:
+                from .unified_popup_dialog import update_thumbnails_callback_factory
+                thumbnail_func = update_thumbnails_callback_factory(e.page)
+                thumbnail_func()
+            except Exception:
+                # Fallback: direct update
+                update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+
+        # Import and call the chunking function
+        from flet_app.ui_popups import video_editor
+
+        def run_chunking():
+            video_editor.split_selected_videos_into_chunks(e.page, seconds_value, thumbnail_update_callback, reencode_enabled)
+
+        e.page.run_thread(run_chunking)
+
+    except ValueError:
+        e.page.snack_bar = ft.SnackBar(ft.Text("Please enter a valid number of seconds."), open=True)
+        e.page.update()
+    except Exception as ex:
+        print(f"Error in slice click: {ex}")
+        e.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {str(ex)}"), open=True)
+        e.page.update()
 
 # ======================================================================================
 # Main GUI Layout Builder (Assembles the sections)

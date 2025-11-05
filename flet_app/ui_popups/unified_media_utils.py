@@ -57,47 +57,82 @@ def _is_web_platform(page: Optional[ft.Page]) -> bool:
 
 def _build_video_media_resource(page: Optional[ft.Page], video_path: str) -> str:
     if not video_path:
-        return video_path
+        return ""
+    
+    # Normalize path separators for consistency
     normalized_path = video_path.replace("\\", "/")
-    if _is_web_platform(page) and os.path.exists(video_path):
-        try:
-            mime_type, _ = mimetypes.guess_type(video_path)
-            mime_type = mime_type or "video/mp4"
-            with open(video_path, "rb") as f:
-                encoded = base64.b64encode(f.read()).decode("utf-8")
-            return f"data:{mime_type};base64,{encoded}"
-        except Exception:
-            pass
-    return normalized_path
+    
+    # Find the 'workspace' directory in the path
+    try:
+        # Split the path at the 'workspace' directory and take the part after it
+        # This handles cases like '.../Dpipe/workspace/videos/file.mp4'
+        # It will result in 'videos/file.mp4'
+        relative_path = normalized_path.split("workspace/", 1)[1]
+        return relative_path
+    except IndexError:
+        # If 'workspace/' is not in the path, it's not a valid asset, return original path
+        # The video player will likely fail, which is the correct behavior
+        return normalized_path
 
 
 def make_video_control(path: str, width: int, height: int, page: Optional[ft.Page] = None):
     """Create a simple video control. Uses filesystem path; no extra controls."""
+    print(f"DEBUG: Creating video control for path: {path}, width: {width}, height: {height}")
+    
     try:
-        from flet_video.video import Video, VideoMedia
-    except Exception:
+        import flet_video as ftv
+        print("DEBUG: Successfully imported flet_video as ftv")
+    except ImportError as e:
+        print(f"DEBUG: Failed to import flet_video as ftv: {e}")
         # Fallback: show a message if video control cannot be imported
         return ft.Container(
-            content=ft.Text("Video module not available"),
+            content=ft.Text("flet_video module not available"),
             alignment=ft.alignment.center,
             width=width,
             height=height,
         )
+    
+    # Use the same approach as main.py: process the path to work with asset serving
     resource = _build_video_media_resource(page, path)
-    # Debug print removed
-    # On web, enforce muted playback to avoid autoplay restrictions
-    volume = 0.0 if _is_web_platform(page) else (100.0 if settings.get("enable_audio", False) else 0.0)
-    # Prefer built-in loop mode to ensure reliable looping on web
-    return Video(
-        playlist=[VideoMedia(resource=resource)],
-        autoplay=True,
-        width=width,
-        height=height,
-        expand=False,
-        show_controls=False,
-        playlist_mode="loop",
-        volume=volume,
-    )
+    print(f"DEBUG: Processed resource path: {resource}")
+    
+    try:
+        # Create video media using the same pattern as main.py (direct path argument)
+        video_media = ftv.VideoMedia(resource)
+        print(f"DEBUG: Successfully created VideoMedia with resource: {resource}")
+    except Exception as e:
+        print(f"DEBUG: Failed to create VideoMedia with resource '{resource}': {e}")
+        return ft.Container(
+            content=ft.Text(f"Failed to create video: {e}"),
+            alignment=ft.alignment.center,
+            width=width,
+            height=height,
+        )
+    
+    try:
+        # Use the same settings as main.py - important: volume=100, autoplay=False
+        video_player = ftv.Video(
+            playlist=[video_media],
+            aspect_ratio=16 / 9,
+            playlist_mode=ftv.PlaylistMode.SINGLE,
+            autoplay=True,  # Autoplay enabled by user request
+            volume=0,       # Muted by default by user request
+            width=width,
+            height=height,
+            expand=False,
+            show_controls=False,
+            fill_color=ft.Colors.BLACK,
+        )
+        print(f"DEBUG: Successfully created Video player")
+        return video_player
+    except Exception as e:
+        print(f"DEBUG: Failed to create Video player: {e}")
+        return ft.Container(
+            content=ft.Text(f"Failed to create video player: {e}"),
+            alignment=ft.alignment.center,
+            width=width,
+            height=height,
+        )
 
 
 def make_video_preview_control(path: str, width: int, height: int) -> ft.Image:
@@ -121,3 +156,5 @@ def make_video_preview_control(path: str, width: int, height: int) -> ft.Image:
         return ft.Image(src=None, src_base64=encoded, width=width, height=height, fit=ft.ImageFit.CONTAIN)
     else:
         return ft.Image(src=None, src_base64=None, width=width, height=height, fit=ft.ImageFit.CONTAIN)
+
+

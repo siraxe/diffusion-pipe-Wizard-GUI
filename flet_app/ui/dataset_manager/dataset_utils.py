@@ -9,6 +9,9 @@ import subprocess # Keep for subprocess if any remain
 import shutil # Keep for shutil if any remain
 import time # Keep for time if any remain
 
+# Import centralized video encoding settings
+from flet_app.ui_popups import video_player_utils as vpu
+
 # ======================================================================================
 # Data & Utility Functions (File I/O, data parsing, validation)
 # ======================================================================================
@@ -313,7 +316,7 @@ def get_media_files(dataset_path, dataset_type):
     return media_files
 
 
-def get_videos_and_thumbnails(dataset_name, dataset_type):
+def get_videos_and_thumbnails(dataset_name, dataset_type, force_metadata_refresh=False):
     """
     Gets media files and generates/retrieves thumbnails for a dataset.
     Unified handling: all datasets live under DATASETS_DIR; thumbnails under THUMBNAILS_BASE_DIR.
@@ -367,13 +370,13 @@ def get_videos_and_thumbnails(dataset_name, dataset_type):
         is_image_file = ext in [e.lower() for e in settings.IMAGE_EXTENSIONS]
 
         # Get media dimensions/info if not already in media_info or if it's an image file
-        if media_name not in media_info or is_image_file:
+        if media_name not in media_info or is_image_file or force_metadata_refresh or (not is_image_file and "fps" not in media_info.get(media_name, {})):
             try:
                 if is_image_file:
                     img = cv2.imread(media_path)
                     if img is not None:
                         height, width = img.shape[:2]
-                        media_info[media_name] = {"width": width, "height": height, "frames": 1}
+                        media_info[media_name] = {"width": width, "height": height, "frames": 1, "fps": 0}
                         info_changed = True
                         os.makedirs(dataset_path, exist_ok=True)
                     else:
@@ -384,8 +387,11 @@ def get_videos_and_thumbnails(dataset_name, dataset_type):
                         width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
                         height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
                         frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
+                        fps = vid.get(cv2.CAP_PROP_FPS)
+                        # Round FPS to 2 decimal places for cleaner display
+                        fps = round(fps, 2) if fps > 0 else 0
                         if width > 0 and height > 0 and frames >= 0:
-                            media_info[media_name] = {"width": width, "height": height, "frames": frames}
+                            media_info[media_name] = {"width": width, "height": height, "frames": frames, "fps": fps}
                             info_changed = True
                     vid.release()
             except Exception as e:
@@ -643,9 +649,7 @@ async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, dataset_
             ffmpeg_path, "-y",
             "-i", video_file,
             "-vf", f"fps={target_fps_float}",
-            "-c:v", "libx264", # Or user-defined codec
-            "-preset", "medium", # Or user-defined
-            "-crf", "18", # Or user-defined
+            *vpu.VideoEncodingSettings.get_cpu_encoding_flags(),
             "-c:a", "aac", # Or user-defined
             "-b:a", "128k", # Or user-defined
             output_file

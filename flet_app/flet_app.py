@@ -163,6 +163,14 @@ if __name__ == "__main__":
 
     view = ft.AppView.WEB_BROWSER if open_browser else None
 
+    # Make the workspace_dir path absolute to avoid CWD issues
+    try:
+        project_root = Path(__file__).resolve().parent.parent
+        workspace_path = str(project_root / "workspace")
+    except Exception:
+        # Fallback to relative path if resolution fails
+        workspace_path = "workspace"
+
     local_url = f"http://localhost:{port}"
     bound_url = f"http://localhost:{port}"
     print("Flet server starting (DPipe GUI Wizard)...")
@@ -198,4 +206,5 @@ if __name__ == "__main__":
         # Then run the main app
         main(page)
 
-    ft.app(target=app_wrapper, host=host, port=port, view=view)
+    ft.app(target=app_wrapper, host=host, port=port, view=view, assets_dir=workspace_path)
+
