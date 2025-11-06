@@ -916,12 +916,6 @@ def open_unified_popup_dialog(
                         _hide_context_menu()
                         if not is_img:
                             page.run_thread(video_editor.on_reverse, page, path, items, None)
-
-# migrated to unified_context_menu: flip_btn = create_styled_button("Flip Horizontal", on_click=_action_flip, button_style=BTN_STYLE2)
-# migrated to unified_context_menu: rot_plus_btn = create_styled_button("Rotate +90", on_click=_action_rot_plus, button_style=BTN_STYLE2)
-# migrated to unified_context_menu: rot_minus_btn = create_styled_button("Rotate -90", on_click=_action_rot_minus, button_style=BTN_STYLE2)
-# migrated to unified_context_menu: reverse_btn = create_styled_button("Reverse", on_click=_action_reverse, button_style=BTN_STYLE2, disabled=is_img)
-
                     context_menu_ctrl = build_context_menu(
                         is_image=is_img,
                         page=page,
@@ -929,12 +923,31 @@ def open_unified_popup_dialog(
                         media_list=items,
                         on_close=_hide_context_menu, on_refresh=refresh)
                     # Insert into media stack later
-                # Position within media area; fall back to center
-                cx = lx if isinstance(lx, (int, float)) else viewer_w/2
-                cy = ly if isinstance(ly, (int, float)) else viewer_h/2
-                # Clamp
-                cx = max(0, min(cx, viewer_w-120))
-                cy = max(0, min(cy, viewer_h-60))
+                # Position context menu differently based on source
+                # For 3 dots button click, position under the button with offset parameters
+                # Detect if this is from _open_context_menu_at (3 dots menu) by checking if coordinates are specific values
+                if lx is not None and ly is not None and (
+                    # Coordinates from 3 dots button click (where we set specific position)
+                    (abs(lx - (viewer_w - 60)) < 30 and abs(ly - 20) < 30) or 
+                    (abs(lx - (viewer_w - 40)) < 30 and abs(ly - 20) < 30) or
+                    # We can also detect by seeing if these are fixed button coordinates rather than mouse event coordinates
+                    (ly == 20)  # 3 dots button is positioned at y=20, while right-clicks would have varying y values
+                ):
+                    w_offset = -170  # Move the menu slightly to the left of the 3 dots button
+                    h_offset = -20  # Move the menu below the 3 dots button
+                    # For 3 dots button positioning, use the target coordinates from _open_context_menu_at
+                    cx = lx + w_offset
+                    cy = ly + h_offset
+                    # Make sure it doesn't go off the screen on the left
+                    cx = max(10, cx)
+                else:
+                    # This is a right-click on media area
+                    cx = lx if isinstance(lx, (int, float)) else viewer_w/2
+                    cy = ly if isinstance(ly, (int, float)) else viewer_h/2
+                    # Clamp to keep within view (for right-clicks)
+                    cx = max(0, min(cx, viewer_w-220))
+                    cy = max(0, min(cy, viewer_h-60))
+                    
                 context_menu_ctrl.left = cx
                 context_menu_ctrl.top = cy
                 context_menu_ctrl.visible = True
@@ -1237,7 +1250,7 @@ def open_unified_popup_dialog(
             # Row 2: Split, Cut to Frames, Cut All Videos to, Num field
             num_to_cut_to = create_textfield(label="num", value=str(original_frames // 2 if original_frames > 1 else 150), keyboard_type=ft.KeyboardType.NUMBER)
             split_btn = ft.ElevatedButton("Split", on_click=lambda e: page.run_thread(video_editor.split_to_video, page, path, int(frame_range_slider.start_value or 0), items, None, local_video_player, refresh, update_thumbnails_callback), style=BTN_STYLE2)
-            cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=lambda e: page.run_thread(video_editor.cut_to_frames, page, path, int(frame_range_slider.start_value or 0), int(frame_range_slider.end_value or original_frames), items, None, refresh, update_thumbnails_callback), style=BTN_STYLE2)
+            cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=lambda e: page.run_thread(video_editor.cut_to_frames, page, path, int(frame_range_slider.start_value or 0), int(frame_range_slider.end_value or original_frames), items, None, refresh, update_thumbnails_callback, False), style=BTN_STYLE2)
             cut_all_btn = ft.ElevatedButton("Cut All Videos to", on_click=lambda e: page.run_thread(video_editor.cut_all_videos_to_max, page, path, items, int(num_to_cut_to.value or 0), None), style=BTN_STYLE2)
             row2 = ft.ResponsiveRow([
                 ft.Container(split_btn, col={"md": 3, "lg": 3, "sm": 12}),
@@ -1480,7 +1493,11 @@ def open_unified_popup_dialog(
                 if context_menu_ctrl and getattr(context_menu_ctrl, 'visible', False):
                     _hide_context_menu()
                 else:
-                    _open_context_menu_at(max(10, viewer_w - 140), 40)
+                    # Position the context menu right next to the 3 dots button (edit_menu_btn), slightly to the left
+                    # This creates a single source of truth for positioning
+                    # We'll position it at the top-right of the edit menu button
+                    # Since edit_menu_btn is in title_suffix_controls, we need to calculate its position relative to dialog
+                    _open_context_menu_at(max(10, viewer_w - 60), 20)  # Moved 20px more to the left (from viewer_w - 40 to viewer_w - 60)
             except Exception:
                 pass
         edit_menu_btn.on_click = _on_edit_menu_click

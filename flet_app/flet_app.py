@@ -8,15 +8,22 @@ if __package__ in (None, ""):
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
-import flet as ft
+# Standard library imports
 import json
+
+# Flet imports
+import flet as ft
+
+# Local imports - UI components
 from flet_app.ui.flet_hotkeys import global_hotkey_handler
 from flet_app.ui.tab_training_view import get_training_tab_content
-from flet_app.ui.dataset_manager.dataset_layout_tab import dataset_tab_layout
+from flet_app.ui.dataset_manager.dataset_layout_tab import dataset_tab_layout, on_main_tab_change, is_in_dataset_tab
 from flet_app.ui.tab_tools_view import get_models_tab_content
 from flet_app.flet_app_top_menu import create_app_menu_bar
 from flet_app.ui.utils.utils_top_menu import TopBarUtils
 from flet_app.ui_popups.popup_dialog_base import PopupDialogBase
+
+# Local imports - configuration
 from flet_app.settings import settings
 
 # =====================
@@ -57,22 +64,16 @@ def build_main_tabs(page):
     """Creates the main tab control with Training, Datasets, and Models tabs."""
     training_tab_container = get_training_tab_content(page)
     
-    # Create the container with A, B, C elements that will be visible only when items are selected
-    abc_container = ft.Container(
-        content=ft.Row([
-            ft.Text("A", size=14, weight=ft.FontWeight.BOLD),
-            ft.Text("B", size=14, weight=ft.FontWeight.BOLD),
-            ft.Text("C", size=14, weight=ft.FontWeight.BOLD),
-        ], spacing=10),
-        top=10,
-        right=20,  # 20px offset from the right
-        padding=ft.padding.all(5),
-        visible=False,  # Initially hidden
-    )
-    
+    # Create dataset tab content first to get the ABC container
+    dataset_tab_content, abc_container = dataset_tab_layout(page)
+
+    # Initialize the tab state since we start on Training tab (index 0)
+    is_in_dataset_tab["value"] = False
+
     main_tabs = ft.Tabs(
         selected_index=0,
         animation_duration=100,
+        on_change=on_main_tab_change,
         tabs=[
             ft.Tab(
                 text="Training",
@@ -80,7 +81,7 @@ def build_main_tabs(page):
             ),
             ft.Tab(
                 text="Datasets",
-                content=dataset_tab_layout(page)
+                content=dataset_tab_content
             ),
             ft.Tab(
                 text="Models",
@@ -101,7 +102,7 @@ def build_main_tabs(page):
     
     # Store reference to the ABC container so it can be controlled externally
     tab_with_abc_container.abc_container = abc_container
-    
+
     return tab_with_abc_container, training_tab_container
 
 def build_tabs_column(main_tabs):

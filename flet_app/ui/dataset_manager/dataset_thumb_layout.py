@@ -5,6 +5,23 @@ from flet_app.settings import settings
 from flet_app.ui_popups.unified_popup_dialog import open_unified_popup_dialog
 
 
+def _format_thumbnail_filename(filename: str) -> str:
+    """
+    Format filename for thumbnail display:
+    - Remove extension
+    - Max 13 characters
+    - Add '..' if longer than 13 chars
+    """
+    # Remove extension
+    name_without_ext = os.path.splitext(filename)[0]
+
+    # If longer than 13 characters, truncate and add '..'
+    if len(name_without_ext) > 13:
+        return name_without_ext[:11] + '..'
+    else:
+        return name_without_ext
+
+
 def _is_web_platform(page: ft.Page | None) -> bool:
     """Return True when running inside a Flet web page."""
     if page is None:
@@ -119,20 +136,47 @@ def create_thumbnail_container(
         border_radius=ft.border_radius.all(5)
     )
 
+    # Transparent overlay for larger click area (bottom half of thumbnail)
+    selection_overlay = ft.Container(
+        width=settings.THUMB_TARGET_W + 10,
+        height=25,  # Cover the bottom area with text info
+        bottom=0,
+        left=0,
+        bgcolor=ft.Colors.TRANSPARENT,
+        on_click=lambda e: (
+            setattr(checkbox, 'value', not checkbox.value),
+            _on_checkbox_change(e)
+        )
+    )
+
     thumbnail_container = ft.Container(
         content=ft.Stack(
             [
                 ft.Column([
                     image_control,
+                    # Filename row (no extension, max 13 chars with .. for longer)
+                    ft.Text(
+                        _format_thumbnail_filename(video_name),
+                        size=11,  # Increased from 9 to 11 to stand out
+                        color=ft.Colors.GREY_700,
+                        weight=ft.FontWeight.BOLD,
+                        text_align=ft.TextAlign.CENTER
+                    ),
+                    # Caption row with frame count
                     ft.Text(spans=[
-                        ft.TextSpan("[cap - ", style=ft.TextStyle(color=ft.Colors.GREY_500, size=10)),
-                        ft.TextSpan(cap_val, style=ft.TextStyle(color=cap_color, size=10)),
-                        ft.TextSpan("] - ", style=ft.TextStyle(color=ft.Colors.GREY_500, size=10)),
-                        ft.TextSpan(f"{fps} fps", style=ft.TextStyle(color=ft.Colors.BLUE, size=10)),
-                    ], size=10),
-                    ft.Text(f"[{width}x{height} - {frames} frames]", size=10, color=ft.Colors.GREY_500),
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, tight=True),
-                checkbox
+                        ft.TextSpan(f"[{frames} frames - ", style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)),
+                        ft.TextSpan(cap_val, style=ft.TextStyle(color=cap_color, size=9)),
+                        ft.TextSpan("]", style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)),
+                    ], size=9),
+                    # Size row
+                    ft.Text(f"{width}x{height} - {fps}fps", size=9, color=ft.Colors.BLUE_GREY_600),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                tight=True,
+                spacing=1  # Make rows more compact
+                ),
+                checkbox,
+                selection_overlay  # Add transparent overlay for larger click area
             ]
         ),
         data=video_path,
@@ -140,7 +184,7 @@ def create_thumbnail_container(
         on_hover=_on_hover_container, # Now _on_hover_container is defined
         tooltip=video_name,
         width=settings.THUMB_TARGET_W + 10,
-        height=settings.THUMB_TARGET_H + 45,
+        height=settings.THUMB_TARGET_H + 50,  # Increased height for 3 rows
         padding=5,
         border=ft.border.all(1, ft.Colors.OUTLINE),
         border_radius=ft.border_radius.all(5),

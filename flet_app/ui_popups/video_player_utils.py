@@ -830,11 +830,12 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
 def cut_video_by_frames(
     current_video_path: str,
     start_frame: int,
-    end_frame: int
+    end_frame: int,
+    force_reencode: bool = False
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Cuts video from start_frame to end_frame using frame-accurate cutting.
-    Uses re-encoding to avoid corruption from stream copy seeking.
+    Always uses re-encoding for precise frame cutting accuracy.
     Returns (success, message, output_path_or_none).
     """
     ffmpeg_exe = _get_ffmpeg_exe_path()
@@ -843,33 +844,57 @@ def cut_video_by_frames(
         return False, "Could not get valid FPS for cutting by frames.", None
 
     fps = metadata['fps']
-    if start_frame > end_frame: # Changed from >= to > to allow single-frame cuts if needed
+    total_frames = metadata.get('frames', 0)
+
+    # Validate frame range
+    if start_frame > end_frame:
         return False, "Start frame must be less than or equal to end frame.", None
 
-    # For frame-accurate cutting, we need to use both seek and frame filtering
-    # This avoids corruption from stream copy at non-keyframes
+    # Ensure end_frame doesn't exceed video length
+    if total_frames > 0 and end_frame >= total_frames:
+        end_frame = total_frames - 1
+        print(f"Adjusted end_frame to {end_frame} (video total frames: {total_frames})")
+
+    # Calculate precise timing
     start_time = start_frame / fps
-    # Calculate duration to include the end_frame
+    # Calculate duration to include the end_frame (inclusive)
     duration = (end_frame - start_frame + 1) / fps
     frame_count = end_frame - start_frame + 1
 
     temp_output_path = _get_temp_output_path(current_video_path, "cut")
+
+    # Use simpler time-based cutting with accurate duration
     command = [
         ffmpeg_exe, "-y",
         "-ss", str(start_time),   # Seek to start time
         "-i", current_video_path,
-        "-vf", f"select='between(n,0,{frame_count-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
-        "-vframes", str(frame_count),  # Ensure exact frame count
-        "-an",                    # No audio (faster processing)
+        "-t", str(duration),      # Exact duration
+        "-c:a", "aac",           # Include audio with AAC encoding
         *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
         temp_output_path
     ]
 
     success, _, stderr = _run_ffmpeg_process(command)
     if success and os.path.exists(temp_output_path):
-        return True, f"Video cut from frame {start_frame} to {end_frame}.", temp_output_path
+        # Verify the output has correct frame count
+        output_metadata = get_video_metadata(temp_output_path)
+        output_frames = output_metadata.get('frames', 0) if output_metadata else 0
+
+        if output_frames == frame_count or (output_frames > 0 and abs(output_frames - frame_count) <= 1):
+            return True, f"Video cut from frame {start_frame} to {end_frame} ({frame_count} frames).", temp_output_path
+        else:
+            print(f"Frame count mismatch: expected {frame_count}, got {output_frames}")
+            # Still return success if we got a reasonable number of frames
+            if output_frames > 0:
+                return True, f"Video cut from frame {start_frame} to {end_frame} ({output_frames} frames).", temp_output_path
+            else:
+                # If no frames, something went wrong
+                if os.path.exists(temp_output_path):
+                    os.remove(temp_output_path)
+                return False, f"Failed to extract frames correctly.", None
     else:
-        if os.path.exists(temp_output_path): os.remove(temp_output_path)
+        if os.path.exists(temp_output_path):
+            os.remove(temp_output_path)
         return False, f"FFmpeg error during cut: {stderr.strip()}", None
 
 

@@ -3,6 +3,8 @@ import os
 import json
 import asyncio
 import time
+import shutil
+from pathlib import Path
 from flet_app.settings import settings
 
 from flet_app.ui._styles import create_dropdown, create_styled_button, create_textfield, BTN_STYLE2
@@ -35,11 +37,17 @@ processed_progress_bar = ft.ProgressBar(visible=False)
 processed_output_field = ft.TextField(
     label="Processed Output", text_size=10, multiline=True, read_only=True,
     visible=False, min_lines=6, max_lines=15, expand=True)
-bottom_app_bar_ref = None
+pending_uploads_count = {"value": 0}
 
 # Multi-selection state
 selected_thumbnails_set = set() # Stores video_path of selected thumbnails
 last_clicked_thumbnail_index = -1 # Stores the index of the last clicked checkbox
+
+# ABC Action Container (A, Duplicate, Delete)
+abc_action_container = None
+
+# Track if we're currently in the dataset tab
+is_in_dataset_tab = {"value": False}
 
 # Global controls (defined here but created in _create_global_controls)
 bucket_size_textfield: ft.TextField = None
@@ -116,13 +124,16 @@ def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_i
             selected_thumbnails_set.discard(video_path)
 
     last_clicked_thumbnail_index = thumbnail_index
-    
+
     # Update ABC container visibility based on selection
     try:
         if page_ctx and hasattr(page_ctx, 'abc_container'):
             # Show ABC container if there are selected thumbnails
             page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
             page_ctx.abc_container.update()
+
+        # Update local ABC container visibility
+        update_abc_container_visibility()
     except Exception:
         # If page is not available or update fails, continue without error
         pass
@@ -131,7 +142,7 @@ def cleanup_old_temp_thumbnails(thumb_dir: str, max_age_seconds: int = 3600):
     current_time = time.time()
     if not os.path.exists(thumb_dir):
         return
-        
+
     for filename in os.listdir(thumb_dir):
         if filename.endswith('.tmp_'):
             try:
@@ -141,6 +152,357 @@ def cleanup_old_temp_thumbnails(thumb_dir: str, max_age_seconds: int = 3600):
                     os.remove(file_path)
             except Exception as e:
                 print(f"Error cleaning up old temp thumbnail {filename}: {e}")
+
+# ======================================================================================
+# ABC Action Container Functions (A, Duplicate, Delete)
+# ======================================================================================
+
+def create_abc_action_container():
+    """Create the A/B/C action container with duplicate and delete functionality"""
+    global abc_action_container
+
+    def on_duplicate_click(e):
+        """Handle duplicate button click"""
+        try:
+            if not selected_thumbnails_set or not selected_dataset:
+                return
+
+            # Get selected items
+            selected_items = list(selected_thumbnails_set)
+            if selected_items:
+                current_dataset = selected_dataset.get("value")
+                if current_dataset:
+                    from .dataset_utils import _get_dataset_base_dir
+                    base_dir, _ = _get_dataset_base_dir(current_dataset)
+                    dataset_path = os.path.join(base_dir, current_dataset)
+
+                    duplicated_count = 0
+
+                    for item_path in selected_items:
+                        try:
+                            item_name = os.path.basename(item_path)
+                            name, ext = os.path.splitext(item_name)
+                            new_name = f"{name}_copy{ext}"
+                            new_path = os.path.join(dataset_path, new_name)
+
+                            # Copy the file
+                            shutil.copy2(item_path, new_path)
+                            duplicated_count += 1
+
+                            # Also copy .txt file if it exists
+                            txt_path = os.path.splitext(item_path)[0] + '.txt'
+                            if os.path.exists(txt_path):
+                                txt_new_name = f"{name}_copy.txt"
+                                txt_new_path = os.path.join(dataset_path, txt_new_name)
+                                shutil.copy2(txt_path, txt_new_path)
+
+                        except Exception as copy_error:
+                            print(f"Error duplicating {item_path}: {copy_error}")
+
+                    # Show success message
+                    if duplicated_count > 0:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"Duplicated {duplicated_count} item(s)"),
+                            open=True
+                        )
+                    else:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text("No items duplicated"),
+                            open=True
+                        )
+
+                    # Clear selections and refresh thumbnails
+                    selected_thumbnails_set.clear()
+                    global last_clicked_thumbnail_index
+                    last_clicked_thumbnail_index = -1
+
+                    # Refresh thumbnails
+                    if thumbnails_grid_ref and thumbnails_grid_ref.current:
+                        e.page.run_task(update_thumbnails,
+                                       page_ctx=e.page,
+                                       grid_control=thumbnails_grid_ref.current,
+                                       force_refresh=True)
+
+                    # Hide the container after operation
+                    abc_action_container.visible = False
+                    abc_action_container.update()
+                    e.page.update()
+        except Exception as ex:
+            print(f"Error in duplicate click: {ex}")
+            if e.page:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Error: {str(ex)}"),
+                    open=True
+                )
+                e.page.update()
+
+    def on_delete_click(e):
+        """Handle delete button click"""
+        try:
+            if not selected_thumbnails_set or not selected_dataset:
+                return
+
+            # Get selected items
+            selected_items = list(selected_thumbnails_set)
+            if selected_items:
+                current_dataset = selected_dataset.get("value")
+                if current_dataset:
+                    from .dataset_utils import _get_dataset_base_dir
+                    base_dir, _ = _get_dataset_base_dir(current_dataset)
+                    dataset_path = os.path.join(base_dir, current_dataset)
+
+                    deleted_count = 0
+
+                    for item_path in selected_items:
+                        try:
+                            # Delete the main file
+                            if os.path.exists(item_path):
+                                os.remove(item_path)
+                                deleted_count += 1
+
+                            # Also delete .txt file if it exists
+                            txt_path = os.path.splitext(item_path)[0] + '.txt'
+                            if os.path.exists(txt_path):
+                                os.remove(txt_path)
+
+                            # Delete the associated thumbnail
+                            current_dataset = selected_dataset.get("value")
+                            if current_dataset:
+                                # Get thumbnail path using correct thumbnail directory
+                                item_name = os.path.basename(item_path)
+                                thumbnail_name = f"{os.path.splitext(item_name)[0]}.jpg"
+                                thumbnail_path = os.path.join(settings.THUMBNAILS_BASE_DIR, current_dataset, thumbnail_name)
+
+                                if os.path.exists(thumbnail_path):
+                                    os.remove(thumbnail_path)
+                                    print(f"Deleted thumbnail: {thumbnail_path}")
+
+                        except Exception as delete_error:
+                            print(f"Error deleting {item_path}: {delete_error}")
+
+                    # Show success message
+                    if deleted_count > 0:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text(f"Deleted {deleted_count} item(s)"),
+                            open=True
+                        )
+                    else:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text("No items deleted"),
+                            open=True
+                        )
+
+                    # Clear selections and refresh thumbnails
+                    selected_thumbnails_set.clear()
+                    global last_clicked_thumbnail_index
+                    last_clicked_thumbnail_index = -1
+
+                    # Refresh thumbnails
+                    if thumbnails_grid_ref and thumbnails_grid_ref.current:
+                        e.page.run_task(update_thumbnails,
+                                       page_ctx=e.page,
+                                       grid_control=thumbnails_grid_ref.current,
+                                       force_refresh=True)
+
+                    # Hide the container after operation
+                    abc_action_container.visible = False
+                    abc_action_container.update()
+                    e.page.update()
+        except Exception as ex:
+            print(f"Error in delete click: {ex}")
+            if e.page:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Error: {str(ex)}"),
+                    open=True
+                )
+                e.page.update()
+
+    def on_download_click(e):
+        """Handle download button click"""
+        try:
+            if not selected_thumbnails_set or not selected_dataset:
+                return
+
+            # Get selected items
+            selected_items = list(selected_thumbnails_set)
+            if selected_items:
+                current_dataset = selected_dataset.get("value")
+                if current_dataset:
+                    from .dataset_utils import _get_dataset_base_dir
+                    import zipfile
+                    import tempfile
+                    from flet_app.project_root import get_project_root
+
+                    base_dir, _ = _get_dataset_base_dir(current_dataset)
+                    dataset_path = os.path.join(base_dir, current_dataset)
+
+                    # Get workspace path for temporary zip file
+                    project_root = get_project_root()
+                    workspace_path = os.path.join(project_root, "workspace")
+                    os.makedirs(workspace_path, exist_ok=True)
+
+                    # Create temporary zip file
+                    import uuid
+                    zip_filename = f"selected_items_{uuid.uuid4().hex[:8]}.zip"
+                    zip_path = os.path.join(workspace_path, zip_filename)
+
+                    items_count = 0
+
+                    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        for item_path in selected_items:
+                            try:
+                                if os.path.exists(item_path):
+                                    # Add main file to zip
+                                    arcname = os.path.basename(item_path)
+                                    zipf.write(item_path, arcname)
+                                    items_count += 1
+
+                                    # Also add .txt file if it exists
+                                    txt_path = os.path.splitext(item_path)[0] + '.txt'
+                                    if os.path.exists(txt_path):
+                                        txt_arcname = os.path.basename(txt_path)
+                                        zipf.write(txt_path, txt_arcname)
+
+                            except Exception as zip_error:
+                                print(f"Error adding {item_path} to zip: {zip_error}")
+
+                    # Show success message
+                    if items_count > 0:
+                        # Copy zip to static output directory
+                        from flet_app.settings import settings
+                        project_location = settings.get("project_location")
+                        if project_location:
+                            output_dir = Path(project_location) / "workspace" / "output"
+                            output_dir.mkdir(parents=True, exist_ok=True)
+
+                            # Copy to output directory with timestamp
+                            import shutil
+                            import datetime
+                            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            static_zip_name = f"download_{timestamp}.zip"
+                            static_zip_path = output_dir / static_zip_name
+                            shutil.copy2(zip_path, static_zip_path)
+
+                            # Generate URL accessible through Flet's static file serving
+                            download_url = f"http://localhost:8550/output/{static_zip_name}"
+
+                            # Show download link
+                            e.page.snack_bar = ft.SnackBar(
+                                content=ft.Row([
+                                    ft.Text(f"Created zip with {items_count} item(s)"),
+                                    ft.ElevatedButton(
+                                        "Download",
+                                        icon=ft.Icons.DOWNLOAD,
+                                        on_click=lambda _: e.page.launch_url(download_url),
+                                        style=ft.ButtonStyle(
+                                            bgcolor=ft.Colors.BLUE_600,
+                                            color=ft.Colors.WHITE
+                                        )
+                                    )
+                                ], spacing=10),
+                                open=True
+                            )
+                    else:
+                        e.page.snack_bar = ft.SnackBar(
+                            ft.Text("No items to download"),
+                            open=True
+                        )
+
+                    # Clean up zip file after 5 minutes (background task)
+                    import threading
+                    def cleanup_zip():
+                        import time
+                        time.sleep(300)  # 5 minutes
+                        try:
+                            if os.path.exists(zip_path):
+                                os.remove(zip_path)
+                                print(f"Cleaned up temporary zip file: {zip_path}")
+                        except Exception:
+                            pass
+
+                    threading.Thread(target=cleanup_zip, daemon=True).start()
+
+        except Exception as ex:
+            print(f"Error in download click: {ex}")
+            if e.page:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Error: {str(ex)}"),
+                    open=True
+                )
+                e.page.update()
+
+    abc_action_container = ft.Container(
+        content=ft.Row([
+            ft.IconButton(
+                icon=ft.Icons.DOWNLOAD,
+                on_click=on_download_click,
+                icon_color=ft.Colors.GREEN_600,
+                tooltip="Download selected items",
+                icon_size=20
+            ),
+            ft.IconButton(
+                icon=ft.Icons.CONTENT_COPY,
+                on_click=on_duplicate_click,
+                icon_color=ft.Colors.BLUE_600,
+                tooltip="Duplicate selected items",
+                icon_size=20
+            ),
+            ft.IconButton(
+                icon=ft.Icons.DELETE,
+                on_click=on_delete_click,
+                icon_color=ft.Colors.RED_600,
+                tooltip="Delete selected items",
+                icon_size=20
+            ),
+        ], spacing=8),
+        top=10,
+        right=20,  # 20px offset from the right
+        padding=ft.padding.all(5),
+        visible=False,  # Initially hidden
+    )
+
+    return abc_action_container
+
+def update_abc_container_visibility():
+    """Update ABC container visibility based on selection state and tab state"""
+    global abc_action_container
+    if abc_action_container:
+        # Only show if we're in dataset tab AND have selections
+        abc_action_container.visible = is_in_dataset_tab["value"] and len(selected_thumbnails_set) > 0
+        if abc_action_container.page:
+            abc_action_container.update()
+
+def on_main_tab_change(e):
+    """Handle main tab switching - manage dataset selections and container visibility"""
+    try:
+        # Check which tab we're switching to
+        new_tab_index = e.control.selected_index
+
+        if new_tab_index == 1:  # Switching to Datasets tab
+            # Set that we're in dataset tab
+            is_in_dataset_tab["value"] = True
+            # Update visibility (will show if there are preserved selections)
+            update_abc_container_visibility()
+
+            # Also update the page's abc_container to match our local container
+            if hasattr(e.page, 'abc_container') and e.page.abc_container:
+                e.page.abc_container.visible = is_in_dataset_tab["value"] and len(selected_thumbnails_set) > 0
+                e.page.abc_container.update()
+        else:  # Switching away from dataset tab
+            # Set that we're not in dataset tab
+            is_in_dataset_tab["value"] = False
+
+            # DON'T clear selections - preserve them for when we return
+            # Just hide the container
+            update_abc_container_visibility()
+
+            # Also update the page's abc_container
+            if hasattr(e.page, 'abc_container') and e.page.abc_container:
+                e.page.abc_container.visible = False
+                e.page.abc_container.update()
+
+    except Exception as ex:
+        print(f"Error handling tab change: {ex}")
 
 async def on_dataset_dropdown_change(
     ev: ft.ControlEvent,
@@ -155,8 +517,13 @@ async def on_dataset_dropdown_change(
     if processed_progress_bar.page:
         processed_progress_bar.visible = False
 
+    # Clear selections when dataset changes
+    global selected_thumbnails_set, last_clicked_thumbnail_index
+    selected_thumbnails_set.clear()
+    last_clicked_thumbnail_index = -1
+
     selected_dataset["value"] = ev.control.value
-    
+
     base_dir, dataset_type = dataset_utils._get_dataset_base_dir(selected_dataset["value"])
     DATASETS_TYPE["value"] = dataset_type
 
@@ -206,10 +573,6 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
         if not thumbnail_paths_map:
             grid_control.controls.append(ft.Text(f"No media found in dataset '{current_selection}'."))
         else:
-            if force_refresh or (selected_dataset.get("value") != current_selection):
-                selected_thumbnails_set.clear()
-                last_clicked_thumbnail_index = -1
-
             sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), key=lambda item: item[0])
 
             for i, (video_path, thumb_path) in enumerate(sorted_thumbnail_items):
@@ -240,6 +603,9 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
             # Show ABC container if there are selected thumbnails
             page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
             page_ctx.abc_container.update()
+
+        # Update local ABC container visibility
+        update_abc_container_visibility()
     except Exception:
         # If page is not available or update fails, continue without error
         pass
@@ -261,6 +627,11 @@ def update_dataset_dropdown(
     current_thumbnails_grid: ft.GridView,
     delete_button: ft.ElevatedButton
 ):
+    # Clear selections when updating dataset list
+    global selected_thumbnails_set, last_clicked_thumbnail_index
+    selected_thumbnails_set.clear()
+    last_clicked_thumbnail_index = -1
+
     folders = get_dataset_folders()
     current_dataset_dropdown.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
     current_dataset_dropdown.value = None
@@ -297,6 +668,11 @@ def reload_current_dataset(
         set_bottom_app_bar_height()
     if processed_progress_bar.page:
         processed_progress_bar.visible = False
+
+    # Clear selections when reloading datasets
+    global selected_thumbnails_set, last_clicked_thumbnail_index
+    selected_thumbnails_set.clear()
+    last_clicked_thumbnail_index = -1
 
     folders = get_dataset_folders()
     current_dataset_dropdown.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
@@ -589,6 +965,12 @@ def dataset_tab_layout(page=None):
 
     if bucket_size_textfield is None:
         _create_global_controls()
+
+    # Create ABC action container and return it for the main page to use
+    abc_container_ref = create_abc_action_container()
+
+    # Initialize tab state (we're creating the dataset tab, so we're in it)
+    is_in_dataset_tab["value"] = True
 
     folders = get_dataset_folders()
     folder_names = list(folders.keys()) if folders else []
@@ -1015,6 +1397,7 @@ def dataset_tab_layout(page=None):
             
             temp_uploads_dir = Path(__file__).parent.parent.parent / "temp_uploads"
             
+            pending_uploads_count["value"] = len(e.files)
             for file in e.files:
                 try:
                     dest_filename = file.name
@@ -1057,11 +1440,16 @@ def dataset_tab_layout(page=None):
                 e.page.update()
 
     async def on_file_uploaded(e: ft.FilePickerUploadEvent):
-        print(f"File uploaded: {e.file_name}")
+        global pending_uploads_count
         if e.file_name:
-            await update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
-            e.page.snack_bar = ft.SnackBar(ft.Text(f"{e.file_name} uploaded successfully"), open=True)
-            e.page.update()
+            pending_uploads_count["value"] -= 1
+            if pending_uploads_count["value"] == 0:
+                await update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"All files uploaded successfully"), open=True)
+                e.page.update()
+            else:
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"{e.file_name} uploaded. {pending_uploads_count['value']} remaining."), open=True)
+                e.page.update()
 
     file_picker = ft.FilePicker(
         on_result=lambda e: e.page.run_task(on_files_picked, e),
@@ -1134,4 +1522,7 @@ def dataset_tab_layout(page=None):
         expand=True
     )
 
-    return main_container
+    # Expose the ABC container for external access
+    main_container.abc_action_container = abc_container_ref
+
+    return main_container, abc_container_ref

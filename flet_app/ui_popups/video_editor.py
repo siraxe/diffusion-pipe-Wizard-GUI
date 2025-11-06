@@ -185,8 +185,8 @@ def handle_crop_all_videos(
         if not dialog_refreshed_for_current_video:
             page.update()
 
-def cut_to_frames(page: ft.Page, current_video_path: str, start_frame: int, end_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], refresh_dialog_callback: Optional[Callable] = None, thumbnail_update_callback: Optional[Callable] = None):
-    success, msg, temp_output_path = vpu.cut_video_by_frames(current_video_path, start_frame, end_frame)
+def cut_to_frames(page: ft.Page, current_video_path: str, start_frame: int, end_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], refresh_dialog_callback: Optional[Callable] = None, thumbnail_update_callback: Optional[Callable] = None, force_reencode: bool = False):
+    success, msg, temp_output_path = vpu.cut_video_by_frames(current_video_path, start_frame, end_frame, force_reencode)
     if success and temp_output_path:
         try:
             shutil.move(temp_output_path, current_video_path)
