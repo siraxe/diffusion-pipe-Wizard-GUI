@@ -56,6 +56,20 @@ def build_menu_bar_column(page):
 def build_main_tabs(page):
     """Creates the main tab control with Training, Datasets, and Models tabs."""
     training_tab_container = get_training_tab_content(page)
+    
+    # Create the container with A, B, C elements that will be visible only when items are selected
+    abc_container = ft.Container(
+        content=ft.Row([
+            ft.Text("A", size=14, weight=ft.FontWeight.BOLD),
+            ft.Text("B", size=14, weight=ft.FontWeight.BOLD),
+            ft.Text("C", size=14, weight=ft.FontWeight.BOLD),
+        ], spacing=10),
+        top=10,
+        right=20,  # 20px offset from the right
+        padding=ft.padding.all(5),
+        visible=False,  # Initially hidden
+    )
+    
     main_tabs = ft.Tabs(
         selected_index=0,
         animation_duration=100,
@@ -75,16 +89,25 @@ def build_main_tabs(page):
         ],
         expand=True,
     )
-    return main_tabs, training_tab_container
+    
+    # Create a container with the tabs and the ABC container positioned to the right
+    tab_with_abc_container = ft.Stack(
+        [
+            main_tabs,
+            abc_container
+        ],
+        expand=True
+    )
+    
+    # Store reference to the ABC container so it can be controlled externally
+    tab_with_abc_container.abc_container = abc_container
+    
+    return tab_with_abc_container, training_tab_container
 
 def build_tabs_column(main_tabs):
     """Wraps the main tabs in a column that expands vertically and stretches horizontally."""
-    return ft.Column(
-        controls=[main_tabs],
-        expand=True,
-        horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-        spacing=0
-    )
+    # The main_tabs already contains the Stack with tabs and text
+    return main_tabs
 
 def build_base_dialog(page):
     """Creates the base popup dialog instance."""
@@ -139,6 +162,9 @@ def main(page: ft.Page):
     # Expose for Save As handler
     page.training_tab_container = training_tab_container
 
+    # Store reference to ABC container so other parts of the app can access it
+    page.abc_container = main_tabs.abc_container
+
     # Attach menu bar refresh function
     page.refresh_menu_bar = lambda: refresh_menu_bar(page, menu_bar_column)
 
@@ -157,7 +183,7 @@ def main(page: ft.Page):
     page.update()
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "127.0.0.1")
+    host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8550"))
     open_browser = os.getenv("OPEN_BROWSER", "0") == "1"
 
@@ -206,5 +232,9 @@ if __name__ == "__main__":
         # Then run the main app
         main(page)
 
-    ft.app(target=app_wrapper, host=host, port=port, view=view, assets_dir=workspace_path)
+    # Set up upload directory for web file uploads - use workspace/datasets as base
+    upload_path = Path(__file__).parent.parent / "workspace" / "datasets"
+    upload_path.mkdir(parents=True, exist_ok=True)
+    
+    ft.app(target=app_wrapper, host=host, port=port, view=view, assets_dir=workspace_path, upload_dir=str(upload_path))
 

@@ -250,7 +250,6 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
         env = os.environ.copy()
         env["NCCL_P2P_DISABLE"] = "1"
         env["NCCL_IB_DISABLE"] = "1"
-        print(f"DEBUG: Launching command: {' '.join(cmd)} (cwd={project_root})")
         popen_kwargs = dict(
             cwd=project_root,
             env=env,
@@ -622,28 +621,22 @@ def get_training_tab_content(page: ft.Page):
         """
         Handles saving config and running training, with error handling and user feedback.
         """
-        print("DEBUG: Entering handle_training_output")
+
         try:
             if training_tab_container is None:
                 msg = "Error: training_tab_container not passed to handle_training_output."
-                print(f"DEBUG: {msg}")
                 if page is not None:
                     page.snack_bar = ft.SnackBar(content=ft.Text(msg), open=True)
                     page.update()
                 return
 
-            print("DEBUG: Getting selected image paths")
-            # Get the selected image paths from the page object
             current_selected_image_path_c1 = getattr(page, 'selected_image_path_c1', None)
             current_selected_image_path_c2 = getattr(page, 'selected_image_path_c2', None)
-            print(f"DEBUG: Image paths - c1: {current_selected_image_path_c1}, c2: {current_selected_image_path_c2}")
 
-            print("DEBUG: Saving training config to TOML")
             # Save TOML config
             out_path, _ = await save_training_config_to_toml(
                 training_tab_container
             )
-            print(f"DEBUG: Config saved to {out_path}")
 
             # Determine launch parameters
             use_multi_gpu = multi_gpu_checkbox.value
@@ -669,9 +662,7 @@ def get_training_tab_content(page: ft.Page):
             except Exception:
                 pass
 
-            print(f"DEBUG: Launching deepspeed (multi_gpu={use_multi_gpu}, trust_cache={trust_cache}, resume_last={resume_last}, cache_only={cache_only})")
             proc, cmd_str = await run_training_deepspeed(out_path, use_multi_gpu, trust_cache, resume_last, cache_only)
-            print(f"DEBUG: Deepspeed launched: {cmd_str}")
 
             # Store process handle and toggle Start->Cancel
             try:
@@ -835,11 +826,9 @@ def get_training_tab_content(page: ft.Page):
                 pass
 
             msg = f"Saved config to {out_path}\nCmd: {cmd_str}\nTraining started."
-            print(f"DEBUG: Showing success message: {msg}")
             if page is not None:
                 page.snack_bar = ft.SnackBar(content=ft.Text(msg), open=True)
                 page.update()
-            print("DEBUG: handle_training_output completed successfully")
         except Exception as e:
             msg = f"Error: {e}"
             print(f"ERROR in handle_training_output: {e}")
@@ -852,19 +841,12 @@ def get_training_tab_content(page: ft.Page):
         """
         Handles the Start button click: checks dataset selection and triggers training.
         """
-        print("DEBUG: Start button clicked")
         try:
-            print("DEBUG: Checking if dataset is selected")
             dataset_selected = is_dataset_selected(config_page_content)
-            print(f"DEBUG: Dataset selected: {dataset_selected}")
-
             async def run_training():
-                print("DEBUG: Running training process")
                 try:
                     await handle_training_output(e.page, training_tab_container_arg)
-                    print("DEBUG: Training process completed")
                 except Exception as ex:
-                    print(f"ERROR in run_training: {ex}")
                     traceback.print_exc()
                     if e.page:
                         e.page.snack_bar = ft.SnackBar(
@@ -874,16 +856,13 @@ def get_training_tab_content(page: ft.Page):
                         e.page.update()
 
             if not dataset_selected:
-                print("DEBUG: No dataset selected, showing confirmation dialog")
                 def on_confirm():
-                    print("DEBUG: User confirmed to proceed without dataset")
                     e.page.run_task(run_training)
 
                 dataset_not_selected.show_dataset_not_selected_dialog(
                     e.page, "Dataset not selected, proceed?", on_confirm
                 )
             else:
-                print("DEBUG: Dataset selected, starting training")
                 await run_training()
 
         except Exception as ex:
@@ -899,7 +878,6 @@ def get_training_tab_content(page: ft.Page):
 
     # Create a wrapper function that can be called synchronously
     def start_button_click(e):
-        print("DEBUG: Start/Cancel button clicked (wrapper)")
         try:
             # Switch to Monitor tab immediately to show console
             try:

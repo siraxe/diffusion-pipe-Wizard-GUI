@@ -76,7 +76,7 @@ def set_bottom_app_bar_height():
             bottom_app_bar_ref.height = 0
         bottom_app_bar_ref.update()
 
-def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_index: int):
+def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_index: int, page_ctx=None):
     global selected_thumbnails_set, last_clicked_thumbnail_index
     import flet_app.ui.flet_hotkeys as ui_fh # Re-import to get a mutable reference to the module itself
 
@@ -116,6 +116,16 @@ def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_i
             selected_thumbnails_set.discard(video_path)
 
     last_clicked_thumbnail_index = thumbnail_index
+    
+    # Update ABC container visibility based on selection
+    try:
+        if page_ctx and hasattr(page_ctx, 'abc_container'):
+            # Show ABC container if there are selected thumbnails
+            page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
+            page_ctx.abc_container.update()
+    except Exception:
+        # If page is not available or update fails, continue without error
+        pass
 
 def cleanup_old_temp_thumbnails(thumb_dir: str, max_age_seconds: int = 3600):
     current_time = time.time()
@@ -167,7 +177,7 @@ async def on_dataset_dropdown_change(
         except Exception:
             pass
 
-    update_thumbnails(page_ctx=ev.page, grid_control=thumbnails_grid_control)
+    await update_thumbnails(page_ctx=ev.page, grid_control=thumbnails_grid_control)
 
     if dataset_delete_captions_button_control:
         pass
@@ -175,7 +185,7 @@ async def on_dataset_dropdown_change(
     if ev.page:
         ev.page.update()
 
-def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView | None, force_refresh: bool = False):
+async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView | None, force_refresh: bool = False):
     global selected_thumbnails_set, last_clicked_thumbnail_index
     
     if not grid_control:
@@ -224,6 +234,16 @@ def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView | None
     if grid_control and grid_control.page:
         grid_control.update()
 
+    # Update ABC container visibility based on current selection after updating the grid
+    try:
+        if page_ctx and hasattr(page_ctx, 'abc_container'):
+            # Show ABC container if there are selected thumbnails
+            page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
+            page_ctx.abc_container.update()
+    except Exception:
+        # If page is not available or update fails, continue without error
+        pass
+
     if force_refresh and current_selection:
         dataset_type = DATASETS_TYPE["value"]
         base_dir = settings.DATASETS_DIR
@@ -253,9 +273,7 @@ def update_dataset_dropdown(
 
     if bucket_size_textfield: bucket_size_textfield.update()
     if model_name_dropdown: model_name_dropdown.update()
-    if trigger_word_textfield: trigger_word_textfield.update()
-
-    update_thumbnails(page_ctx=p_page, grid_control=current_thumbnails_grid)
+    p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid)
 
     if delete_button:
         pass
@@ -293,7 +311,7 @@ def reload_current_dataset(
         if bucket_size_textfield: bucket_size_textfield.value = bucket_val
         if model_name_dropdown: model_name_dropdown.value = model_val if model_val in settings.train_models else settings.train_def_model
         if trigger_word_textfield: trigger_word_textfield.value = trigger_word_val or ''
-        update_thumbnails(page_ctx=p_page, grid_control=current_thumbnails_grid)
+        p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid)
         snack_bar_text = f"Dataset '{prev_selected_name}' reloaded."
     else:
         current_dataset_dropdown.value = None
@@ -302,7 +320,7 @@ def reload_current_dataset(
         if bucket_size_textfield: bucket_size_textfield.value = bucket_val
         if model_name_dropdown: model_name_dropdown.value = model_val
         if trigger_word_textfield: trigger_word_textfield.value = trigger_word_val or ''
-        update_thumbnails(page_ctx=p_page, grid_control=current_thumbnails_grid)
+        p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid)
         snack_bar_text = "Dataset list reloaded. Select a dataset."
 
     if delete_button:
@@ -347,6 +365,18 @@ def _create_global_controls():
     bucket_size_textfield.on_change = lambda e: e.page.run_task(on_bucket_or_model_change, e, selected_dataset, bucket_size_textfield, None, trigger_word_textfield)
     trigger_word_textfield.on_change = lambda e: e.page.run_task(on_bucket_or_model_change, e, selected_dataset, bucket_size_textfield, None, trigger_word_textfield)
 
+def _build_dataset_creation_section(dataset_name_textfield: ft.TextField, add_dataset_button: ft.ElevatedButton):
+    """Build the section for creating new datasets"""
+    return ft.Column([
+        ft.Container(height=5),  # Reduced spacing
+        ft.ResponsiveRow([
+            ft.Container(content=dataset_name_textfield, expand=True, col=7),
+            ft.Container(content=add_dataset_button, expand=True, col=5),
+        ], spacing=5),
+        ft.Container(height=3),
+        ft.Divider(),
+    ], spacing=0)
+
 def _build_dataset_selection_section(dataset_dropdown_control: ft.Dropdown, update_button_control: ft.IconButton):
     return ft.Column([
         ft.Container(height=10),
@@ -388,17 +418,35 @@ def _build_latent_test_section(update_thumbnails_func):
         create_textfield(label="Replace", value="", expand=True, ref=replace_text_field_ref),
         create_styled_button("Find and Replace", on_click=lambda e: e.page.run_task(find_and_replace_in_captions,
             e, selected_dataset, DATASETS_TYPE, find_text_field_ref, replace_text_field_ref, update_thumbnails_func, thumbnails_grid_ref
-        ))
+        ), 
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
+        )
     ])
     prefix_suffix_replace=ft.Column([
         create_textfield(label="Text",value="",expand=True, ref=affix_text_field_ref),
         ft.ResponsiveRow([
             create_styled_button("Add prefix",col=6, on_click=lambda e: e.page.run_task(apply_affix_from_textfield,
                 e, "prefix", selected_dataset, DATASETS_TYPE, update_thumbnails_func, thumbnails_grid_ref, affix_text_field_ref
-            )),
+            ),
+            button_style=ft.ButtonStyle(
+                text_style=ft.TextStyle(size=10),  # Smaller font
+                shape=ft.RoundedRectangleBorder(radius=3)
+            ),
+            height=30  # Smaller height
+            ),
             create_styled_button("Add suffix",col=6, on_click=lambda e: e.page.run_task(apply_affix_from_textfield,
                 e, "suffix", selected_dataset, DATASETS_TYPE, update_thumbnails_func, thumbnails_grid_ref, affix_text_field_ref
-            ))
+            ),
+            button_style=ft.ButtonStyle(
+                text_style=ft.TextStyle(size=10),  # Smaller font
+                shape=ft.RoundedRectangleBorder(radius=3)
+            ),
+            height=30  # Smaller height
+            )
         ])
     ])
     return build_expansion_tile(
@@ -435,7 +483,12 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
         tooltip="Slice selected videos into chunks",
         expand=True,
         col=8,
-        on_click=lambda e: _on_slice_to_click(e, slice_seconds_textfield, reencode_checkbox)
+        on_click=lambda e: _on_slice_to_click(e, slice_seconds_textfield, reencode_checkbox),
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
     )
 
     # Create slice section following the same pattern as change_fps_section
@@ -509,7 +562,7 @@ def _on_slice_to_click(e: ft.ControlEvent, seconds_textfield: ft.TextField, reen
                 thumbnail_func()
             except Exception:
                 # Fallback: direct update
-                update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+                e.page.run_task(update_thumbnails, page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
 
         # Import and call the chunking function
         from flet_app.ui_popups import video_editor
@@ -570,8 +623,63 @@ def dataset_tab_layout(page=None):
         tooltip="Update dataset list and refresh thumbnails",
         style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=8)), 
         icon_size=20,
-        on_click=lambda e: update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_control, force_refresh=True)
+        on_click=lambda e: e.page.run_task(update_thumbnails, e.page, thumbnails_grid_control, True)
     )
+
+    # Dataset creation fields
+    dataset_name_textfield = create_textfield(
+        "Dataset name",
+        "",
+        hint_text="Enter new dataset name",
+        expand=True,
+    )
+    
+    add_dataset_button = create_styled_button(
+        "Add",
+        tooltip="Add new dataset",
+        expand=True,
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
+    )
+
+    # Event handler for the add dataset button
+    async def on_add_dataset_click(e: ft.ControlEvent):
+        """Handle the Add Dataset button click"""
+        dataset_name = dataset_name_textfield.value
+        if not dataset_name or dataset_name.strip() == "":
+            e.page.snack_bar = ft.SnackBar(ft.Text("Please enter a dataset name"), open=True)
+            e.page.update()
+            return
+            
+        # Create the new dataset directory
+        dataset_path = os.path.join(settings.DATASETS_DIR, dataset_name.strip())
+        
+        try:
+            if os.path.exists(dataset_path):
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"Dataset '{dataset_name}' already exists"), open=True)
+                e.page.update()
+                return
+                
+            os.makedirs(dataset_path, exist_ok=True)
+            
+            # Update the dataset dropdown to include the new dataset
+            folders = get_dataset_folders()
+            dataset_dropdown_control.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
+            dataset_dropdown_control.value = dataset_name
+            selected_dataset["value"] = dataset_name
+            await update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_control)
+            
+            e.page.snack_bar = ft.SnackBar(ft.Text(f"Dataset '{dataset_name}' created successfully"), open=True)
+            e.page.update()
+            
+        except Exception as ex:
+            e.page.snack_bar = ft.SnackBar(ft.Text(f"Error creating dataset: {str(ex)}"), open=True)
+            e.page.update()
+
+    add_dataset_button.on_click = lambda e: e.page.run_task(on_add_dataset_click, e)
 
     caption_model_dropdown = create_dropdown(
         "Captioning Model",
@@ -718,14 +826,22 @@ def dataset_tab_layout(page=None):
         ref=dataset_delete_captions_button_ref,
         tooltip="Delete the captions.json file",
         expand=True,
-        button_style=BTN_STYLE2,
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
     )
     dataset_delete_captions_button_ref.current = dataset_delete_captions_button_control
 
     dataset_add_captions_button_control = create_styled_button(
         "Add Captions",
         ref=dataset_add_captions_button_ref,
-        button_style=BTN_STYLE2,
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30,  # Smaller height
         expand=True
     )
     dataset_add_captions_button_ref.current = dataset_add_captions_button_control
@@ -745,7 +861,11 @@ def dataset_tab_layout(page=None):
         on_click=lambda e: e.page.run_task(on_change_fps_click,
             e, selected_dataset, DATASETS_TYPE, change_fps_textfield_ref, thumbnails_grid_ref, update_thumbnails, settings
         ),
-        button_style=BTN_STYLE2
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
     )
     change_fps_section = ft.ResponsiveRow([
         ft.Container(content=change_fps_textfield, col=4,),
@@ -759,7 +879,11 @@ def dataset_tab_layout(page=None):
         on_click=lambda e: e.page.run_task(on_rename_files_click,
             e, selected_dataset, DATASETS_TYPE, rename_textfield, thumbnails_grid_ref, update_thumbnails
         ),
-        button_style=BTN_STYLE2
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
     )
 
     caption_to_json_button = create_styled_button(
@@ -769,7 +893,11 @@ def dataset_tab_layout(page=None):
         on_click=lambda e: e.page.run_task(on_caption_to_json_click,
             e, selected_dataset, DATASETS_TYPE, update_thumbnails, thumbnails_grid_ref
         ),
-        button_style=BTN_STYLE2
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
     )
 
     caption_to_txt_button = create_styled_button(
@@ -779,7 +907,11 @@ def dataset_tab_layout(page=None):
         on_click=lambda e: e.page.run_task(on_caption_to_txt_click,
             e, selected_dataset, DATASETS_TYPE
         ),
-        button_style=BTN_STYLE2
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
     )
 
     update_button_control.on_click = lambda e: reload_current_dataset(
@@ -845,8 +977,12 @@ def dataset_tab_layout(page=None):
     batch_section = _build_batch_section(change_fps_section, rename_textfield, rename_files_button,caption_to_txt_button,
         caption_to_json_button)
 
+    # Build dataset creation section
+    dataset_creation_section = _build_dataset_creation_section(dataset_name_textfield, add_dataset_button)
+
     lc_content = ft.Column([
         dataset_selection_section,
+        dataset_creation_section,  # Add the new dataset creation section right after selection
         captioning_section,
         latent_test_section,
         batch_section
@@ -854,8 +990,118 @@ def dataset_tab_layout(page=None):
 
     bottom_app_bar = _build_bottom_status_bar()
 
+    # Create a file picker for proper file uploads (handles both desktop and web)
+    async def on_files_picked(e: ft.FilePickerResultEvent):
+        # Handle selected files
+        if e.files is not None and len(e.files) > 0:
+            # Get the currently selected dataset
+            current_dataset_name = selected_dataset.get("value")
+            if not current_dataset_name:
+                if e.page:
+                    e.page.snack_bar = ft.SnackBar(ft.Text("Please select a dataset first"), open=True)
+                    e.page.update()
+                return
+            
+            # Get the dataset path
+            base_dir, _ = dataset_utils._get_dataset_base_dir(current_dataset_name)
+            dataset_path = os.path.join(base_dir, current_dataset_name)
+            
+            # Create dataset directory if it doesn't exist
+            os.makedirs(dataset_path, exist_ok=True)
+            
+            successful_uploads = 0
+            import shutil
+            from pathlib import Path
+            
+            temp_uploads_dir = Path(__file__).parent.parent.parent / "temp_uploads"
+            
+            for file in e.files:
+                try:
+                    dest_filename = file.name
+                    dest_path = os.path.join(dataset_path, dest_filename)
+
+                    if file.path:  # Desktop mode: Direct copy
+                        source_path = file.path
+                        shutil.copy2(source_path, dest_path)
+                        successful_uploads += 1
+                    else:  # Web mode: Generate upload URL directly to the selected dataset
+                        # For web mode, we generate the upload URL directly to the selected dataset
+                        if current_dataset_name:
+                            # Generate upload URL directly to the dataset directory
+                            relative_upload_path = f"{current_dataset_name}/{file.name}"
+                            upload_url = e.page.get_upload_url(relative_upload_path, expires=300)  # 5-min expiry
+                            file_picker.upload([ft.FilePickerUploadFile(file.name, upload_url=upload_url)])
+                            
+                            # In web mode, the file will be uploaded directly to the dataset folder
+                            # via the upload URL, so no additional move operation is needed
+                            print(f"Web upload URL generated for: {file.name} -> {relative_upload_path}")
+                            
+                            # The upload would happen in the background, and we can update the UI after
+                            e.page.snack_bar = ft.SnackBar(ft.Text(f"Web upload initiated for {file.name}"), open=True)
+                            e.page.update()
+                        else:
+                            print(f"Cannot upload web file {file.name}: no dataset selected")
+                
+                except Exception as ex:
+                    print(f"Error processing {file.name}: {ex}")
+                    if e.page:
+                        e.page.snack_bar = ft.SnackBar(ft.Text(f"Error uploading {file.name}: {str(ex)}"), open=True)
+                        e.page.update()
+
+            # Update thumbnails after upload for desktop files
+            await update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_control, force_refresh=True)
+            
+            # Show success message for desktop files
+            if e.page:
+                e.page.snack_bar = ft.SnackBar(ft.Text(f"{successful_uploads} file(s) uploaded successfully"), open=True)
+                e.page.update()
+
+    async def on_file_uploaded(e: ft.FilePickerUploadEvent):
+        print(f"File uploaded: {e.file_name}")
+        if e.file_name:
+            await update_thumbnails(page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+            e.page.snack_bar = ft.SnackBar(ft.Text(f"{e.file_name} uploaded successfully"), open=True)
+            e.page.update()
+
+    file_picker = ft.FilePicker(
+        on_result=lambda e: e.page.run_task(on_files_picked, e),
+        on_upload=lambda e: e.page.run_task(update_thumbnails, e.page, thumbnails_grid_ref.current, True)
+    )
+    if p_page:  # Use p_page instead of page
+        p_page.overlay.append(file_picker)
+    
+    # Create upload button that triggers file picker
+    async def open_file_picker_async(picker: ft.FilePicker):
+        picker.pick_files(
+            allow_multiple=True,
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=settings.IMAGE_EXTENSIONS + settings.VIDEO_EXTENSIONS
+        )
+
+    upload_button = create_styled_button(
+        "Upload Files",
+        tooltip="Upload files to current dataset",
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30,
+        on_click=lambda e: e.page.run_task(open_file_picker_async, file_picker)
+    )
+    
+    # Create a simple container for the thumbnails area with upload button
+    # Since true OS-level drag and drop isn't supported in Flet web, we'll use a clickable area approach
     rc_content = ft.Column([
-        thumbnails_grid_control,
+        ft.Container(
+            content=ft.Column([
+                thumbnails_grid_control,
+                ft.Row([upload_button], alignment=ft.MainAxisAlignment.CENTER, spacing=10)  # Add upload button below thumbnails
+            ]),
+            expand=True,
+            border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY_400)),
+            border_radius=5,
+            margin=ft.margin.only(top=10),
+        ),
         bottom_app_bar,
     ], alignment=ft.CrossAxisAlignment.STRETCH, expand=True, spacing=10)
 

@@ -100,7 +100,7 @@ def create_thumbnail_container(
     def _on_checkbox_change(e: ft.ControlEvent):
         # This is triggered by user click. Update visuals and then call external callback.
         set_thumbnail_selection_state(thumbnail_container, checkbox.value)
-        on_checkbox_change_callback(video_path, checkbox.value, thumbnail_index)
+        on_checkbox_change_callback(video_path, checkbox.value, thumbnail_index, page_ctx)
 
     encoded_thumbnail = None
     if _is_web_platform(page_ctx) and os.path.exists(thumb_path):

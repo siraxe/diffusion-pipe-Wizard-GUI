@@ -77,13 +77,10 @@ def _build_video_media_resource(page: Optional[ft.Page], video_path: str) -> str
 
 def make_video_control(path: str, width: int, height: int, page: Optional[ft.Page] = None):
     """Create a simple video control. Uses filesystem path; no extra controls."""
-    print(f"DEBUG: Creating video control for path: {path}, width: {width}, height: {height}")
     
     try:
         import flet_video as ftv
-        print("DEBUG: Successfully imported flet_video as ftv")
     except ImportError as e:
-        print(f"DEBUG: Failed to import flet_video as ftv: {e}")
         # Fallback: show a message if video control cannot be imported
         return ft.Container(
             content=ft.Text("flet_video module not available"),
@@ -94,14 +91,10 @@ def make_video_control(path: str, width: int, height: int, page: Optional[ft.Pag
     
     # Use the same approach as main.py: process the path to work with asset serving
     resource = _build_video_media_resource(page, path)
-    print(f"DEBUG: Processed resource path: {resource}")
-    
     try:
         # Create video media using the same pattern as main.py (direct path argument)
         video_media = ftv.VideoMedia(resource)
-        print(f"DEBUG: Successfully created VideoMedia with resource: {resource}")
     except Exception as e:
-        print(f"DEBUG: Failed to create VideoMedia with resource '{resource}': {e}")
         return ft.Container(
             content=ft.Text(f"Failed to create video: {e}"),
             alignment=ft.alignment.center,
@@ -123,10 +116,8 @@ def make_video_control(path: str, width: int, height: int, page: Optional[ft.Pag
             show_controls=False,
             fill_color=ft.Colors.BLACK,
         )
-        print(f"DEBUG: Successfully created Video player")
         return video_player
     except Exception as e:
-        print(f"DEBUG: Failed to create Video player: {e}")
         return ft.Container(
             content=ft.Text(f"Failed to create video player: {e}"),
             alignment=ft.alignment.center,
