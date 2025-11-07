@@ -8,6 +8,7 @@ Key Features:
 - Model download manager using aria2c for efficient parallel downloading of large model files
 
 **Note:** This application was tested on WSL (Windows Subsystem for Linux) and may require additional testing on native Linux distributions.
+**Note:** Not all functions are implmemented to properly work with files on server yet.
 
 ![GUI Preview](.git_assets/gui_02.png)
 
