@@ -285,6 +285,43 @@ def is_dataset_selected(config_page_content):
         return dataset_block.get_selected_dataset()
     return None
 
+def check_and_delete_zone_identifier_files(dataset_name):
+    """
+    Checks for and deletes files with 'Zone.Identifier' in their names in the selected dataset folder.
+    Returns the number of files deleted.
+    """
+    if not dataset_name:
+        print("No dataset selected for Zone.Identifier check")
+        return 0
+
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+        base_dir, _ = _get_dataset_base_dir(dataset_name)
+        dataset_path = os.path.join(base_dir, dataset_name)
+
+        if not os.path.exists(dataset_path):
+            print(f"Dataset path does not exist: {dataset_path}")
+            return 0
+
+        # Search for and delete files containing 'Zone.Identifier' in their names
+        deleted_count = 0
+        for root, dirs, files in os.walk(dataset_path):
+            for file in files:
+                if "Zone.Identifier" in file:
+                    file_path = os.path.join(root, file)
+                    try:
+                        os.remove(file_path)
+                        print(f"Deleted Zone.Identifier file: {file_path}")
+                        deleted_count += 1
+                    except Exception as delete_error:
+                        print(f"Failed to delete {file_path}: {delete_error}")
+
+        return deleted_count
+
+    except Exception as e:
+        print(f"Error checking/deleting Zone.Identifier files: {e}")
+        return 0
+
 # =====================
 # GUI-Building Functions
 # =====================
@@ -843,6 +880,12 @@ def get_training_tab_content(page: ft.Page):
         """
         try:
             dataset_selected = is_dataset_selected(config_page_content)
+
+            # Check for and delete Zone.Identifier files in the dataset
+            deleted_count = check_and_delete_zone_identifier_files(dataset_selected)
+            if deleted_count > 0:
+                print(f"Deleted {deleted_count} Zone.Identifier files before training")
+
             async def run_training():
                 try:
                     await handle_training_output(e.page, training_tab_container_arg)
