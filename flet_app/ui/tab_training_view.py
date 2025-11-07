@@ -395,38 +395,39 @@ def check_and_move_unmatched_control_images(dataset_name):
         print(f"Error checking/moving unmatched control images: {e}")
         return 0
 
-def has_control_enabled(training_tab_container):
+def has_control_enabled(training_tab_container, dataset_name=None):
     """
-    Checks if 'Has control' is enabled in the data config.
-    Returns True if enabled, False otherwise.
+    Checks if dataset has a 'control' folder to determine if control is enabled.
+    Returns True if control folder exists, False otherwise.
     """
-    try:
-        # Get the data config page content from the main container
-        data_cfg_ctrl = getattr(training_tab_container, 'data_config_page_content', None)
-        if data_cfg_ctrl is None:
-            print("Debug: data_config_page_content not found in container")
-            return False
-
-        # Access the has_control_checkbox directly
-        has_control_checkbox = getattr(data_cfg_ctrl, 'has_control_checkbox', None)
-        if has_control_checkbox is not None:
-            print(f"Debug: has_control_checkbox found, value: {has_control_checkbox.value}")
-            return bool(has_control_checkbox.value)
-        else:
-            print("Debug: has_control_checkbox not found in data_config_page_content")
-
-        # Fallback: try to extract from config if direct access fails
+    if not dataset_name:
+        # Try to get dataset name from the container if not provided
         try:
-            from .utils.config_utils import extract_config_from_controls
-            if extract_config_from_controls:
-                cfg_map = extract_config_from_controls(data_cfg_ctrl) or {}
-                return bool(cfg_map.get('Has control', False))
+            config_page_content = getattr(training_tab_container, 'config_page_content', None)
+            if config_page_content:
+                dataset_block = getattr(config_page_content, 'dataset_block', None)
+                if dataset_block and hasattr(dataset_block, 'get_selected_dataset'):
+                    dataset_name = dataset_block.get_selected_dataset()
         except Exception:
             pass
 
+    if not dataset_name:
+        print("Debug: No dataset available for control folder check")
         return False
+
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+        base_dir, _ = _get_dataset_base_dir(dataset_name)
+        dataset_path = os.path.join(base_dir, dataset_name)
+
+        control_path = os.path.join(dataset_path, "control")
+        has_control = os.path.exists(control_path) and os.path.isdir(control_path)
+
+        print(f"Debug: Control folder check - path: {control_path}, exists: {has_control}")
+        return has_control
+
     except Exception as e:
-        print(f"Debug: Exception in has_control_enabled: {e}")
+        print(f"Debug: Error checking control folder: {e}")
         return False
 
 # =====================
@@ -994,8 +995,8 @@ def get_training_tab_content(page: ft.Page):
                 print(f"Deleted {deleted_count} Zone.Identifier files before training")
 
             # Check for unmatched control images if Has control is enabled
-            # Pass the main container which contains the data_config_page_content
-            has_control = has_control_enabled(training_tab_container_arg)
+            # Pass both container and dataset name for cleaner folder detection
+            has_control = has_control_enabled(training_tab_container_arg, dataset_selected)
             print(f"Has control enabled: {has_control}")  # Debug output
             if has_control:
                 moved_count = check_and_move_unmatched_control_images(dataset_selected)
