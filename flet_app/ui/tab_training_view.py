@@ -285,6 +285,151 @@ def is_dataset_selected(config_page_content):
         return dataset_block.get_selected_dataset()
     return None
 
+def check_and_delete_zone_identifier_files(dataset_name):
+    """
+    Checks for and deletes files with 'Zone.Identifier' in their names in the selected dataset folder.
+    Returns the number of files deleted.
+    """
+    if not dataset_name:
+        print("No dataset selected for Zone.Identifier check")
+        return 0
+
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+        base_dir, _ = _get_dataset_base_dir(dataset_name)
+        dataset_path = os.path.join(base_dir, dataset_name)
+
+        if not os.path.exists(dataset_path):
+            print(f"Dataset path does not exist: {dataset_path}")
+            return 0
+
+        # Search for and delete files containing 'Zone.Identifier' in their names
+        deleted_count = 0
+        for root, dirs, files in os.walk(dataset_path):
+            for file in files:
+                if "Zone.Identifier" in file:
+                    file_path = os.path.join(root, file)
+                    try:
+                        os.remove(file_path)
+                        print(f"Deleted Zone.Identifier file: {file_path}")
+                        deleted_count += 1
+                    except Exception as delete_error:
+                        print(f"Failed to delete {file_path}: {delete_error}")
+
+        return deleted_count
+
+    except Exception as e:
+        print(f"Error checking/deleting Zone.Identifier files: {e}")
+        return 0
+
+def check_and_move_unmatched_control_images(dataset_name):
+    """
+    Checks for dataset images that don't have corresponding control images.
+    Moves unmatched images to a '_miss' folder next to the control folder.
+    Returns the number of moved files.
+    """
+    if not dataset_name:
+        print("No dataset selected for control image check")
+        return 0
+
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+        import glob
+
+        base_dir, _ = _get_dataset_base_dir(dataset_name)
+        dataset_path = os.path.join(base_dir, dataset_name)
+
+        if not os.path.exists(dataset_path):
+            print(f"Dataset path does not exist: {dataset_path}")
+            return 0
+
+        control_dir = os.path.join(dataset_path, "control")
+        if not os.path.exists(control_dir):
+            print(f"Control directory does not exist: {control_dir}")
+            return 0
+
+        # Create _miss directory if it doesn't exist
+        miss_dir = os.path.join(dataset_path, "_miss")
+        os.makedirs(miss_dir, exist_ok=True)
+
+        # Get all supported image extensions
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.gif']
+
+        # Find all images in the main dataset directory (excluding control and _miss directories)
+        main_images = []
+        for ext in image_extensions:
+            main_images.extend(glob.glob(os.path.join(dataset_path, f"*{ext}")))
+            main_images.extend(glob.glob(os.path.join(dataset_path, f"*{ext.upper()}")))
+
+        # Filter out files that might be in control or _miss directories
+        main_images = [img for img in main_images if not img.startswith(control_dir + os.sep)
+                      and not img.startswith(miss_dir + os.sep)]
+
+        # Find all control images
+        control_images = []
+        for ext in image_extensions:
+            control_images.extend(glob.glob(os.path.join(control_dir, f"*{ext}")))
+            control_images.extend(glob.glob(os.path.join(control_dir, f"*{ext.upper()}")))
+
+        # Create set of base names for control images (without extension)
+        control_basenames = {os.path.splitext(os.path.basename(img))[0] for img in control_images}
+
+        moved_count = 0
+        for main_image in main_images:
+            main_basename = os.path.splitext(os.path.basename(main_image))[0]
+
+            # If main image doesn't have a corresponding control image
+            if main_basename not in control_basenames:
+                try:
+                    # Move to _miss directory
+                    target_path = os.path.join(miss_dir, os.path.basename(main_image))
+                    shutil.move(main_image, target_path)
+                    print(f"Moved unmatched image to _miss: {os.path.basename(main_image)}")
+                    moved_count += 1
+                except Exception as move_error:
+                    print(f"Failed to move {main_image}: {move_error}")
+
+        return moved_count
+
+    except Exception as e:
+        print(f"Error checking/moving unmatched control images: {e}")
+        return 0
+
+def has_control_enabled(training_tab_container, dataset_name=None):
+    """
+    Checks if dataset has a 'control' folder to determine if control is enabled.
+    Returns True if control folder exists, False otherwise.
+    """
+    if not dataset_name:
+        # Try to get dataset name from the container if not provided
+        try:
+            config_page_content = getattr(training_tab_container, 'config_page_content', None)
+            if config_page_content:
+                dataset_block = getattr(config_page_content, 'dataset_block', None)
+                if dataset_block and hasattr(dataset_block, 'get_selected_dataset'):
+                    dataset_name = dataset_block.get_selected_dataset()
+        except Exception:
+            pass
+
+    if not dataset_name:
+        print("Debug: No dataset available for control folder check")
+        return False
+
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+        base_dir, _ = _get_dataset_base_dir(dataset_name)
+        dataset_path = os.path.join(base_dir, dataset_name)
+
+        control_path = os.path.join(dataset_path, "control")
+        has_control = os.path.exists(control_path) and os.path.isdir(control_path)
+
+        print(f"Debug: Control folder check - path: {control_path}, exists: {has_control}")
+        return has_control
+
+    except Exception as e:
+        print(f"Debug: Error checking control folder: {e}")
+        return False
+
 # =====================
 # GUI-Building Functions
 # =====================
@@ -843,6 +988,23 @@ def get_training_tab_content(page: ft.Page):
         """
         try:
             dataset_selected = is_dataset_selected(config_page_content)
+
+            # Check for and delete Zone.Identifier files in the dataset
+            deleted_count = check_and_delete_zone_identifier_files(dataset_selected)
+            if deleted_count > 0:
+                print(f"Deleted {deleted_count} Zone.Identifier files before training")
+
+            # Check for unmatched control images if Has control is enabled
+            # Pass both container and dataset name for cleaner folder detection
+            has_control = has_control_enabled(training_tab_container_arg, dataset_selected)
+            print(f"Has control enabled: {has_control}")  # Debug output
+            if has_control:
+                moved_count = check_and_move_unmatched_control_images(dataset_selected)
+                if moved_count > 0:
+                    print(f"Moved {moved_count} unmatched images to _miss folder")
+                else:
+                    print("No unmatched control images found")
+
             async def run_training():
                 try:
                     await handle_training_output(e.page, training_tab_container_arg)
