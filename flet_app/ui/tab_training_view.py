@@ -322,6 +322,113 @@ def check_and_delete_zone_identifier_files(dataset_name):
         print(f"Error checking/deleting Zone.Identifier files: {e}")
         return 0
 
+def check_and_move_unmatched_control_images(dataset_name):
+    """
+    Checks for dataset images that don't have corresponding control images.
+    Moves unmatched images to a '_miss' folder next to the control folder.
+    Returns the number of moved files.
+    """
+    if not dataset_name:
+        print("No dataset selected for control image check")
+        return 0
+
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+        import glob
+
+        base_dir, _ = _get_dataset_base_dir(dataset_name)
+        dataset_path = os.path.join(base_dir, dataset_name)
+
+        if not os.path.exists(dataset_path):
+            print(f"Dataset path does not exist: {dataset_path}")
+            return 0
+
+        control_dir = os.path.join(dataset_path, "control")
+        if not os.path.exists(control_dir):
+            print(f"Control directory does not exist: {control_dir}")
+            return 0
+
+        # Create _miss directory if it doesn't exist
+        miss_dir = os.path.join(dataset_path, "_miss")
+        os.makedirs(miss_dir, exist_ok=True)
+
+        # Get all supported image extensions
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.gif']
+
+        # Find all images in the main dataset directory (excluding control and _miss directories)
+        main_images = []
+        for ext in image_extensions:
+            main_images.extend(glob.glob(os.path.join(dataset_path, f"*{ext}")))
+            main_images.extend(glob.glob(os.path.join(dataset_path, f"*{ext.upper()}")))
+
+        # Filter out files that might be in control or _miss directories
+        main_images = [img for img in main_images if not img.startswith(control_dir + os.sep)
+                      and not img.startswith(miss_dir + os.sep)]
+
+        # Find all control images
+        control_images = []
+        for ext in image_extensions:
+            control_images.extend(glob.glob(os.path.join(control_dir, f"*{ext}")))
+            control_images.extend(glob.glob(os.path.join(control_dir, f"*{ext.upper()}")))
+
+        # Create set of base names for control images (without extension)
+        control_basenames = {os.path.splitext(os.path.basename(img))[0] for img in control_images}
+
+        moved_count = 0
+        for main_image in main_images:
+            main_basename = os.path.splitext(os.path.basename(main_image))[0]
+
+            # If main image doesn't have a corresponding control image
+            if main_basename not in control_basenames:
+                try:
+                    # Move to _miss directory
+                    target_path = os.path.join(miss_dir, os.path.basename(main_image))
+                    shutil.move(main_image, target_path)
+                    print(f"Moved unmatched image to _miss: {os.path.basename(main_image)}")
+                    moved_count += 1
+                except Exception as move_error:
+                    print(f"Failed to move {main_image}: {move_error}")
+
+        return moved_count
+
+    except Exception as e:
+        print(f"Error checking/moving unmatched control images: {e}")
+        return 0
+
+def has_control_enabled(training_tab_container):
+    """
+    Checks if 'Has control' is enabled in the data config.
+    Returns True if enabled, False otherwise.
+    """
+    try:
+        # Get the data config page content from the main container
+        data_cfg_ctrl = getattr(training_tab_container, 'data_config_page_content', None)
+        if data_cfg_ctrl is None:
+            print("Debug: data_config_page_content not found in container")
+            return False
+
+        # Access the has_control_checkbox directly
+        has_control_checkbox = getattr(data_cfg_ctrl, 'has_control_checkbox', None)
+        if has_control_checkbox is not None:
+            print(f"Debug: has_control_checkbox found, value: {has_control_checkbox.value}")
+            return bool(has_control_checkbox.value)
+        else:
+            print("Debug: has_control_checkbox not found in data_config_page_content")
+
+        # Fallback: try to extract from config if direct access fails
+        try:
+            from .utils.config_utils import extract_config_from_controls
+            if extract_config_from_controls:
+                cfg_map = extract_config_from_controls(data_cfg_ctrl) or {}
+                return bool(cfg_map.get('Has control', False))
+        except Exception:
+            pass
+
+        return False
+    except Exception as e:
+        print(f"Debug: Exception in has_control_enabled: {e}")
+        return False
+
 # =====================
 # GUI-Building Functions
 # =====================
@@ -885,6 +992,17 @@ def get_training_tab_content(page: ft.Page):
             deleted_count = check_and_delete_zone_identifier_files(dataset_selected)
             if deleted_count > 0:
                 print(f"Deleted {deleted_count} Zone.Identifier files before training")
+
+            # Check for unmatched control images if Has control is enabled
+            # Pass the main container which contains the data_config_page_content
+            has_control = has_control_enabled(training_tab_container_arg)
+            print(f"Has control enabled: {has_control}")  # Debug output
+            if has_control:
+                moved_count = check_and_move_unmatched_control_images(dataset_selected)
+                if moved_count > 0:
+                    print(f"Moved {moved_count} unmatched images to _miss folder")
+                else:
+                    print("No unmatched control images found")
 
             async def run_training():
                 try:

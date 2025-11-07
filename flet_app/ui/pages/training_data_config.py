@@ -408,6 +408,7 @@ def get_training_data_config_page_content():
 
     # Expose dataset block for cross-page sync and a refresh method for TOML indicator
     container.dataset_block = dataset_block
+    container.has_control_checkbox = has_control_checkbox
     try:
         container.refresh_indicator = _on_dataset_change_for_indicator
     except Exception:
