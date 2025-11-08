@@ -219,7 +219,7 @@ def handle_dataset_sort_change(e):
     try:
         dataset_sort_mode["value"] = e.control.value
         if thumbnails_grid_ref and thumbnails_grid_ref.current and e.page:
-            e.page.run_task(update_thumbnails, page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+            e.page.run_task(update_thumbnails, page_ctx=e.page, grid_control=thumbnails_grid_ref.current)
     except Exception as ex:
         print(f"Error in sort change: {ex}")
 
@@ -848,7 +848,7 @@ def reload_current_dataset(
         if bucket_size_textfield: bucket_size_textfield.value = bucket_val
         if model_name_dropdown: model_name_dropdown.value = model_val if model_val in settings.train_models else settings.train_def_model
         if trigger_word_textfield: trigger_word_textfield.value = trigger_word_val or ''
-        p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid)
+        p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid, force_refresh=True)
         snack_bar_text = f"Dataset '{prev_selected_name}' reloaded."
     else:
         current_dataset_dropdown.value = None
@@ -857,7 +857,7 @@ def reload_current_dataset(
         if bucket_size_textfield: bucket_size_textfield.value = bucket_val
         if model_name_dropdown: model_name_dropdown.value = model_val
         if trigger_word_textfield: trigger_word_textfield.value = trigger_word_val or ''
-        p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid)
+        p_page.run_task(update_thumbnails, page_ctx=p_page, grid_control=current_thumbnails_grid, force_refresh=True)
         snack_bar_text = "Dataset list reloaded. Select a dataset."
 
     if delete_button:

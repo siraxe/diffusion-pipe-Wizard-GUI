@@ -169,7 +169,7 @@ def build_training_dataset_page_content(extra_right_controls=None):
                     dataset_dropdown.value = None # No datasets available, clear selection
                     selected_dataset["value"] = None
             dataset_dropdown.update()
-        update_summary_row()
+        update_summary_row(force_summary_refresh=True)
 
     def build_controls():
         """
@@ -263,18 +263,18 @@ def build_training_dataset_page_content(extra_right_controls=None):
         ], spacing=10, alignment=ft.MainAxisAlignment.START)
         return ft.Container(content=row, padding=ft.padding.only(left=30, right=8, top=8, bottom=8))
 
-    def update_summary_row():
+    def update_summary_row(force_summary_refresh: bool = False):
         """
         Updates the summary display row with the current dataset's summary and collage image.
         """
         page_col = content_column_ref.current
-        if not page_col: return
+        if not page_col:
+            return
 
         summary_img_container = None
         summary_text_column = None
         if len(page_col.controls) > 1:
             candidate = page_col.controls[1]
-            # Our refactor wraps the row in a Container; handle both old/new
             if isinstance(candidate, ft.Container):
                 inner = getattr(candidate, 'content', None)
             else:
@@ -290,33 +290,44 @@ def build_training_dataset_page_content(extra_right_controls=None):
         if not summary_img_container or not summary_text_column:
             return
 
-        summary_img_container.content = None # Clear image first
-        summary_text_column.controls.clear() # Clear text first
+        summary_img_container.content = None
+        summary_text_column.controls.clear()
 
         current_selected_dataset = selected_dataset["value"]
 
-        if not current_selected_dataset or str(current_selected_dataset).lower() == "none": # Handle None and "None" string
+        if not current_selected_dataset or str(current_selected_dataset).lower() == "none":
             summary_text_column.controls.append(
                 ft.Text("Select a dataset", key="placeholder_select_dataset")
             )
         else:
-            # Unified datasets and thumbnails base directory
             base_dir, dataset_type = _get_dataset_base_dir(current_selected_dataset)
             clean_dataset_name = current_selected_dataset
             thumbnails_base_dir = settings.THUMBNAILS_BASE_DIR
 
             thumbnails_dir = os.path.join(thumbnails_base_dir, clean_dataset_name)
             summary_path = os.path.join(thumbnails_dir, "summary.jpg")
-            
             if not os.path.exists(thumbnails_dir):
                 os.makedirs(thumbnails_dir, exist_ok=True)
-            
+
             if not os.path.exists(thumbnails_dir):
                 summary_text_column.controls.append(ft.Text(f"Thumbnails directory for {current_selected_dataset} not found or couldn't be created.", size=12))
             else:
-                # Try to generate summary if it doesn't exist
-                if not os.path.exists(summary_path):
-                    generate_collage(thumbnails_dir, summary_path)
+                needs_summary = force_summary_refresh or not os.path.exists(summary_path)
+                if needs_summary and os.path.exists(summary_path):
+                    try:
+                        os.remove(summary_path)
+                    except Exception as e:
+                        print(f"Error removing old summary image: {e}")
+
+                if needs_summary:
+                    try:
+                        get_videos_and_thumbnails(clean_dataset_name, dataset_type, force_metadata_refresh=force_summary_refresh)
+                    except Exception as e:
+                        print(f"Error refreshing thumbnails for summary: {e}")
+                    try:
+                        generate_collage(thumbnails_dir, summary_path)
+                    except Exception as e:
+                        print(f"Error generating summary image: {e}")
 
                 if os.path.exists(summary_path):
                     try:
@@ -332,41 +343,13 @@ def build_training_dataset_page_content(extra_right_controls=None):
                         print(f"Error loading summary image: {e}")
                         summary_text_column.controls.append(ft.Text(f"Error loading summary image: {e}", size=12))
                 else:
-                    # Attempt to regenerate thumbnails and summary on-demand
-                    try:
-                        get_videos_and_thumbnails(clean_dataset_name, dataset_type)
-                        generate_collage(thumbnails_dir, summary_path)
-                    except Exception:
-                        pass
+                    print(f"Summary image not found at: {summary_path}")
+                    summary_text_column.controls.append(ft.Text(f"Summary image not found at: {summary_path}", size=12))
 
-                    if os.path.exists(summary_path):
-                        try:
-                            with open(summary_path, "rb") as image_file:
-                                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-                            summary_img_container.content = ft.Image(
-                                src_base64=encoded_string,
-                                width=settings.COLLAGE_WIDTH - 2,
-                                height=settings.COLLAGE_HEIGHT,
-                                fit=ft.ImageFit.CONTAIN
-                            )
-                        except Exception as e:
-                            summary_text_column.controls.append(ft.Text(f"Error loading summary image: {e}", size=12))
-                    else:
-                        print(f"Summary image not found at: {summary_path}")
-                        summary_text_column.controls.append(ft.Text(f"Summary image not found at: {summary_path}", size=12))
-
-            summary_data = load_dataset_summary(current_selected_dataset)
-
-            # Check for "Files" instead of "Videos"
-            if not summary_data.get("Files") and not os.path.exists(summary_path):
-                summary_text_column.controls.append(ft.Text(f"No files or summary image found for {current_selected_dataset}.", size=12))
-
-            summary_text_column.controls.append(ft.Text("Dataset summary", weight=ft.FontWeight.BOLD, size=14))
-            for k, v in summary_data.items():
-                summary_text_column.controls.append(ft.Text(f"{k} - {v}", size=12))
-
-        if summary_img_container.page: summary_img_container.update()
-        if summary_text_column.page: summary_text_column.update()
+        if summary_img_container.page:
+            summary_img_container.update()
+        if summary_text_column.page:
+            summary_text_column.update()
 
     # Build optional bottom-right Save area (moved under summary)
     bottom_right_controls = []

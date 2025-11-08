@@ -1,6 +1,7 @@
 import flet as ft
 import os
 import json
+import re
 from typing import Any
 try:
     import tomllib as _toml_reader  # Python 3.11+
@@ -118,6 +119,8 @@ def get_training_data_config_page_content():
             out_toml_path = os.path.join(parent_dir, f"{clean_dataset_name}.toml")
 
             # Collect values
+            resolutions_raw = (resolutions_field.value or "").strip()
+            ar_buckets_raw = (ar_buckets_field.value or "").strip()
             resolutions_val = _parse_list_field(resolutions_field.value or "[]", [])
             ar_buckets_val = _parse_list_field(ar_buckets_field.value or "[]", [])
             enable_ar_bucket_val = bool(enable_ar_bucket_field.value)
@@ -141,14 +144,20 @@ def get_training_data_config_page_content():
                 return "[" + ", ".join(fmt_pair(p) for p in lst) + "]"
 
             toml_lines = []
-            toml_lines.append(f"resolutions = {_fmt_list(resolutions_val)}")
+            if resolutions_raw:
+                toml_lines.append(f"resolutions = {_fmt_list(resolutions_val)}")
+            else:
+                toml_lines.append("# resolutions = []")
             toml_lines.append("")
             toml_lines.append(f"enable_ar_bucket = {'true' if enable_ar_bucket_val else 'false'}")
             toml_lines.append("")
             toml_lines.append("# Min and max aspect ratios, given as width/height ratio.")
             toml_lines.append(f"min_ar = {min_ar_val}")
             toml_lines.append(f"max_ar = {max_ar_val}")
-            toml_lines.append(f"ar_buckets = {_fmt_list_of_lists(ar_buckets_val)}")
+            if ar_buckets_raw:
+                toml_lines.append(f"ar_buckets = {_fmt_list_of_lists(ar_buckets_val)}")
+            else:
+                toml_lines.append("# ar_buckets = []")
             toml_lines.append("")
             toml_lines.append("# Total number of aspect ratio buckets, evenly spaced (in log space) between min_ar and max_ar.")
             toml_lines.append(f"num_ar_buckets = {num_ar_buckets_val}")
@@ -282,10 +291,28 @@ def get_training_data_config_page_content():
                 return
             if _toml_reader is None:
                 return  # Skip if tomllib not available; avoid adding deps
-            with open(toml_path, 'rb') as f:
-                data = _toml_reader.load(f)
+            with open(toml_path, 'r', encoding='utf-8') as f:
+                raw_text = f.read()
+            data = {}
+            try:
+                loads_fn = getattr(_toml_reader, 'loads', None)
+                if loads_fn:
+                    data = loads_fn(raw_text)
+                else:
+                    with open(toml_path, 'rb') as fb:
+                        data = _toml_reader.load(fb)
+            except Exception:
+                data = {}
+            resolutions_commented = bool(re.search(r'^[ 	]*#[ 	]*resolutions[ 	]*=.*', raw_text, re.MULTILINE))
+            ar_buckets_commented = bool(re.search(r'^[ 	]*#[ 	]*ar_buckets[ 	]*=.*', raw_text, re.MULTILINE))
             # Top-level fields
-            if isinstance(data.get('resolutions'), list):
+            if resolutions_commented:
+                try:
+                    resolutions_field.value = ""
+                    if resolutions_field.page: resolutions_field.update()
+                except Exception:
+                    pass
+            elif isinstance(data.get('resolutions'), list):
                 try:
                     resolutions_field.value = json.dumps(data['resolutions'])
                     if resolutions_field.page: resolutions_field.update()
@@ -309,7 +336,13 @@ def get_training_data_config_page_content():
                     if max_ar_field.page: max_ar_field.update()
                 except Exception:
                     pass
-            if isinstance(data.get('ar_buckets'), list):
+            if ar_buckets_commented:
+                try:
+                    ar_buckets_field.value = ""
+                    if ar_buckets_field.page: ar_buckets_field.update()
+                except Exception:
+                    pass
+            elif isinstance(data.get('ar_buckets'), list):
                 try:
                     ar_buckets_field.value = json.dumps(data['ar_buckets'])
                     if ar_buckets_field.page: ar_buckets_field.update()
@@ -409,6 +442,10 @@ def get_training_data_config_page_content():
     # Expose dataset block for cross-page sync and a refresh method for TOML indicator
     container.dataset_block = dataset_block
     container.has_control_checkbox = has_control_checkbox
+    try:
+        container.save_data_config = _on_save_click
+    except Exception:
+        pass
     try:
         container.refresh_indicator = _on_dataset_change_for_indicator
     except Exception:

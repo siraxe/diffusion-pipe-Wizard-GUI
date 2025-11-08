@@ -398,7 +398,14 @@ def get_videos_and_thumbnails(dataset_name, dataset_type, force_metadata_refresh
                 print(f"Error getting media info for {media_name}: {e}") # Debugging print
                 pass # Continue even if info retrieval fails
 
-        # Generate thumbnail if it doesn't exist
+        # Remove cached thumbnail when forcing a refresh so new images regenerate
+        if force_metadata_refresh and os.path.exists(thumbnail_path):
+            try:
+                os.remove(thumbnail_path)
+            except Exception as rm_ex:
+                print(f"Error removing cached thumbnail {thumbnail_path}: {rm_ex}")
+
+        # Generate thumbnail if it doesn't exist (or we deleted it above)
         if not os.path.exists(thumbnail_path):
             print(f"Generating thumbnail for: {media_path}") # Debugging print
             if is_image_file:

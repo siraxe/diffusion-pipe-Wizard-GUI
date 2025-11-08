@@ -503,7 +503,7 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
     if not files_to_rename:
         if e.page:
             e.page.snack_bar = ft.SnackBar(
-                content=ft.Text(f"No {file_type} files found to rename in '{clean_dataset_name}'."), 
+                content=ft.Text(f"No {file_type} files found to rename in '{clean_current_name}'."), 
                 open=True
             )
             e.page.update()
@@ -632,7 +632,11 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
 
         if e.page:
             e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Renamed {len(files_to_rename)} files successfully and cleaned up old thumbnails."), open=True)
-            update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True) # Force refresh to update image sources
+            if update_thumbnails_func:
+                if asyncio.iscoroutinefunction(update_thumbnails_func):
+                    await update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)  # Force refresh to update image sources
+                else:
+                    update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)  # Force refresh to update image sources
             e.page.update()
 
 async def on_bucket_or_model_change(e: ft.ControlEvent, selected_dataset_ref, bucket_size_textfield_obj, model_name_dropdown_obj, trigger_word_textfield_obj):

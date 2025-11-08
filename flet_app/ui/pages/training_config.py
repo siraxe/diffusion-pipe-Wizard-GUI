@@ -1185,6 +1185,7 @@ def get_training_config_page_content():
         padding=ft.padding.all(5)
     )
     container.dataset_block = dataset_block
+    container.save_data_config_button = save_cfg_btn
     return container
 
 def update_wan_fields_visibility(is_wan22: bool, min_t_value=None, max_t_value=None):

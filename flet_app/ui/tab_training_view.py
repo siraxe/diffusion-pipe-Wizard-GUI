@@ -12,6 +12,7 @@ import shutil
 import asyncio
 import traceback
 import tempfile
+import json
 from PIL import Image
 
 # =====================
@@ -64,6 +65,16 @@ async def save_training_config_to_toml(training_tab_container):
             except Exception:
                 return default
 
+        def _raw_field_text(val):
+            if isinstance(val, str):
+                return val.strip()
+            if val is None:
+                return ""
+            try:
+                return json.dumps(val)
+            except Exception:
+                return str(val).strip()
+
         # Collect dataset directory path
         dir_path_val = ""
         selected_name = None
@@ -78,8 +89,12 @@ async def save_training_config_to_toml(training_tab_container):
             pass
 
         # Pull fields from UI
-        resolutions_val = _parse_json_list(_get('resolutions', "[]"), [])
-        ar_buckets_val = _parse_json_list(_get('ar_buckets', "[]"), [])
+        resolutions_raw = _raw_field_text(_get('resolutions', ""))
+        ar_buckets_raw = _raw_field_text(_get('ar_buckets', "[]"))
+        resolutions_val = _parse_json_list(resolutions_raw or "[]", [])
+        ar_buckets_val = _parse_json_list(ar_buckets_raw or "[]", [])
+        resolutions_commented = not resolutions_raw
+        ar_buckets_commented = not ar_buckets_raw
         enable_ar_bucket_val = bool(_get('enable_ar_bucket', True))
         min_ar_val = float(_get('min_ar', 0.5) or 0.0)
         max_ar_val = float(_get('max_ar', 2.0) or 0.0)
@@ -115,14 +130,20 @@ async def save_training_config_to_toml(training_tab_container):
             return "[" + ", ".join(fmt_pair(p) for p in lst) + "]"
 
         lines = []
-        lines.append(f"resolutions = {_fmt_list(resolutions_val)}")
+        if resolutions_commented:
+            lines.append("# resolutions = []")
+        else:
+            lines.append(f"resolutions = {_fmt_list(resolutions_val)}")
         lines.append("")
         lines.append(f"enable_ar_bucket = {'true' if enable_ar_bucket_val else 'false'}")
         lines.append("")
         lines.append("# Min and max aspect ratios, given as width/height ratio.")
         lines.append(f"min_ar = {min_ar_val}")
         lines.append(f"max_ar = {max_ar_val}")
-        lines.append(f"ar_buckets = {_fmt_list_of_lists(ar_buckets_val)}")
+        if ar_buckets_commented:
+            lines.append("# ar_buckets = []")
+        else:
+            lines.append(f"ar_buckets = {_fmt_list_of_lists(ar_buckets_val)}")
         lines.append("")
         lines.append("# Total number of aspect ratio buckets, evenly spaced (in log space) between min_ar and max_ar.")
         lines.append(f"num_ar_buckets = {num_ar_buckets_val}")
@@ -579,6 +600,12 @@ def get_training_tab_content(page: ft.Page):
     config_page_content = get_training_config_page_content()
     data_config_page_content = get_training_data_config_page_content()
     monitor_page_content = get_training_monitor_page_content()
+
+    # Prefer the Data Config tab's save handler so inputs stay intact
+    cfg_save_btn = getattr(config_page_content, 'save_data_config_button', None)
+    data_save_handler = getattr(data_config_page_content, 'save_data_config', None)
+    if cfg_save_btn and callable(data_save_handler):
+        cfg_save_btn.on_click = lambda e: data_save_handler(e)
 
     # Wire dataset selection sync between pages (two-way)
     try:
