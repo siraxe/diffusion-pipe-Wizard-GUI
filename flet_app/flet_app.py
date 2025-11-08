@@ -17,7 +17,7 @@ import flet as ft
 # Local imports - UI components
 from flet_app.ui.flet_hotkeys import global_hotkey_handler
 from flet_app.ui.tab_training_view import get_training_tab_content
-from flet_app.ui.dataset_manager.dataset_layout_tab import dataset_tab_layout, on_main_tab_change, is_in_dataset_tab
+from flet_app.ui.dataset_manager.dataset_layout_tab import dataset_tab_layout, on_main_tab_change, is_in_dataset_tab, update_sort_controls_visibility
 from flet_app.ui.tab_tools_view import get_models_tab_content
 from flet_app.flet_app_top_menu import create_app_menu_bar
 from flet_app.ui.utils.utils_top_menu import TopBarUtils
@@ -65,10 +65,11 @@ def build_main_tabs(page):
     training_tab_container = get_training_tab_content(page)
     
     # Create dataset tab content first to get the ABC container
-    dataset_tab_content, abc_container = dataset_tab_layout(page)
+    dataset_tab_content, abc_container, sort_controls_container = dataset_tab_layout(page)
 
     # Initialize the tab state since we start on Training tab (index 0)
     is_in_dataset_tab["value"] = False
+    update_sort_controls_visibility()
 
     main_tabs = ft.Tabs(
         selected_index=0,
@@ -95,11 +96,12 @@ def build_main_tabs(page):
     tab_with_abc_container = ft.Stack(
         [
             main_tabs,
+            sort_controls_container,
             abc_container
         ],
         expand=True
     )
-    
+
     # Store reference to the ABC container so it can be controlled externally
     tab_with_abc_container.abc_container = abc_container
 

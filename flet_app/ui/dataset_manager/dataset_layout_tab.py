@@ -33,6 +33,10 @@ selected_dataset = {"value": None}
 DATASETS_TYPE = {"value": None} # "image" or "video"
 video_files_list = {"value": []}
 thumbnails_grid_ref = ft.Ref[ft.GridView]()
+refresh_button_ref = ft.Ref[ft.IconButton]()
+thumbnails_refresh_in_progress = False
+thumbnails_pending_refresh = False
+thumbnails_pending_force_refresh = False
 processed_progress_bar = ft.ProgressBar(visible=False)
 processed_output_field = ft.TextField(
     label="Processed Output", text_size=10, multiline=True, read_only=True,
@@ -55,8 +59,13 @@ rename_textfield: ft.TextField = None
 model_name_dropdown: ft.Dropdown = None
 trigger_word_textfield: ft.TextField = None
 
+# Global sorting state for datasets
+dataset_sort_mode = {"value": "newest"}  # "newest", "oldest", "name_asc", "name_desc"
+dataset_sort_controls_container: ft.Container | None = None
+
 # References to controls created in dataset_tab_layout that need external access
 dataset_dropdown_control_ref = ft.Ref[ft.Dropdown]()
+dataset_dropdown_disabled_by_refresh = False
 dataset_add_captions_button_ref = ft.Ref[ft.ElevatedButton]()
 dataset_delete_captions_button_ref = ft.Ref[ft.ElevatedButton]()
 caption_model_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -83,6 +92,58 @@ def set_bottom_app_bar_height():
         else:
             bottom_app_bar_ref.height = 0
         bottom_app_bar_ref.update()
+
+def _resolve_page_context(page_ctx: ft.Page | None, grid_control: ft.GridView | None) -> ft.Page | None:
+    """Best effort page lookup so we can update UI state even when callers pass None."""
+    if page_ctx:
+        return page_ctx
+    if grid_control and grid_control.page:
+        return grid_control.page
+    if refresh_button_ref.current and refresh_button_ref.current.page:
+        return refresh_button_ref.current.page
+    if dataset_dropdown_control_ref.current and dataset_dropdown_control_ref.current.page:
+        return dataset_dropdown_control_ref.current.page
+    return None
+
+
+def _set_refresh_ui_state(is_running: bool, page_ctx: ft.Page | None, grid_control: ft.GridView | None):
+    """Toggle refresh button/dropdown state while thumbnails rebuild."""
+    global dataset_dropdown_disabled_by_refresh
+
+    refresh_btn = refresh_button_ref.current
+    if refresh_btn:
+        refresh_btn.disabled = is_running
+        refresh_btn.icon = ft.Icons.HOURGLASS_TOP if is_running else ft.Icons.REFRESH
+        refresh_btn.tooltip = "Refreshing thumbnails..." if is_running else "Update dataset list and refresh thumbnails"
+        if refresh_btn.page:
+            refresh_btn.update()
+
+    dropdown = dataset_dropdown_control_ref.current
+    if dropdown:
+        if is_running:
+            if not dropdown.disabled:
+                dataset_dropdown_disabled_by_refresh = True
+            dropdown.disabled = True
+        elif dataset_dropdown_disabled_by_refresh:
+            dropdown.disabled = False
+            dataset_dropdown_disabled_by_refresh = False
+        if dropdown.page:
+            dropdown.update()
+
+
+def _build_thumbnails_loading_indicator(message: str = "Refreshing thumbnails...") -> ft.Container:
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.ProgressRing(width=18, height=18, stroke_width=2),
+                ft.Text(message, size=11, color=ft.Colors.GREY_600),
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            spacing=10,
+        ),
+        padding=10,
+    )
+
 
 def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_index: int, page_ctx=None):
     global selected_thumbnails_set, last_clicked_thumbnail_index
@@ -152,6 +213,15 @@ def cleanup_old_temp_thumbnails(thumb_dir: str, max_age_seconds: int = 3600):
                     os.remove(file_path)
             except Exception as e:
                 print(f"Error cleaning up old temp thumbnail {filename}: {e}")
+
+def handle_dataset_sort_change(e):
+    """Keep the dataset thumbnails sorted when the dropdown changes"""
+    try:
+        dataset_sort_mode["value"] = e.control.value
+        if thumbnails_grid_ref and thumbnails_grid_ref.current and e.page:
+            e.page.run_task(update_thumbnails, page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+    except Exception as ex:
+        print(f"Error in sort change: {ex}")
 
 # ======================================================================================
 # ABC Action Container Functions (A, Duplicate, Delete)
@@ -432,45 +502,92 @@ def create_abc_action_container():
                 e.page.update()
 
     abc_action_container = ft.Container(
-        content=ft.Row([
-            ft.IconButton(
-                icon=ft.Icons.DOWNLOAD,
-                on_click=on_download_click,
-                icon_color=ft.Colors.GREEN_600,
-                tooltip="Download selected items",
-                icon_size=20
-            ),
-            ft.IconButton(
-                icon=ft.Icons.CONTENT_COPY,
-                on_click=on_duplicate_click,
-                icon_color=ft.Colors.BLUE_600,
-                tooltip="Duplicate selected items",
-                icon_size=20
-            ),
-            ft.IconButton(
-                icon=ft.Icons.DELETE,
-                on_click=on_delete_click,
-                icon_color=ft.Colors.RED_600,
-                tooltip="Delete selected items",
-                icon_size=20
-            ),
-        ], spacing=8),
-        top=10,
-        right=20,  # 20px offset from the right
-        padding=ft.padding.all(5),
+        content=ft.Row(
+            [
+                ft.Row([
+                    ft.IconButton(
+                        icon=ft.Icons.DOWNLOAD,
+                        on_click=on_download_click,
+                        icon_color=ft.Colors.GREEN_600,
+                        tooltip="Download selected items",
+                        icon_size=20
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.CONTENT_COPY,
+                        on_click=on_duplicate_click,
+                        icon_color=ft.Colors.BLUE_600,
+                        tooltip="Duplicate selected items",
+                        icon_size=20
+                    ),
+                    ft.IconButton(
+                        icon=ft.Icons.DELETE,
+                        on_click=on_delete_click,
+                        icon_color=ft.Colors.RED_600,
+                        tooltip="Delete selected items",
+                        icon_size=20
+                    ),
+                ], spacing=8),
+            ],
+            alignment=ft.MainAxisAlignment.START,
+            expand=True
+        ),
+        top=0,
+        right=160,  # 30px offset from the right
+        padding=ft.padding.all(2),
         visible=False,  # Initially hidden
     )
 
     return abc_action_container
 
+def create_sort_controls_container():
+    global dataset_sort_controls_container
+    if dataset_sort_controls_container is not None:
+        return dataset_sort_controls_container
+
+    sort_dropdown = create_dropdown(
+        label=None,
+        value=dataset_sort_mode["value"],
+        options={
+            "newest": "Newest",
+            "oldest": "Oldest",
+            "name_asc": "A-Z",
+            "name_desc": "Z-A",
+        },
+        width=170,
+        on_change=handle_dataset_sort_change,
+        scale=0.8,
+    )
+
+    dataset_sort_controls_container = ft.Container(
+        content=sort_dropdown,
+        padding=ft.padding.only(left=0, right=0),
+        border=None,
+        bgcolor=ft.Colors.TRANSPARENT,
+        top=0,
+        right=0,
+        visible=False,
+        scale=0.8,
+    )
+
+    return dataset_sort_controls_container
+
 def update_abc_container_visibility():
     """Update ABC container visibility based on selection state and tab state"""
     global abc_action_container
     if abc_action_container:
-        # Only show if we're in dataset tab AND have selections
+        # Main container visible only if we are in dataset tab AND have selections
         abc_action_container.visible = is_in_dataset_tab["value"] and len(selected_thumbnails_set) > 0
+        
         if abc_action_container.page:
             abc_action_container.update()
+
+
+def update_sort_controls_visibility():
+    global dataset_sort_controls_container
+    if dataset_sort_controls_container:
+        dataset_sort_controls_container.visible = is_in_dataset_tab["value"]
+        if dataset_sort_controls_container.page:
+            dataset_sort_controls_container.update()
 
 def on_main_tab_change(e):
     """Handle main tab switching - manage dataset selections and container visibility"""
@@ -483,6 +600,7 @@ def on_main_tab_change(e):
             is_in_dataset_tab["value"] = True
             # Update visibility (will show if there are preserved selections)
             update_abc_container_visibility()
+            update_sort_controls_visibility()
 
             # Also update the page's abc_container to match our local container
             if hasattr(e.page, 'abc_container') and e.page.abc_container:
@@ -495,6 +613,7 @@ def on_main_tab_change(e):
             # DON'T clear selections - preserve them for when we return
             # Just hide the container
             update_abc_container_visibility()
+            update_sort_controls_visibility()
 
             # Also update the page's abc_container
             if hasattr(e.page, 'abc_container') and e.page.abc_container:
@@ -554,72 +673,114 @@ async def on_dataset_dropdown_change(
 
 async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView | None, force_refresh: bool = False):
     global selected_thumbnails_set, last_clicked_thumbnail_index
+    global thumbnails_refresh_in_progress, thumbnails_pending_refresh, thumbnails_pending_force_refresh
     
     if not grid_control:
         return
 
-    current_selection = selected_dataset.get("value")
-    grid_control.controls.clear()
-    # removed processed_map/proc indicator
+    page_ctx = _resolve_page_context(page_ctx, grid_control)
 
-    if not current_selection:
-        folders_exist = get_dataset_folders() is not None and len(get_dataset_folders()) > 0
-        grid_control.controls.append(ft.Text("Select a dataset to view media." if folders_exist else "No datasets found."))
-    else:
-        thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, DATASETS_TYPE["value"], force_refresh)
-        video_files_list["value"] = list(thumbnail_paths_map.keys())
-        dataset_captions = load_dataset_captions(current_selection)
+    if thumbnails_refresh_in_progress:
+        thumbnails_pending_refresh = True
+        thumbnails_pending_force_refresh = thumbnails_pending_force_refresh or force_refresh
+        return
 
-        if not thumbnail_paths_map:
-            grid_control.controls.append(ft.Text(f"No media found in dataset '{current_selection}'."))
-        else:
-            sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), key=lambda item: item[0])
+    thumbnails_refresh_in_progress = True
+    _set_refresh_ui_state(True, page_ctx, grid_control)
 
-            for i, (video_path, thumb_path) in enumerate(sorted_thumbnail_items):
-                has_caption = any(entry.get("media_path") == os.path.basename(video_path) and entry.get("caption", "").strip() for entry in dataset_captions)
-                
-                grid_control.controls.append(
-                    create_thumbnail_container(
-                        page_ctx=page_ctx,
-                        video_path=video_path,
-                        thumb_path=thumb_path,
-                        video_info=video_info,
-                        has_caption=has_caption,
-                        video_files_list=video_files_list["value"],
-                        update_thumbnails_callback=update_thumbnails,
-                        grid_control=grid_control,
-                        on_checkbox_change_callback=_on_thumbnail_checkbox_change,
-                        thumbnail_index=i,
-                        is_selected_initially=(video_path in selected_thumbnails_set)
-                    )
-                )
-
-    if grid_control and grid_control.page:
-        grid_control.update()
-
-    # Update ABC container visibility based on current selection after updating the grid
     try:
-        if page_ctx and hasattr(page_ctx, 'abc_container'):
-            # Show ABC container if there are selected thumbnails
-            page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
-            page_ctx.abc_container.update()
+        current_selection = selected_dataset.get("value")
+        grid_control.controls.clear()
+        grid_control.controls.append(_build_thumbnails_loading_indicator())
+        if grid_control.page:
+            grid_control.update()
 
-        # Update local ABC container visibility
-        update_abc_container_visibility()
-    except Exception:
-        # If page is not available or update fails, continue without error
-        pass
+        if not current_selection:
+            grid_control.controls.clear()
+            folders = get_dataset_folders()
+            folders_exist = folders is not None and len(folders) > 0
+            grid_control.controls.append(ft.Text("Select a dataset to view media." if folders_exist else "No datasets found."))
+        else:
+            thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, DATASETS_TYPE["value"], force_refresh)
+            video_files_list["value"] = list(thumbnail_paths_map.keys())
+            dataset_captions = load_dataset_captions(current_selection)
 
-    if force_refresh and current_selection:
-        dataset_type = DATASETS_TYPE["value"]
-        base_dir = settings.DATASETS_DIR
-        dataset_folder_path = os.path.abspath(os.path.join(base_dir, current_selection))
-        
-        cleanup_old_temp_thumbnails(dataset_folder_path)
-        
-        thumb_dir = os.path.join(settings.THUMBNAILS_BASE_DIR, current_selection)
-        if os.path.exists(thumb_dir):
-            cleanup_old_temp_thumbnails(thumb_dir)
+            grid_control.controls.clear()
+
+            if not thumbnail_paths_map:
+                grid_control.controls.append(ft.Text(f"No media found in dataset '{current_selection}'."))
+            else:
+                # Apply sorting based on current sort mode
+                sort_mode = dataset_sort_mode.get("value", "newest")
+                if sort_mode == "name_desc":
+                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), key=lambda item: item[0].lower(), reverse=True)
+                elif sort_mode == "name_asc":
+                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), key=lambda item: item[0].lower())
+                elif sort_mode == "oldest":
+                    # Sort by modification time (oldest first)
+                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), 
+                        key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0)
+                else:  # newest (default)
+                    # Sort by modification time (newest first)
+                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), 
+                        key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0, reverse=True)
+
+                for i, (video_path, thumb_path) in enumerate(sorted_thumbnail_items):
+                    has_caption = any(
+                        entry.get("media_path") == os.path.basename(video_path) and entry.get("caption", "").strip()
+                        for entry in dataset_captions
+                    )
+
+                    grid_control.controls.append(
+                        create_thumbnail_container(
+                            page_ctx=page_ctx,
+                            video_path=video_path,
+                            thumb_path=thumb_path,
+                            video_info=video_info,
+                            has_caption=has_caption,
+                            video_files_list=video_files_list["value"],
+                            update_thumbnails_callback=update_thumbnails,
+                            grid_control=grid_control,
+                            on_checkbox_change_callback=_on_thumbnail_checkbox_change,
+                            thumbnail_index=i,
+                            is_selected_initially=(video_path in selected_thumbnails_set)
+                        )
+                    )
+
+        if grid_control and grid_control.page:
+            grid_control.update()
+
+        try:
+            if page_ctx and hasattr(page_ctx, 'abc_container'):
+                page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
+                page_ctx.abc_container.update()
+
+            update_abc_container_visibility()
+        except Exception:
+            pass
+
+        if force_refresh and current_selection:
+            base_dir = settings.DATASETS_DIR
+            dataset_folder_path = os.path.abspath(os.path.join(base_dir, current_selection))
+            cleanup_old_temp_thumbnails(dataset_folder_path)
+
+            thumb_dir = os.path.join(settings.THUMBNAILS_BASE_DIR, current_selection)
+            if os.path.exists(thumb_dir):
+                cleanup_old_temp_thumbnails(thumb_dir)
+    finally:
+        thumbnails_refresh_in_progress = False
+        _set_refresh_ui_state(False, page_ctx, grid_control)
+
+    pending_refresh = thumbnails_pending_refresh
+    pending_force = thumbnails_pending_force_refresh
+    thumbnails_pending_refresh = False
+    thumbnails_pending_force_refresh = False
+
+    if pending_refresh and thumbnails_grid_ref and thumbnails_grid_ref.current:
+        rerun_page = _resolve_page_context(page_ctx, thumbnails_grid_ref.current)
+        rerun_grid = thumbnails_grid_ref.current
+        if rerun_page and rerun_grid:
+            rerun_page.run_task(update_thumbnails, rerun_page, rerun_grid, pending_force)
 
 def update_dataset_dropdown(
     p_page: ft.Page | None,
@@ -969,6 +1130,8 @@ def dataset_tab_layout(page=None):
     # Create ABC action container and return it for the main page to use
     abc_container_ref = create_abc_action_container()
 
+    sort_controls_container_ref = create_sort_controls_container()
+
     # Initialize tab state (we're creating the dataset tab, so we're in it)
     is_in_dataset_tab["value"] = True
 
@@ -1001,10 +1164,12 @@ def dataset_tab_layout(page=None):
     )
 
     update_button_control = ft.IconButton(
-        icon=ft.Icons.REFRESH, 
+        ref=refresh_button_ref,
+        icon=ft.Icons.REFRESH,
         tooltip="Update dataset list and refresh thumbnails",
-        style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=8)), 
+        style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=8)),
         icon_size=20,
+        disabled=thumbnails_refresh_in_progress,
         on_click=lambda e: e.page.run_task(update_thumbnails, e.page, thumbnails_grid_control, True)
     )
 
@@ -1223,7 +1388,7 @@ def dataset_tab_layout(page=None):
             text_style=ft.TextStyle(size=10),  # Smaller font
             shape=ft.RoundedRectangleBorder(radius=3)
         ),
-        height=30,  # Smaller height
+          # Smaller height
         expand=True
     )
     dataset_add_captions_button_ref.current = dataset_add_captions_button_control
@@ -1473,7 +1638,7 @@ def dataset_tab_layout(page=None):
             text_style=ft.TextStyle(size=10),
             shape=ft.RoundedRectangleBorder(radius=3)
         ),
-        height=30,
+        
         on_click=lambda e: e.page.run_task(open_file_picker_async, file_picker)
     )
     
@@ -1525,4 +1690,4 @@ def dataset_tab_layout(page=None):
     # Expose the ABC container for external access
     main_container.abc_action_container = abc_container_ref
 
-    return main_container, abc_container_ref
+    return main_container, abc_container_ref, sort_controls_container_ref
