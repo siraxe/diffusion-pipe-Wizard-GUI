@@ -4,6 +4,7 @@
 .qwen
 *.env
 
+
 # diff pipe
 diffusion-pipe/
 models/
@@ -88,3 +89,5 @@ logs/
 !flet_app/modules/longcat_patch/models/
 !flet_app/modules/longcat_patch/models/*
 
+flet_app/ui/utils/recent_files.txt
+opencode.json

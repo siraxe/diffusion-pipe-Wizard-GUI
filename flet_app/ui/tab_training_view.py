@@ -15,6 +15,21 @@ import tempfile
 import json
 from PIL import Image
 
+
+def _get_workspace_last_config_paths():
+    """
+    Return the workspace directory along with the locked last_config and last_data_config paths.
+    Ensures the workspace directory exists before returning the paths.
+    """
+    from flet_app.project_root import get_project_root
+
+    project_root = str(get_project_root())
+    ws_dir = os.path.abspath(os.path.join(project_root, "workspace"))
+    os.makedirs(ws_dir, exist_ok=True)
+    last_config_path = os.path.join(ws_dir, "last_config.toml")
+    last_data_config_path = os.path.join(ws_dir, "last_data_config.toml")
+    return ws_dir, last_config_path, last_data_config_path
+
 # =====================
 # Data/Utility Functions
 # =====================
@@ -171,10 +186,8 @@ async def save_training_config_to_toml(training_tab_container):
 
     def _save_both():
         from .utils.config_utils import build_toml_config_from_ui
-        from flet_app.project_root import get_project_root
-        project_root = str(get_project_root())
-        ws_dir = os.path.abspath(os.path.join(project_root, "workspace"))
-        os.makedirs(ws_dir, exist_ok=True)
+
+        ws_dir, last_config_path, last_data_config_path = _get_workspace_last_config_paths()
 
         def _write_atomic(path: str, text: str):
             """Write text to path atomically to avoid partially-written configs."""
@@ -197,7 +210,7 @@ async def save_training_config_to_toml(training_tab_container):
 
         # 1) Build and save last_data_config.toml
         data_toml_text = _build_last_data_config_text()
-        data_toml_path = os.path.join(ws_dir, "last_data_config.toml")
+        data_toml_path = last_data_config_path
         _write_atomic(data_toml_path, data_toml_text)
 
         # 2) Build training TOML and rewrite dataset pointer to last_data_config.toml
@@ -213,7 +226,7 @@ async def save_training_config_to_toml(training_tab_container):
         train_toml_text = _replace_dataset_line(train_toml_text, data_toml_path_abs)
 
         # 3) Save last_config.toml with updated dataset pointer
-        out_path = os.path.join(ws_dir, "last_config.toml")
+        out_path = last_config_path
         _write_atomic(out_path, train_toml_text)
 
         return out_path, train_toml_text
@@ -517,6 +530,9 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
         width=250,
     )
 
+    # Add Last Config checkbox
+    last_config_checkbox = ft.Checkbox(label="Last Config", value=False)
+
     start_btn = ft.ElevatedButton(
         "Start",
         on_click=on_start_click,
@@ -544,9 +560,10 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
                     expand=True,
                     padding=ft.padding.only(left=20) # Add some padding
                 ),
-                # Right side: output_dir field then Start button
+                # Right side: Last Config checkbox then output_dir field then Start button
                 ft.Container(
                     content=ft.Row([
+                        last_config_checkbox,
                         output_dir_field,
                         start_btn,
                     ], alignment=ft.MainAxisAlignment.END, spacing=12),
@@ -561,6 +578,8 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
     bottom.start_btn = start_btn
     # Expose the output_dir field for config read/write
     bottom.output_dir_field = output_dir_field
+    # Expose the last_config_checkbox for external control
+    bottom.last_config_checkbox = last_config_checkbox
     return bottom
 
 def build_main_container(main_content_row, bottom_app_bar):
@@ -805,10 +824,15 @@ def get_training_tab_content(page: ft.Page):
             current_selected_image_path_c1 = getattr(page, 'selected_image_path_c1', None)
             current_selected_image_path_c2 = getattr(page, 'selected_image_path_c2', None)
 
-            # Save TOML config
-            out_path, _ = await save_training_config_to_toml(
-                training_tab_container
-            )
+            # Save TOML config (or reuse the workspace "last" files if requested)
+            _, last_config_path, last_data_config_path = _get_workspace_last_config_paths()
+            last_config_checkbox = getattr(training_tab_container, 'last_config_checkbox', None)
+            use_last_config = bool(last_config_checkbox and last_config_checkbox.value)
+            if use_last_config and os.path.exists(last_config_path) and os.path.exists(last_data_config_path):
+                print("Reusing existing workspace/last_config.toml")
+                out_path = last_config_path
+            else:
+                out_path, _ = await save_training_config_to_toml(training_tab_container)
 
             # Determine launch parameters
             use_multi_gpu = multi_gpu_checkbox.value
@@ -1157,6 +1181,10 @@ def get_training_tab_content(page: ft.Page):
         main_container.output_dir_field = getattr(bottom_bar, 'output_dir_field', None)
     except Exception:
         main_container.output_dir_field = None
+    try:
+        main_container.last_config_checkbox = getattr(bottom_bar, 'last_config_checkbox', None)
+    except Exception:
+        main_container.last_config_checkbox = None
 
     # Expose references to allow programmatic refreshes
     main_container.sub_navigation_rail = sub_navigation_rail
