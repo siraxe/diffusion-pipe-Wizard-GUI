@@ -89,5 +89,6 @@ logs/
 !flet_app/modules/longcat_patch/models/
 !flet_app/modules/longcat_patch/models/*
 
-flet_app/ui/utils/recent_files.txt
 opencode.json
+/assets/output
+flet_app/ui/utils/recent_files.txt

@@ -16,6 +16,10 @@ def get_training_monitor_page_content():
 
     # Reference to store console text for manual cleanup
     console_ref = {"training_console_text": None}
+    content_ref = {"container": None}
+    chart_refs = {"a": None, "b": None}
+
+
 
     def clean_console_manually():
         """Manual cleanup function for the Clean button - clears all console content."""
@@ -317,7 +321,7 @@ def get_training_monitor_page_content():
                         except Exception:
                             value_display = str(value)
                         short_tag = _shorten_tag(str(tag_name))
-                        loss_summary = f"{short_tag}: {value_display} (step {epoch_step})"
+                        loss_summary = f"{short_tag}: {value_display} ({epoch_step})"
                     else:
                         loss_debug = f"no scalar for step {epoch_step}"
                 if not loss_summary:
@@ -382,7 +386,7 @@ def get_training_monitor_page_content():
                 if match:
                     loss_display = match.group(1)
         elif loss_debug:
-            loss_display = f"unavailable ({loss_debug})"
+            loss_display = "-"
 
         bg_default = ft.Colors.with_opacity(0.04, ft.Colors.BLUE_GREY_50)
         bg_selected = ft.Colors.with_opacity(0.18, ft.Colors.LIGHT_BLUE_100)
@@ -495,6 +499,142 @@ def get_training_monitor_page_content():
         if monitor_list_view.page:
             monitor_list_view.update()
 
+    def update_graphs_from_data():
+        """Update graphs with real epoch/loss data from epoch_loss_cache"""
+        try:
+            by_step = epoch_loss_cache.get("by_step", {})
+            placeholder_a = [(i, (i * 10) % 100) for i in range(10)]
+            placeholder_b = [(i, (i * 5) % 50) for i in range(10)]
+
+            def is_numeric_step(x):
+                """Check if a step value is numeric (string or int/float)"""
+                if isinstance(x, (int, float)):
+                    return True
+                elif isinstance(x, str):
+                    return x.replace('.', '', 1).isdigit()
+                return False
+
+            def get_step_number(step):
+                """Convert step to numeric value"""
+                if isinstance(step, (int, float)):
+                    return int(float(step))
+                elif isinstance(step, str) and step.replace('.', '', 1).isdigit():
+                    return int(float(step))
+                else:
+                    return None
+
+            def extract_loss(step_data):
+                if isinstance(step_data, (int, float)):
+                    return round(float(step_data), 3)
+                if isinstance(step_data, dict):
+                    for value in step_data.values():
+                        if isinstance(value, (int, float)):
+                            return round(float(value), 3)
+                return None
+
+            if by_step:
+                sorted_steps = sorted(by_step.keys(), key=lambda x: get_step_number(x) if is_numeric_step(x) else 0)
+                step_loss_pairs: list[tuple[int, float]] = []
+                for step_key in sorted_steps:
+                    if not is_numeric_step(step_key):
+                        continue
+                    step_number = get_step_number(step_key)
+                    if step_number is None:
+                        continue
+                    loss_value = extract_loss(by_step.get(step_key))
+                    if loss_value is None:
+                        continue
+                    step_loss_pairs.append((step_number, loss_value))
+
+                if step_loss_pairs:
+                    graph_a_points = step_loss_pairs[-20:]
+                    graph_b_points = step_loss_pairs[-60:] if len(step_loss_pairs) > 60 else step_loss_pairs
+                else:
+                    graph_a_points = placeholder_a
+                    graph_b_points = placeholder_b
+            else:
+                graph_a_points = placeholder_a
+                graph_b_points = placeholder_b
+
+            def axis_bounds(points: list[tuple[int, float]]):
+                if not points:
+                    return 0, 10, 0, 10
+                x_values = [p[0] for p in points]
+                y_values = [p[1] for p in points]
+                x_min = max(0, min(x_values))
+                x_max = max(x_values) + 3
+                if x_max <= x_min:
+                    x_max = x_min + 1
+                y_min = min(0, min(y_values))
+                y_max_val = max(y_values)
+                if y_max_val <= 0:
+                    y_max = y_min + 1
+                else:
+                    y_max = y_max_val + abs(y_max_val) * 0.1
+                if y_max <= y_min:
+                    y_max = y_min + 1
+                return x_min, x_max, y_min, y_max
+
+            def _apply_axis_interval(axis: ft.ChartAxis | None, span: float):
+                if axis is None:
+                    return
+                axis.show_labels = True
+                if span <= 0:
+                    axis.labels_interval = 1
+                    return
+                axis.labels_interval = max(0.01, span / 4)
+
+            chart_a = chart_refs.get("a")
+            chart_b = chart_refs.get("b")
+            if chart_a is not None and chart_b is not None:
+                ax_a_min, ax_a_max, ay_a_min, ay_a_max = axis_bounds(graph_a_points)
+                ax_b_min, ax_b_max, ay_b_min, ay_b_max = axis_bounds(graph_b_points)
+
+                chart_a.data_series = [
+                    ft.LineChartData(
+                        data_points=[ft.LineChartDataPoint(x, y) for x, y in graph_a_points],
+                        stroke_width=2,
+                        color=ft.Colors.BLUE,
+                        curved=True,
+                        stroke_cap_round=True,
+                    )
+                ]
+                chart_a.min_x = ax_a_min
+                chart_a.max_x = ax_a_max
+                chart_a.min_y = ay_a_min
+                chart_a.max_y = ay_a_max
+
+                chart_b.data_series = [
+                    ft.LineChartData(
+                        data_points=[ft.LineChartDataPoint(x, y) for x, y in graph_b_points],
+                        stroke_width=2,
+                        color=ft.Colors.GREEN,
+                        curved=True,
+                        stroke_cap_round=True,
+                    )
+                ]
+                chart_b.min_x = ax_b_min
+                chart_b.max_x = ax_b_max
+                chart_b.min_y = ay_b_min
+                chart_b.max_y = ay_b_max
+                _apply_axis_interval(chart_a.left_axis, ay_a_max - ay_a_min)
+                _apply_axis_interval(chart_a.bottom_axis, ax_a_max - ax_a_min)
+                _apply_axis_interval(chart_b.left_axis, ay_b_max - ay_b_min)
+                _apply_axis_interval(chart_b.bottom_axis, ax_b_max - ax_b_min)
+                if chart_a.left_axis:
+                    chart_a.left_axis.show_labels = False
+                if chart_b.left_axis:
+                    chart_b.left_axis.show_labels = False
+
+                container = content_ref.get("container")
+                if container:
+                    current_page = getattr(container, "page", None)
+                    if current_page:
+                        current_page.update()
+
+        except Exception as e:
+            print(f"[update_graphs_from_data] Error updating graphs: {e}")
+
     def update_monitoring_from_selection(rescan: bool = True):
         path_value = selected.get("full")
         if not path_value:
@@ -508,6 +648,8 @@ def get_training_monitor_page_content():
                 if btn.page:
                     btn.update()
             refresh_monitor_list()
+            # Update graphs with the new data
+            update_graphs_from_data()
             return
         if rescan:
             epoch_loss_cache["by_step"] = {}
@@ -524,6 +666,8 @@ def get_training_monitor_page_content():
             if btn.page:
                 btn.update()
         refresh_monitor_list()
+        # Update graphs with the new data
+        update_graphs_from_data()
 
     def monitor_on_name_click(_: ft.ControlEvent | None = None):
         monitor_sort_mode["value"] = "name"
@@ -903,7 +1047,7 @@ def get_training_monitor_page_content():
     ], alignment=ft.MainAxisAlignment.END, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     monitoring_col = ft.Column([
-        *add_section_title("Monitoring"),
+        *add_section_title("Files"),
         monitor_list_container,
         monitor_footer,
     ], spacing=6)
@@ -1251,6 +1395,204 @@ def get_training_monitor_page_content():
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER),
     ], spacing=6)
 
+    # Test Column with real data graphs
+    def test_refresh(e):
+        """Refresh function for test column - updates with real data"""
+        # Re-collect data and update graphs
+        path_value = selected.get("full")
+        if path_value:
+            epoch_loss_cache["by_step"] = {}
+            epoch_loss_cache["tag"] = ""
+            epoch_loss_cache["debug"] = ""
+            collected = _collect_epoch_losses(path_value)
+            if isinstance(collected, dict):
+                epoch_loss_cache.update(collected)
+
+        # Update graphs with the new data
+        update_graphs_from_data()
+
+    # Test refresh button
+    test_refresh_btn = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        tooltip="Refresh Test Data",
+        on_click=test_refresh,
+        icon_color=ft.Colors.BLUE_GREY_600
+    )
+
+    # Test header (title + refresh only, no sorting)
+    test_header = ft.Row([
+        ft.Text("Monitor", weight=ft.FontWeight.BOLD, size=16),
+        test_refresh_btn
+    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+    # Create placeholder charts using Flet's LineChart
+    # Initial data for Graph A
+    initial_data_a = [(i, (i * 10) % 100) for i in range(10)]
+    test_chart_a = ft.LineChart(
+        height=180,
+        expand=True,
+        min_y=0,
+        max_y=120,
+        min_x=0,
+        max_x=10,
+        # Left axis label
+        left_axis=ft.ChartAxis(
+            labels_size=9,
+            title=ft.Text("Loss", size=12, color=ft.Colors.WHITE),
+            title_size=12,
+        ),
+        # Bottom axis label
+        bottom_axis=ft.ChartAxis(
+            labels_size=9,
+            labels_interval=1,
+            title=ft.Text("Epoch", size=12, color=ft.Colors.WHITE),
+            title_size=12,
+        ),
+        # Grid lines
+        horizontal_grid_lines=ft.ChartGridLines(
+            color=ft.Colors.with_opacity(0.2, ft.Colors.GREY),
+            interval=20,
+        ),
+        vertical_grid_lines=ft.ChartGridLines(
+            color=ft.Colors.with_opacity(0.2, ft.Colors.GREY),
+            interval=2,
+        ),
+        # Tooltip
+        tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLUE_GREY_700),
+        data_series=[
+            ft.LineChartData(
+                data_points=[ft.LineChartDataPoint(x, y) for x, y in initial_data_a],
+                stroke_width=2,
+                color=ft.Colors.BLUE,
+                curved=True,
+                stroke_cap_round=True,
+            )
+        ]
+    )
+
+    # Initial data for Graph B
+    initial_data_b = [(i, (i * 5) % 50) for i in range(10)]
+    test_chart_b = ft.LineChart(
+        height=180,
+        expand=True,
+        min_y=0,
+        max_y=60,
+        min_x=0,
+        max_x=10,
+        # Left axis label
+        left_axis=ft.ChartAxis(
+            labels_size=9,
+            title=ft.Text("Loss", size=12, color=ft.Colors.WHITE),
+            title_size=12,
+        ),
+        # Bottom axis label
+        bottom_axis=ft.ChartAxis(
+            labels_size=9,
+            labels_interval=1,
+            title=ft.Text("Step", size=12, color=ft.Colors.WHITE),
+            title_size=12,
+        ),
+        # Grid lines
+        horizontal_grid_lines=ft.ChartGridLines(
+            color=ft.Colors.with_opacity(0.2, ft.Colors.GREY),
+            interval=10,
+        ),
+        vertical_grid_lines=ft.ChartGridLines(
+            color=ft.Colors.with_opacity(0.2, ft.Colors.GREY),
+            interval=2,
+        ),
+        # Tooltip
+        tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLUE_GREY_700),
+        data_series=[
+            ft.LineChartData(
+                data_points=[ft.LineChartDataPoint(x, y) for x, y in initial_data_b],
+                stroke_width=2,
+                color=ft.Colors.GREEN,
+                curved=True,
+                stroke_cap_round=True,
+            )
+        ]
+    )
+
+    # Graph containers (without titles)
+    graph_a_container = ft.Container(
+        content=test_chart_a,
+        padding=ft.padding.only(left=10, right=10, top=10, bottom=20),
+        bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.BLUE_GREY_50),
+        border_radius=6,
+        expand=True,
+        height=250,
+    )
+
+    graph_b_container = ft.Container(
+        content=test_chart_b,
+        padding=ft.padding.only(left=10, right=10, top=10, bottom=50),
+        bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.BLUE_GREY_50),
+        border_radius=6,
+        expand=True,
+        height=230,
+    )
+
+    # Graphs with titles on top
+    graph_a_with_title = ft.Column([
+        ft.Text("Graph A", size=14, weight=ft.FontWeight.BOLD),
+        graph_a_container,
+    ], spacing=5, expand=True)
+
+    graph_b_with_title = ft.Column([
+        ft.Text("Graph B", size=14, weight=ft.FontWeight.BOLD),
+        graph_b_container,
+    ], spacing=5, expand=True)
+
+    # Graphs row (side by side, full width)
+    graphs_row = ft.Row([
+        graph_a_with_title,
+        graph_b_with_title,
+    ], spacing=10, expand=True)
+
+    graphs_to_slider_gap = ft.Container(height=50)
+
+    # Smooth slider
+    smooth_slider = ft.Slider(
+        value=0.0,
+        min=0.0,
+        max=0.999,
+        divisions=999,
+        label="Smooth: {value}",
+        expand=True,
+        height=20,
+    )
+
+    # Slider container
+    slider_container = ft.Container(
+        content=ft.Column([
+            ft.Text("Smooth", size=14, weight=ft.FontWeight.BOLD),
+            smooth_slider,
+        ], spacing=5),
+        padding=10,
+        bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.BLUE_GREY_50),
+        border_radius=6,
+        margin=ft.margin.only(top=30),
+    )
+
+    # Test column content
+    test_col_content = ft.Column([
+        test_header,
+        ft.Divider(height=5, thickness=1),
+        graphs_row,
+        graphs_to_slider_gap,
+        slider_container,
+    ], spacing=12, expand=True)
+
+    # Wrap in a scrollable container
+    test_col = ft.Container(
+        content=test_col_content,
+        padding=5,
+        bgcolor="#0f0f0f",
+        border_radius=6,
+        expand=True,
+    )
+
     # Bottom: Training Console (header visible, console hidden by default)
     # Style matches the console used in Tools -> Download Models
     # Hidden command area (appears when training starts)
@@ -1296,9 +1638,10 @@ def get_training_monitor_page_content():
     content = ft.Container(
         content=ft.Column([
             ft.ResponsiveRow([
-                ft.Column([tensorboard_col], col=6),
-                ft.Column([monitoring_col], col=6),
-            ], spacing=12),
+                ft.Column([tensorboard_col], col=3),
+                ft.Column([monitoring_col], col=3),
+                ft.Column([test_col], col=6),
+            ], spacing=10),
             # Full-width training console area
             # Training Console header with Clean button
             ft.Row([
@@ -1323,6 +1666,10 @@ def get_training_monitor_page_content():
         expand=True,
     )
 
+    chart_refs["a"] = test_chart_a
+    chart_refs["b"] = test_chart_b
+    content_ref["container"] = content
+
     # Expose console controls for future use by caller
     setattr(content, "training_console_container", training_console_container)
     setattr(content, "training_console_text", training_console_text)
@@ -1330,5 +1677,8 @@ def get_training_monitor_page_content():
     setattr(content, "training_console_list", training_console_list)
     setattr(content, "training_cmd_container", training_cmd_container)
     setattr(content, "training_cmd_text", training_cmd_text)
+
+    # Initialize graphs with current data
+    update_graphs_from_data()
 
     return content
