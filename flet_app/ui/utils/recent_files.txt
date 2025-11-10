@@ -1,5 +1,5 @@
+/home/e/Dpipe/workspace/configs/croc_config.toml
 /home/e/Dpipe/workspace/configs/qq_human.toml
 /home/e/Dpipe/workspace/configs/qq.toml
 /home/e/Dpipe/workspace/configs/longcat_config.toml
 /home/e/Dpipe/workspace/configs/wan22_i2v_high.toml
-/home/e/Dpipe/flet_app/default/config_default.toml

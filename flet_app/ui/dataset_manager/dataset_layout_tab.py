@@ -1003,7 +1003,7 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
         "seconds",
         "60",
         expand=True,
-        hint_text="seconds",
+        hint_text="60 or 5.5 (seconds)",
         col=4
     )
 
@@ -1017,7 +1017,7 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
 
     slice_to_button = create_styled_button(
         "Slice to:",
-        tooltip="Slice selected videos into chunks",
+        tooltip="Slice selected videos into chunks. Use integers for time-based splitting (e.g., '60') or floats for frame-based splitting (e.g., '5.5')",
         expand=True,
         col=8,
         on_click=lambda e: _on_slice_to_click(e, slice_seconds_textfield, reencode_checkbox),
@@ -1081,13 +1081,20 @@ def _on_slice_to_click(e: ft.ControlEvent, seconds_textfield: ft.TextField, reen
     print("Slice to button clicked!")
 
     try:
-        seconds_value = int(seconds_textfield.value or "60")
+        # Support both integer and float values (e.g., "5" or "5.5")
+        time_value = float(seconds_textfield.value or "60")
         reencode_enabled = reencode_checkbox.value
-        print(f"Seconds value: {seconds_value}, Re-encode: {reencode_enabled}")
+        print(f"Time value: {time_value}, Re-encode: {reencode_enabled}")
 
-        # Show immediate feedback
-        mode_text = "re-encoding" if reencode_enabled else "smart stream copy"
-        e.page.snack_bar = ft.SnackBar(ft.Text(f"Processing chunking for {seconds_value} seconds ({mode_text})..."), open=True)
+        # Show immediate feedback - indicate if it's frame-based
+        if time_value.is_integer():
+            mode_text = "re-encoding" if reencode_enabled else "smart stream copy"
+            feedback_text = f"Processing chunking for {int(time_value)} seconds ({mode_text})..."
+        else:
+            mode_text = "re-encoding" if reencode_enabled else "smart stream copy"
+            feedback_text = f"Processing chunking for {time_value} seconds (frame-based) ({mode_text})..."
+
+        e.page.snack_bar = ft.SnackBar(ft.Text(feedback_text), open=True)
         e.page.update()
 
         # Create thumbnail update callback
@@ -1105,7 +1112,7 @@ def _on_slice_to_click(e: ft.ControlEvent, seconds_textfield: ft.TextField, reen
         from flet_app.ui_popups import video_editor
 
         def run_chunking():
-            video_editor.split_selected_videos_into_chunks(e.page, seconds_value, thumbnail_update_callback, reencode_enabled)
+            video_editor.split_selected_videos_into_chunks(e.page, time_value, thumbnail_update_callback, reencode_enabled)
 
         e.page.run_thread(run_chunking)
 

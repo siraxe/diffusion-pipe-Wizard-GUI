@@ -485,9 +485,10 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
             except Exception as e_del:
                 print(f"Error deleting mask file {mask_image_path}: {e_del}")
 
-def split_selected_videos_into_chunks(page: ft.Page, seconds_per_chunk: int, thumbnail_update_callback: Optional[Callable] = None, force_reencode: bool = False):
+def split_selected_videos_into_chunks(page: ft.Page, seconds_per_chunk: float, thumbnail_update_callback: Optional[Callable] = None, force_reencode: bool = False):
     """
     Splits selected videos into chunks of specified seconds.
+    Supports both integer values (for time-based splitting) and float values (for frame-based splitting).
     Uses stream copy for fast processing and updates thumbnails afterward.
     """
     print(f"Starting chunking process with {seconds_per_chunk} seconds per chunk")
@@ -574,9 +575,10 @@ def split_selected_videos_into_chunks(page: ft.Page, seconds_per_chunk: int, thu
         print("No videos were successfully chunked")
         if page: page.snack_bar = ft.SnackBar(ft.Text("No videos were successfully chunked."), open=True); page.update()
 
-def _split_single_video_into_chunks(video_path: str, seconds_per_chunk: int, force_reencode: bool = False) -> Tuple[bool, str]:
+def _split_single_video_into_chunks(video_path: str, seconds_per_chunk: float, force_reencode: bool = False) -> Tuple[bool, str]:
     """
     Splits a single video into chunks of specified seconds using efficient method without re-encoding.
+    Supports both integer values (for time-based splitting) and float values (for frame-based splitting).
     Returns (success, message).
     """
     try:
@@ -593,17 +595,42 @@ def _split_single_video_into_chunks(video_path: str, seconds_per_chunk: int, for
         if total_duration <= seconds_per_chunk:
             return False, "Video is shorter than specified chunk size"
 
-        # Calculate chunk count - always include a chunk for any remaining time
-        full_chunks = int(total_duration // seconds_per_chunk)
-        remainder_duration = total_duration % seconds_per_chunk
-        
-        if remainder_duration > 0:
-            chunk_count = full_chunks + 1
+        # Determine if we should use frame-based cutting (when seconds_per_chunk is not an integer)
+        is_frame_based = not seconds_per_chunk.is_integer()
+        fps = metadata['fps']
+
+        if is_frame_based:
+            # For frame-based cutting, convert time to frame count
+            frames_per_chunk = int(round(seconds_per_chunk * fps))
+            total_frames = metadata['total_frames']
+
+            # Calculate chunk count based on frames
+            full_chunks = total_frames // frames_per_chunk
+            remainder_frames = total_frames % frames_per_chunk
+
+            if remainder_frames > 0:
+                chunk_count = full_chunks + 1
+            else:
+                chunk_count = full_chunks
+                if chunk_count == 0:
+                    chunk_count = 1
+
+            print(f"Frame-based chunking: {frames_per_chunk} frames per chunk, {chunk_count} chunks total")
         else:
-            chunk_count = full_chunks
-            # If the video divides evenly, we still need at least one chunk
-            if chunk_count == 0:
-                chunk_count = 1
+            # Time-based chunking (original logic)
+            # Calculate chunk count - always include a chunk for any remaining time
+            full_chunks = int(total_duration // seconds_per_chunk)
+            remainder_duration = total_duration % seconds_per_chunk
+
+            if remainder_duration > 0:
+                chunk_count = full_chunks + 1
+            else:
+                chunk_count = full_chunks
+                # If the video divides evenly, we still need at least one chunk
+                if chunk_count == 0:
+                    chunk_count = 1
+
+            print(f"Time-based chunking: {seconds_per_chunk} seconds per chunk, {chunk_count} chunks total")
 
         # Prepare output directory
         video_dir = os.path.dirname(video_path)
@@ -619,43 +646,76 @@ def _split_single_video_into_chunks(video_path: str, seconds_per_chunk: int, for
         ffmpeg_exe = _get_ffmpeg_exe_path()
         
         for i in range(chunk_count):
-            start_time = i * seconds_per_chunk
-            
-            # Calculate end time for this chunk
-            if i == chunk_count - 1:  # Last chunk - go to end of video
-                # Calculate the actual duration for the last chunk (may include small remainder)
-                actual_duration = total_duration - start_time
+            if is_frame_based:
+                # Frame-based cutting
+                start_frame = i * frames_per_chunk
+
+                if i == chunk_count - 1:  # Last chunk - go to end of video
+                    remaining_frames = total_frames - start_frame
+                    end_frame = total_frames
+                    frames_to_cut = remaining_frames
+                else:
+                    end_frame = start_frame + frames_per_chunk
+                    frames_to_cut = frames_per_chunk
+
+                # Convert frames to time for FFmpeg (since we still need to use -ss and -t)
+                start_time = start_frame / fps
+                duration = frames_to_cut / fps
+
                 command = [
                     ffmpeg_exe, "-y",
                     "-ss", str(start_time),  # Seek before input for speed (may snap to keyframe)
                     "-i", video_path,
-                    "-t", str(actual_duration),
+                    "-t", str(duration),
                     "-c", "copy",  # Copy both audio and video streams
                     "-avoid_negative_ts", "make_zero",
                     "-fflags", "+genpts"
                 ]
-            else:  # Not the last chunk - cut for seconds_per_chunk duration
-                command = [
-                    ffmpeg_exe, "-y",
-                    "-ss", str(start_time),  # Seek before input for speed (may snap to keyframe)
-                    "-i", video_path,
-                    "-t", str(seconds_per_chunk),
-                    "-c", "copy",  # Copy both audio and video streams
-                    "-avoid_negative_ts", "make_zero",
-                    "-fflags", "+genpts"
-                ]
-            
+
+                # Log frame-based cutting info
+                if i == chunk_count - 1:
+                    print(f"Chunk {i+1}: Frame-based cutting from frame {start_frame} ({start_time:.2f}s) for {frames_to_cut} frames ({duration:.2f}s) to end (frame {end_frame})")
+                else:
+                    print(f"Chunk {i+1}: Frame-based cutting from frame {start_frame} ({start_time:.2f}s) for {frames_to_cut} frames ({duration:.2f}s) to frame {end_frame}")
+            else:
+                # Time-based cutting (original logic)
+                start_time = i * seconds_per_chunk
+
+                # Calculate end time for this chunk
+                if i == chunk_count - 1:  # Last chunk - go to end of video
+                    # Calculate the actual duration for the last chunk (may include small remainder)
+                    actual_duration = total_duration - start_time
+                    command = [
+                        ffmpeg_exe, "-y",
+                        "-ss", str(start_time),  # Seek before input for speed (may snap to keyframe)
+                        "-i", video_path,
+                        "-t", str(actual_duration),
+                        "-c", "copy",  # Copy both audio and video streams
+                        "-avoid_negative_ts", "make_zero",
+                        "-fflags", "+genpts"
+                    ]
+                else:  # Not the last chunk - cut for seconds_per_chunk duration
+                    command = [
+                        ffmpeg_exe, "-y",
+                        "-ss", str(start_time),  # Seek before input for speed (may snap to keyframe)
+                        "-i", video_path,
+                        "-t", str(seconds_per_chunk),
+                        "-c", "copy",  # Copy both audio and video streams
+                        "-avoid_negative_ts", "make_zero",
+                        "-fflags", "+genpts"
+                    ]
+
+                # Execute FFmpeg command
+                if i == chunk_count - 1:
+                    actual_duration = total_duration - start_time
+                    print(f"Chunk {i+1}: Time-based cutting from {start_time:.2f}s for {actual_duration:.2f}s (to end)")
+                else:
+                    print(f"Chunk {i+1}: Time-based cutting from {start_time:.2f}s for {seconds_per_chunk:.2f}s")
+
             # Create chunk filename with zero-padding for chronological order
             chunk_filename = f"{base_name}_chunk_{str(i+1).zfill(3)}{ext}"
             chunk_path = os.path.join(temp_dir, chunk_filename)
             command.append(chunk_path)
-            
-            # Execute FFmpeg command
-            if i == chunk_count - 1:
-                actual_duration = total_duration - start_time
-                print(f"Chunk {i+1}: Cutting from {start_time:.2f}s for {actual_duration:.2f}s (to end)")
-            else:
-                print(f"Chunk {i+1}: Cutting from {start_time:.2f}s for {seconds_per_chunk:.2f}s")
                 
             success, stdout, stderr = vpu._run_ffmpeg_process(command)
             
