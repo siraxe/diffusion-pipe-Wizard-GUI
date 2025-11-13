@@ -225,6 +225,20 @@ async def save_training_config_to_toml(training_tab_container):
 
         train_toml_text = _replace_dataset_line(train_toml_text, data_toml_path_abs)
 
+        # Convert wan22 to wan for runtime backend compatibility
+        def _convert_wan22_to_wan(content: str) -> str:
+            """Convert wan22 model type to wan for backend compatibility"""
+            lines = content.split('\n')
+            converted_lines = []
+            for line in lines:
+                # Look for "type = 'wan22'" in model section
+                if line.strip().startswith("type = ") and "'wan22'" in line:
+                    line = line.replace("'wan22'", "'wan'")
+                converted_lines.append(line)
+            return '\n'.join(converted_lines)
+
+        train_toml_text = _convert_wan22_to_wan(train_toml_text)
+
         # 3) Save last_config.toml with updated dataset pointer
         out_path = last_config_path
         _write_atomic(out_path, train_toml_text)

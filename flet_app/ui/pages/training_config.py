@@ -143,7 +143,7 @@ def get_training_config_page_content():
         if not skip_defaults:
             try:
                 if timestep_sm_dropdown_ref.current:
-                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "longcat", "qwen_image", "qwen_image_plus", "auraflow"}
+                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "wan22", "longcat", "qwen_image", "qwen_image_plus", "auraflow"}
                     if sel_norm in models_logit:
                         timestep_sm_dropdown_ref.current.value = "logit_normal"
                     else:
@@ -366,13 +366,13 @@ def get_training_config_page_content():
             try:
                 if ckpt_path_wan22_field_ref.current:
                     if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
-                        ckpt_path_wan22_field_ref.current.value = 'models/Wan2.2-T2V-A14B'
+                        ckpt_path_wan22_field_ref.current.value = 'models/Wan2.2-I2V-A14B'
                 if transformer_path_field_ref.current:
                     if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/wan2.2_t2v_low_noise_14B_fp16.safetensors'
+                        transformer_path_field_ref.current.value = 'models/Wan2.2-I2V-A14B/high_noise_model'
                 if llm_path_field_ref.current:
                     if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
-                        llm_path_field_ref.current.value = 'models/umt5_xxl_fp16.safetensors'
+                        llm_path_field_ref.current.value = ''
             except Exception:
                 pass
         # Set wan (2.1) defaults when selected
@@ -911,8 +911,8 @@ def get_training_config_page_content():
                         ),
                         ft.Column([
                             ft.ResponsiveRow(controls=[
-                                create_textfield("min_t", 0, expand=True, col=6, scale=0.8, ref=min_t_field_ref, visible=(settings.train_def_model == "wan22")),
-                                create_textfield("max_t", 0.875, expand=True, col=6, scale=0.8, ref=max_t_field_ref, visible=(settings.train_def_model == "wan22")),
+                                create_textfield("min_t", 0.9, hint_text="HIGH = 0.9 , LOW t2v = 0.0 ,i2v = 0.0", expand=True, col=6, scale=0.8, ref=min_t_field_ref, visible=(settings.train_def_model == "wan22")),
+                                create_textfield("max_t", 1.000, hint_text="HIGH = 1.0 , LOW t2v = 0.875 ,i2v = 0.900 ,", expand=True, col=6, scale=0.8, ref=max_t_field_ref, visible=(settings.train_def_model == "wan22")),
                             ], spacing=2),
                             ft.ResponsiveRow(controls=[
                                 create_textfield(

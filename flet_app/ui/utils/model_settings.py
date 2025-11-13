@@ -160,7 +160,13 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
         # Fallback if import fails
         def collapse_model_path(path): return path
 
-    if mt_lower == 'wan' and isinstance(model_dict, dict) and ('min_t' in model_dict or 'max_t' in model_dict):
+    # Handle wan22 detection for both legacy and new configs
+    if mt_lower == 'wan22':
+        # New configs with explicit type = 'wan22'
+        mt = 'wan22'
+        mt_lower = 'wan22'
+    elif mt_lower == 'wan' and isinstance(model_dict, dict) and ('min_t' in model_dict or 'max_t' in model_dict):
+        # Legacy configs: convert 'wan' to 'wan22' when min/max_t present
         mt = 'wan22'
         mt_lower = 'wan22'
 
@@ -242,7 +248,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -254,6 +260,8 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_lumina = (mt in ('lumina', 'lumina_2'))
         is_sdxl = (mt == 'sdxl')
         is_longcat = (mt == 'longcat')
+        is_hunyuan_video = (mt == 'hunyuan-video')
+        is_wan = (mt == 'wan')
     except Exception:
         pass
 
@@ -278,6 +286,19 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         from flet_app.ui.pages.training_config import update_wan22_ckpt_visibility, update_longcat_ckpt_visibility
         update_wan22_ckpt_visibility(is_wan22, label_vals.get('ckpt_path'))
         update_longcat_ckpt_visibility(is_longcat, label_vals.get('ckpt_path'))
+
+        # Also control the ckpt_path_row_ref visibility (same logic as on_model_type_change)
+        from flet_app.ui.pages.training_config import ckpt_path_row_ref, ckpt_path_wan22_field_ref
+        if ckpt_path_row_ref.current:
+            should_be_visible = (is_wan22 or is_longcat or is_wan or is_hunyuan_video)
+            ckpt_path_row_ref.current.visible = should_be_visible
+
+            # Also ensure field-level visibility is set
+            if ckpt_path_wan22_field_ref.current:
+                ckpt_path_wan22_field_ref.current.visible = should_be_visible
+
+            if ckpt_path_row_ref.current.page:
+                ckpt_path_row_ref.current.page.update()
     except Exception:
         pass
     update_auraflow_fields_visibility(is_auraflow, label_vals.get('max_sequence_length'))

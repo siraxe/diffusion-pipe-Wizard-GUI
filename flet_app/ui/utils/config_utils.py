@@ -233,13 +233,10 @@ def build_toml_config_from_ui(training_tab_container) -> str:
     # [model]
     lines.append("[model]")
     model_source = _get('Model Type', '')
-    # Convert wan22 to wan when saving
-    is_wan22 = (model_source == 'wan22')
-    if is_wan22:
-        model_source = 'wan'
+    # Save model type as-is for user configs (wan22 stays wan22)
     lines.append(f"type = {_quote(model_source)}")
 
-    mt_lower = str(_get('Model Type', '')).strip().lower()
+    mt_lower = model_source.strip().lower()
     # SDXL: write checkpoint_path immediately under type, if provided
     if mt_lower == 'sdxl':
         ckpt = _get('checkpoint_path', None)
