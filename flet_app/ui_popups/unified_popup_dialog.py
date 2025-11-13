@@ -1250,7 +1250,12 @@ def open_unified_popup_dialog(
             # Row 2: Split, Cut to Frames, Cut All Videos to, Num field
             num_to_cut_to = create_textfield(label="num", value=str(original_frames // 2 if original_frames > 1 else 150), keyboard_type=ft.KeyboardType.NUMBER)
             split_btn = ft.ElevatedButton("Split", on_click=lambda e: page.run_thread(video_editor.split_to_video, page, path, int(frame_range_slider.start_value or 0), items, None, local_video_player, refresh, update_thumbnails_callback), style=BTN_STYLE2)
-            cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=lambda e: page.run_thread(video_editor.cut_to_frames, page, path, int(frame_range_slider.start_value or 0), int(frame_range_slider.end_value or original_frames), items, None, refresh, update_thumbnails_callback, False), style=BTN_STYLE2)
+            def on_cut_to_frames_click(e):
+                start_val = int(frame_range_slider.start_value or 0)
+                end_val = int(frame_range_slider.end_value or original_frames)
+                page.run_thread(video_editor.cut_to_frames, page, path, start_val, end_val, items, None, refresh, update_thumbnails_callback, False)
+
+            cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=on_cut_to_frames_click, style=BTN_STYLE2)
             cut_all_btn = ft.ElevatedButton("Cut All Videos to", on_click=lambda e: page.run_thread(video_editor.cut_all_videos_to_max, page, path, items, int(num_to_cut_to.value or 0), None), style=BTN_STYLE2)
             row2 = ft.ResponsiveRow([
                 ft.Container(split_btn, col={"md": 3, "lg": 3, "sm": 12}),

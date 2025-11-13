@@ -58,21 +58,32 @@ def _is_web_platform(page: Optional[ft.Page]) -> bool:
 def _build_video_media_resource(page: Optional[ft.Page], video_path: str) -> str:
     if not video_path:
         return ""
-    
+
     # Normalize path separators for consistency
     normalized_path = video_path.replace("\\", "/")
-    
+
     # Find the 'workspace' directory in the path
     try:
         # Split the path at the 'workspace' directory and take the part after it
         # This handles cases like '.../Dpipe/workspace/videos/file.mp4'
         # It will result in 'videos/file.mp4'
         relative_path = normalized_path.split("workspace/", 1)[1]
-        return relative_path
+
+        # Add cache-busting timestamp to prevent browser from serving cached versions
+        # after video operations like cutting/trimming
+        import time
+        timestamp = int(time.time())
+
+        # Append timestamp as query parameter to force browser to reload
+        if "?" in relative_path:
+            return f"{relative_path}&_t={timestamp}"
+        else:
+            return f"{relative_path}?_t={timestamp}"
+
     except IndexError:
         # If 'workspace/' is not in the path, it's not a valid asset, return original path
         # The video player will likely fail, which is the correct behavior
-        return normalized_path
+        return video_path
 
 
 def make_video_control(path: str, width: int, height: int, page: Optional[ft.Page] = None):

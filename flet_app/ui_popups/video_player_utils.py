@@ -844,7 +844,7 @@ def cut_video_by_frames(
         return False, "Could not get valid FPS for cutting by frames.", None
 
     fps = metadata['fps']
-    total_frames = metadata.get('frames', 0)
+    total_frames = metadata.get('total_frames', 0)
 
     # Validate frame range
     if start_frame > end_frame:
@@ -863,12 +863,13 @@ def cut_video_by_frames(
 
     temp_output_path = _get_temp_output_path(current_video_path, "cut")
 
-    # Use simpler time-based cutting with accurate duration
+    # Use frame-accurate cutting with two-pass approach
+    # First: extract exact frames from start_frame to end_frame
     command = [
         ffmpeg_exe, "-y",
         "-ss", str(start_time),   # Seek to start time
         "-i", current_video_path,
-        "-t", str(duration),      # Exact duration
+        "-frames:v", str(frame_count),  # Extract exact number of frames
         "-c:a", "aac",           # Include audio with AAC encoding
         *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
         temp_output_path
@@ -878,7 +879,7 @@ def cut_video_by_frames(
     if success and os.path.exists(temp_output_path):
         # Verify the output has correct frame count
         output_metadata = get_video_metadata(temp_output_path)
-        output_frames = output_metadata.get('frames', 0) if output_metadata else 0
+        output_frames = output_metadata.get('total_frames', 0) if output_metadata else 0
 
         if output_frames == frame_count or (output_frames > 0 and abs(output_frames - frame_count) <= 1):
             return True, f"Video cut from frame {start_frame} to {end_frame} ({frame_count} frames).", temp_output_path
