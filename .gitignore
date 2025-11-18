@@ -92,3 +92,4 @@ logs/
 opencode.json
 /assets/output
 flet_app/ui/utils/recent_files.txt
+diffusion-pipe_new/

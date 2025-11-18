@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import json
 import base64
-from .._styles import create_textfield, create_dropdown # Import helper functions
+from .._styles import create_textfield, create_dropdown  # Import helper functions
 from ..dataset_manager.dataset_utils import get_dataset_folders, _get_dataset_base_dir, get_videos_and_thumbnails  # Reuse the helper
 from flet_app.settings import settings
 
@@ -80,6 +80,83 @@ def load_dataset_summary(dataset):
         "Total frames/images": total_frames_or_images
     }
 
+
+def build_resolution_summary_from_info(dataset):
+    """
+    Builds a human-readable summary of media counts grouped by resolution
+    using the dataset's info.json file.
+
+    Example lines:
+    - "4 videos - 1024x345"
+    - "2 images - 304x345"
+    """
+    if not dataset or dataset == "Select your dataset":
+        return []
+
+    try:
+        base_dir, _dataset_type = _get_dataset_base_dir(dataset)
+        dataset_full_path = os.path.join(base_dir, dataset)
+        info_path = os.path.join(dataset_full_path, "info.json")
+    except Exception:
+        return []
+
+    if not os.path.exists(info_path):
+        return []
+
+    try:
+        with open(info_path, "r", encoding="utf-8") as f:
+            info = json.load(f)
+    except Exception:
+        return []
+
+    if not isinstance(info, dict):
+        return []
+
+    # Group counts by (width, height) and media type (video/image)
+    resolution_groups = {}
+    for _name, meta in info.items():
+        if not isinstance(meta, dict):
+            continue
+        width = meta.get("width")
+        height = meta.get("height")
+        if not width or not height:
+            continue
+
+        frames = meta.get("frames", 0) or 0
+        fps = meta.get("fps", 0) or 0
+        is_video = (frames and frames > 1) or (fps and fps > 0)
+
+        key = (int(width), int(height))
+        if key not in resolution_groups:
+            resolution_groups[key] = {"videos": 0, "images": 0}
+        if is_video:
+            resolution_groups[key]["videos"] += 1
+        else:
+            resolution_groups[key]["images"] += 1
+
+    if not resolution_groups:
+        return []
+
+    # Sort by area (width*height) descending, then width, then height
+    sorted_items = sorted(
+        resolution_groups.items(),
+        key=lambda item: (item[0][0] * item[0][1], item[0][0], item[0][1]),
+        reverse=True,
+    )
+
+    lines = []
+    for (w, h), counts in sorted_items:
+        if counts["videos"]:
+            count = counts["videos"]
+            label = "video" if count == 1 else "videos"
+            lines.append(f"{count} {label} - {w}x{h}")
+        if counts["images"]:
+            count = counts["images"]
+            label = "image" if count == 1 else "images"
+            lines.append(f"{count} {label} - {w}x{h}")
+
+    return lines
+
 def generate_collage(thumbnails_dir, summary_path, target_w=settings.COLLAGE_WIDTH, target_h=settings.COLLAGE_HEIGHT):
     """
     Generates a collage image from all jpg thumbnails in a directory (except summary.jpg).
@@ -131,11 +208,16 @@ def generate_collage(thumbnails_dir, summary_path, target_w=settings.COLLAGE_WID
 # =====================
 # GUI-Building Functions
 # =====================
+
+# Global selected dataset state shared across training tabs
+GLOBAL_TRAINING_SELECTED_DATASET = {"value": None}
+
 def build_training_dataset_page_content(extra_right_controls=None):
     """
     Builds the main container for the training dataset selection page, including dropdown, summary, and controls.
     """
-    selected_dataset = {"value": None}
+    # Share selection across instances (e.g., Config / Data Config tabs)
+    selected_dataset = GLOBAL_TRAINING_SELECTED_DATASET
     selection_change_listeners = []
     num_repeats_change_listeners = []
     content_column_ref = ft.Ref[ft.Column]()
@@ -147,6 +229,8 @@ def build_training_dataset_page_content(extra_right_controls=None):
         if col is None:
             return
         folders = get_dataset_folders()
+        # Sort dataset names A-Z by their display name
+        folders = dict(sorted(folders.items(), key=lambda item: item[1].lower()))
         dataset_dropdown = dataset_dropdown_ref.current
         prev_selected = selected_dataset["value"]
         if dataset_dropdown:
@@ -176,6 +260,8 @@ def build_training_dataset_page_content(extra_right_controls=None):
         Builds the top row controls: dataset dropdown, refresh button, and num workers field.
         """
         folders = get_dataset_folders()
+        # Sort dataset names A-Z by their display name
+        folders = dict(sorted(folders.items(), key=lambda item: item[1].lower()))
         # Prepare options for dropdown: key is clean name, text is display name
         dropdown_options_map = {name: display_name for name, display_name in folders.items()}
         dataset_dropdown = create_dropdown(
@@ -258,8 +344,17 @@ def build_training_dataset_page_content(extra_right_controls=None):
         Builds the row that displays the dataset summary and collage image.
         """
         row = ft.Row([
-            ft.Container(key="summary_img_container", width=settings.COLLAGE_WIDTH, height=settings.COLLAGE_HEIGHT),
-            ft.Column(key="summary_text_column", spacing=8, expand=True)
+            ft.Container(
+                key="summary_img_container",
+                width=settings.COLLAGE_WIDTH,
+                height=settings.COLLAGE_HEIGHT,
+            ),
+            ft.Column(
+                key="summary_text_column",
+                spacing=8,
+                expand=True,
+                scroll=ft.ScrollMode.ADAPTIVE,
+            ),
         ], spacing=10, alignment=ft.MainAxisAlignment.START)
         return ft.Container(content=row, padding=ft.padding.only(left=30, right=8, top=8, bottom=8))
 
@@ -345,6 +440,17 @@ def build_training_dataset_page_content(extra_right_controls=None):
                 else:
                     print(f"Summary image not found at: {summary_path}")
                     summary_text_column.controls.append(ft.Text(f"Summary image not found at: {summary_path}", size=12))
+
+                # Build and display resolution-based summary next to summary.jpg
+                resolution_lines = build_resolution_summary_from_info(clean_dataset_name)
+                if resolution_lines:
+                    summary_text_column.controls.append(
+                        ft.Text("Summary", size=13, weight=ft.FontWeight.BOLD)
+                    )
+                    for line in resolution_lines:
+                        summary_text_column.controls.append(
+                            ft.Text(line, size=12)
+                        )
 
         if summary_img_container.page:
             summary_img_container.update()

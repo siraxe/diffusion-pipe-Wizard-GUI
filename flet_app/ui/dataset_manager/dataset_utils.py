@@ -347,13 +347,22 @@ def get_videos_and_thumbnails(dataset_name, dataset_type, force_metadata_refresh
     thumbnail_paths = {}
     media_info = {} # Use media_info to be general for video/image
 
-    # Load existing info for video datasets
+    # Load existing info for datasets and prune unused / stale keys
     if info_path and os.path.exists(info_path):
         try:
             with open(info_path, 'r', encoding='utf-8') as f:
                 loaded_info = json.load(f)
                 if isinstance(loaded_info, dict):
-                    media_info = loaded_info
+                    # Only keep per-media entries that are still present
+                    # and shaped like dicts. This also drops legacy
+                    # top-level keys such as "bucket_resolution" and
+                    # "trigger_word" that are no longer used here.
+                    current_media_names = {os.path.basename(p) for p in media_files}
+                    media_info = {
+                        name: meta
+                        for name, meta in loaded_info.items()
+                        if isinstance(meta, dict) and name in current_media_names
+                    }
         except (json.JSONDecodeError, Exception) as e:
             print(f"Error loading info.json for {dataset_name}: {e}") # Debugging print
             media_info = {}

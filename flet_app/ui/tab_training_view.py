@@ -270,7 +270,7 @@ def _detect_gpu_count() -> int:
         pass
     return 1
 
-async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_cache: bool = False, resume_last: bool = False, cache_only: bool = False):
+async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_cache: bool = False, resume_last: bool = False, cache_only: bool = False, resume_last_strength: float = 1.0):
     """Launch deepspeed training with env vars and computed GPU count.
     Returns (proc, cmd_string) where proc is a Popen object with stdout piped.
     """
@@ -293,6 +293,17 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
             cmd.append("--trust_cache")
         if resume_last:
             cmd.append("--resume_from_checkpoint")
+            # Only add adapter scale flag if the training script supports it.
+            if resume_last_strength < 1.0:
+                try:
+                    train_py = os.path.join(project_root, "diffusion-pipe", "train.py")
+                    with open(train_py, "r", encoding="utf-8") as f:
+                        train_src = f.read()
+                    if "resume_adapter_scale" in train_src:
+                        cmd.extend(["--resume_adapter_scale", str(resume_last_strength)])
+                except Exception:
+                    # If detection fails, fall back to plain resume_from_checkpoint.
+                    pass
         if cache_only:
             cmd.append("--cache_only")
         env = os.environ.copy()
@@ -546,6 +557,12 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
 
     # Add Last Config checkbox
     last_config_checkbox = ft.Checkbox(label="Last Config", value=False)
+    last_strength_field = create_textfield(
+        "Last str",
+        "1.0",
+        width=100,
+        keyboard_type=ft.KeyboardType.NUMBER,
+    )
 
     start_btn = ft.ElevatedButton(
         "Start",
@@ -568,7 +585,7 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
                         multi_gpu_checkbox,
                         trust_cache_checkbox,
                         resume_last_checkbox,
-                        cache_only_checkbox,
+                        last_strength_field,
                     ], spacing=20, alignment=ft.MainAxisAlignment.START),
                     alignment=ft.alignment.center_left,
                     expand=True,
@@ -578,6 +595,7 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
                 ft.Container(
                     content=ft.Row([
                         last_config_checkbox,
+                        cache_only_checkbox,
                         output_dir_field,
                         start_btn,
                     ], alignment=ft.MainAxisAlignment.END, spacing=12),
@@ -594,6 +612,7 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
     bottom.output_dir_field = output_dir_field
     # Expose the last_config_checkbox for external control
     bottom.last_config_checkbox = last_config_checkbox
+    bottom.last_strength_field = last_strength_field
     return bottom
 
 def build_main_container(main_content_row, bottom_app_bar):
@@ -842,6 +861,27 @@ def get_training_tab_content(page: ft.Page):
             _, last_config_path, last_data_config_path = _get_workspace_last_config_paths()
             last_config_checkbox = getattr(training_tab_container, 'last_config_checkbox', None)
             use_last_config = bool(last_config_checkbox and last_config_checkbox.value)
+            last_strength_field = getattr(training_tab_container, 'last_strength_field', None)
+            last_strength_value = 1.0
+            if last_strength_field and isinstance(last_strength_field.value, str):
+                raw_value = last_strength_field.value.strip()
+            else:
+                raw_value = ""
+            if raw_value:
+                try:
+                    last_strength_value = float(raw_value)
+                except ValueError:
+                    print(f"Invalid Last str value '{raw_value}'. Defaulting to 1.0.")
+                    last_strength_value = 1.0
+            if last_strength_value <= 0:
+                print(f"Last str must be > 0. Received {last_strength_value}. Defaulting to 1.0.")
+                last_strength_value = 1.0
+            if last_strength_field and last_strength_field.value != str(last_strength_value):
+                last_strength_field.value = str(last_strength_value)
+                try:
+                    last_strength_field.update()
+                except Exception:
+                    pass
             if use_last_config and os.path.exists(last_config_path) and os.path.exists(last_data_config_path):
                 print("Reusing existing workspace/last_config.toml")
                 out_path = last_config_path
@@ -872,7 +912,7 @@ def get_training_tab_content(page: ft.Page):
             except Exception:
                 pass
 
-            proc, cmd_str = await run_training_deepspeed(out_path, use_multi_gpu, trust_cache, resume_last, cache_only)
+            proc, cmd_str = await run_training_deepspeed(out_path, use_multi_gpu, trust_cache, resume_last, cache_only, last_strength_value)
 
             # Store process handle and toggle Start->Cancel
             try:
@@ -1199,6 +1239,10 @@ def get_training_tab_content(page: ft.Page):
         main_container.last_config_checkbox = getattr(bottom_bar, 'last_config_checkbox', None)
     except Exception:
         main_container.last_config_checkbox = None
+    try:
+        main_container.last_strength_field = getattr(bottom_bar, 'last_strength_field', None)
+    except Exception:
+        main_container.last_strength_field = None
 
     # Expose references to allow programmatic refreshes
     main_container.sub_navigation_rail = sub_navigation_rail

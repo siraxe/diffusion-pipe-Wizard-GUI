@@ -288,10 +288,13 @@ def create_abc_action_container():
 
                     # Refresh thumbnails
                     if thumbnails_grid_ref and thumbnails_grid_ref.current:
-                        e.page.run_task(update_thumbnails,
-                                       page_ctx=e.page,
-                                       grid_control=thumbnails_grid_ref.current,
-                                       force_refresh=True)
+                        # Do not force full thumbnail regeneration; just refresh the grid state
+                        e.page.run_task(
+                            update_thumbnails,
+                            page_ctx=e.page,
+                            grid_control=thumbnails_grid_ref.current,
+                            force_refresh=False,
+                        )
 
                     # Hide the container after operation
                     abc_action_container.visible = False
@@ -702,7 +705,6 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
             grid_control.controls.append(ft.Text("Select a dataset to view media." if folders_exist else "No datasets found."))
         else:
             thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, DATASETS_TYPE["value"], force_refresh)
-            video_files_list["value"] = list(thumbnail_paths_map.keys())
             dataset_captions = load_dataset_captions(current_selection)
 
             grid_control.controls.clear()
@@ -713,17 +715,32 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
                 # Apply sorting based on current sort mode
                 sort_mode = dataset_sort_mode.get("value", "newest")
                 if sort_mode == "name_desc":
-                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), key=lambda item: item[0].lower(), reverse=True)
+                    sorted_thumbnail_items = sorted(
+                        thumbnail_paths_map.items(),
+                        key=lambda item: item[0].lower(),
+                        reverse=True,
+                    )
                 elif sort_mode == "name_asc":
-                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), key=lambda item: item[0].lower())
+                    sorted_thumbnail_items = sorted(
+                        thumbnail_paths_map.items(),
+                        key=lambda item: item[0].lower(),
+                    )
                 elif sort_mode == "oldest":
                     # Sort by modification time (oldest first)
-                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), 
-                        key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0)
+                    sorted_thumbnail_items = sorted(
+                        thumbnail_paths_map.items(),
+                        key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0,
+                    )
                 else:  # newest (default)
                     # Sort by modification time (newest first)
-                    sorted_thumbnail_items = sorted(thumbnail_paths_map.items(), 
-                        key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0, reverse=True)
+                    sorted_thumbnail_items = sorted(
+                        thumbnail_paths_map.items(),
+                        key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0,
+                        reverse=True,
+                    )
+
+                # Keep video_files_list in the same order as the visible thumbnails
+                video_files_list["value"] = [video_path for video_path, _ in sorted_thumbnail_items]
 
                 for i, (video_path, thumb_path) in enumerate(sorted_thumbnail_items):
                     has_caption = any(
@@ -794,6 +811,8 @@ def update_dataset_dropdown(
     last_clicked_thumbnail_index = -1
 
     folders = get_dataset_folders()
+    # Sort dataset names A-Z by their display name
+    folders = dict(sorted(folders.items(), key=lambda item: item[1].lower())) if folders else {}
     current_dataset_dropdown.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
     current_dataset_dropdown.value = None
     selected_dataset["value"] = None
@@ -836,6 +855,8 @@ def reload_current_dataset(
     last_clicked_thumbnail_index = -1
 
     folders = get_dataset_folders()
+    # Sort dataset names A-Z by their display name
+    folders = dict(sorted(folders.items(), key=lambda item: item[1].lower())) if folders else {}
     current_dataset_dropdown.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
     current_dataset_dropdown.disabled = len(folders) == 0
 
@@ -1143,6 +1164,8 @@ def dataset_tab_layout(page=None):
     is_in_dataset_tab["value"] = True
 
     folders = get_dataset_folders()
+    # Sort dataset names A-Z by their display name
+    folders = dict(sorted(folders.items(), key=lambda item: item[1].lower())) if folders else {}
     folder_names = list(folders.keys()) if folders else []
 
     dataset_dropdown_control = create_dropdown(
