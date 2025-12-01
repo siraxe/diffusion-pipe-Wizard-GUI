@@ -121,6 +121,36 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         ls_bool = str(ls).strip().lower() in ('1', 'true', 'yes', 'on') if not isinstance(ls, bool) else ls
         lines.append(f"lumina_shift = {'true' if ls_bool else 'false'}")
 
+    # z_image - uses custom field names
+    if mt == 'z_image':
+        diffusion_model = get_value('diffusion_model', None)
+        if diffusion_model and str(diffusion_model).strip():
+            expanded_dm_path = expand_model_path(str(diffusion_model))
+            lines.append(f"diffusion_model = '{expanded_dm_path}'")
+        # diffusion_model_dtype checkbox - always add the line, comment if unchecked
+        dm_dtype = get_value('diffusion_model_dtype', False)
+        dm_dtype_bool = str(dm_dtype).strip().lower() in ('1', 'true', 'yes', 'on') if not isinstance(dm_dtype, bool) else dm_dtype
+        if dm_dtype_bool:
+            lines.append(f"diffusion_model_dtype = 'float8'")
+        else:
+            lines.append(f"#diffusion_model_dtype = 'float8'")
+        vae = get_value('vae', None)
+        if vae and str(vae).strip():
+            expanded_vae = expand_model_path(str(vae))
+            lines.append(f"vae = '{expanded_vae}'")
+        text_encoders = get_value('text_encoders', None)
+        if text_encoders and str(text_encoders).strip():
+            expanded_te = expand_model_path(str(text_encoders))
+            # Save text_encoders as a list with path and type
+            lines.append(f"text_encoders = [")
+            lines.append(f"    {{path = '{expanded_te}', type = 'lumina2'}}")
+            lines.append(f"]")
+        merge_adapters = get_value('merge_adapters', None)
+        if merge_adapters and str(merge_adapters).strip():
+            expanded_ma = expand_model_path(str(merge_adapters))
+            # Save merge_adapters as a list in TOML
+            lines.append(f"merge_adapters = ['{expanded_ma}']")
+
     # sdxl
     if mt == 'sdxl':
         vp = get_value('v_pred', None)
@@ -211,6 +241,37 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     elif mt_lower in ('lumina', 'lumina_2'):
         if 'lumina_shift' in model_dict:
             label_vals['lumina_shift'] = model_dict.get('lumina_shift')
+    elif mt_lower == 'z_image':
+        # z_image uses custom field names
+        if 'diffusion_model' in model_dict:
+            label_vals['diffusion_model'] = collapse_model_path(model_dict.get('diffusion_model'))
+        if 'diffusion_model_dtype' in model_dict:
+            # Check if diffusion_model_dtype is set to 'float8'
+            dm_dtype_val = model_dict.get('diffusion_model_dtype')
+            label_vals['diffusion_model_dtype'] = (str(dm_dtype_val).strip().lower() == 'float8')
+        if 'vae' in model_dict:
+            label_vals['vae'] = collapse_model_path(model_dict.get('vae'))
+        if 'text_encoders' in model_dict:
+            # text_encoders is stored as a list with {path, type}, extract path for UI
+            text_encoders_val = model_dict.get('text_encoders')
+            if isinstance(text_encoders_val, list) and len(text_encoders_val) > 0:
+                first_encoder = text_encoders_val[0]
+                if isinstance(first_encoder, dict) and 'path' in first_encoder:
+                    label_vals['text_encoders'] = collapse_model_path(first_encoder['path'])
+                elif isinstance(first_encoder, str):
+                    # Fallback if it's a simple string in the list
+                    label_vals['text_encoders'] = collapse_model_path(first_encoder)
+            elif isinstance(text_encoders_val, str):
+                # Fallback if it's a string (for backwards compatibility)
+                label_vals['text_encoders'] = collapse_model_path(text_encoders_val)
+        if 'merge_adapters' in model_dict:
+            # merge_adapters is stored as a list in TOML, extract first item for UI
+            merge_adapters_val = model_dict.get('merge_adapters')
+            if isinstance(merge_adapters_val, list) and len(merge_adapters_val) > 0:
+                label_vals['merge_adapters'] = collapse_model_path(merge_adapters_val[0])
+            elif isinstance(merge_adapters_val, str):
+                # Fallback if it's a string (for backwards compatibility)
+                label_vals['merge_adapters'] = collapse_model_path(merge_adapters_val)
     elif mt_lower == 'sdxl':
         if 'v_pred' in model_dict:
             label_vals['v_pred'] = model_dict.get('v_pred')
@@ -248,7 +309,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -258,6 +319,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_sd3 = (mt == 'sd3')
         is_ltx = (mt in ('ltx-video', 'ltx'))
         is_lumina = (mt in ('lumina', 'lumina_2'))
+        is_z_image = (mt == 'z_image')
         is_sdxl = (mt == 'sdxl')
         is_longcat = (mt == 'longcat')
         is_hunyuan_video = (mt == 'hunyuan-video')
@@ -275,6 +337,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_sd3 = is_sd3 or (curv == 'sd3')
             is_ltx = is_ltx or (curv in ('ltx-video', 'ltx'))
             is_lumina = is_lumina or (curv in ('lumina', 'lumina_2'))
+            is_z_image = is_z_image or (curv == 'z_image')
             is_sdxl = is_sdxl or (curv == 'sdxl')
             is_longcat = is_longcat or (curv == 'longcat')
     except Exception:
@@ -321,6 +384,17 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             label_vals.get('text_encoder_1_lr'),
             label_vals.get('text_encoder_2_lr'),
             label_vals.get('checkpoint_path'),
+        )
+    except Exception:
+        pass
+    try:
+        from flet_app.ui.pages.training_config import update_z_image_fields_visibility
+        update_z_image_fields_visibility(
+            is_z_image,
+            label_vals.get('diffusion_model'),
+            label_vals.get('vae'),
+            label_vals.get('text_encoders'),
+            label_vals.get('merge_adapters'),
         )
     except Exception:
         pass

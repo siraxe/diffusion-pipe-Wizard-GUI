@@ -1,5 +1,6 @@
 # Claude files
 .claude
+.claude2
 .codex
 .qwen
 *.env

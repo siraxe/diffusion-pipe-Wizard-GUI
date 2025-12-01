@@ -1,5 +1,5 @@
+/home/e/Dpipe/workspace/configs/z_image_w.toml
 /home/e/Dpipe/workspace/configs/i3.toml
 /home/e/Dpipe/workspace/configs/wan22_i2v_t1_high.toml
 /home/e/Dpipe/workspace/configs/wan22_i2v_high.toml
 /home/e/Dpipe/workspace/configs/croc_config.toml
-/home/e/Dpipe/workspace/configs/qq_human.toml

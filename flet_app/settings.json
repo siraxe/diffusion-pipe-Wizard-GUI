@@ -17,7 +17,8 @@
         "sd3",
         "sdxl",
         "wan",
-        "wan22"
+        "wan22",
+        "z_image"
     ],
     "captions": {
         "llava_next_7b": "LLaVA-NeXT-7B",

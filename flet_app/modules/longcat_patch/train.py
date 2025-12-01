@@ -316,6 +316,9 @@ if __name__ == '__main__':
     elif model_type == 'lumina_2':
         from models import lumina_2
         model = lumina_2.Lumina2Pipeline(config)
+    elif model_type == 'z_image':
+        from models import z_image
+        model = z_image.ZImagePipeline(config)
     elif model_type == 'wan':
         from models.wan import wan
         model = wan.WanPipeline(config)

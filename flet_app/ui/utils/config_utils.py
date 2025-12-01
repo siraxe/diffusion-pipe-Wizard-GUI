@@ -222,10 +222,8 @@ def build_toml_config_from_ui(training_tab_container) -> str:
         blocks_swap_val = int(blocks_swap_val)
     except Exception:
         blocks_swap_val = 0
-    if blocks_swap_val and blocks_swap_val > 0:
-        lines.append(f"blocks_to_swap = {blocks_swap_val}")
-    else:
-        lines.append(f"#blocks_to_swap = {blocks_swap_val}")
+    # Always write blocks_to_swap without commenting it out
+    lines.append(f"blocks_to_swap = {blocks_swap_val}")
     disable_bsfe_val = _get('disable_bsfe', 'true')
     lines.append(f"disable_block_swap_for_eval = {'true' if _as_bool(disable_bsfe_val) else 'false'}")
     lines.append("")
@@ -368,7 +366,9 @@ def extract_config_from_controls(control):
             result[control.label] = control.value
     elif isinstance(control, ft.Checkbox):
         if getattr(control, 'visible', True):
-            result[control.label] = control.value
+            # Use data attribute as key if present, otherwise use label
+            key = getattr(control, 'data', None) or control.label
+            result[key] = control.value
     return result
 
 

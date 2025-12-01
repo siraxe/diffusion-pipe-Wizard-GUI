@@ -562,6 +562,7 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
         "1.0",
         width=100,
         keyboard_type=ft.KeyboardType.NUMBER,
+        visible=False,
     )
 
     start_btn = ft.ElevatedButton(

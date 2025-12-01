@@ -50,6 +50,13 @@ llama3_row_ref = ft.Ref[ft.ResponsiveRow]()
 clip_row_ref = ft.Ref[ft.ResponsiveRow]()
 timestep_sm_dropdown_ref = ft.Ref[ft.Dropdown]()
 transformer_dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
+# z_image specific fields
+z_image_diffusion_model_field_ref = ft.Ref[ft.TextField]()
+z_image_vae_field_ref = ft.Ref[ft.TextField]()
+z_image_text_encoders_field_ref = ft.Ref[ft.TextField]()
+z_image_merge_adapters_field_ref = ft.Ref[ft.TextField]()
+z_image_diffusion_model_dtype_checkbox_ref = ft.Ref[ft.Checkbox]()
+z_image_row_ref = ft.Ref[ft.ResponsiveRow]()
 
 _suppress_model_defaults = False
 
@@ -78,6 +85,7 @@ def get_training_config_page_content():
         is_sd3 = (str(sel).strip().lower() == "sd3")
         is_ltx = (str(sel).strip().lower() in ("ltx-video", "ltx"))
         is_lumina = (str(sel).strip().lower() in ("lumina", "lumina_2"))
+        is_z_image = (str(sel).strip().lower() == "z_image")
         is_sdxl = (str(sel).strip().lower() == "sdxl")
         sel_norm = str(sel).strip().lower() if sel is not None else ""
         is_qwen_plus = (sel_norm == "qwen_image_plus")
@@ -157,7 +165,7 @@ def get_training_config_page_content():
         if not skip_defaults:
             try:
                 if transformer_dtype_dropdown_ref.current:
-                    models_none = {"sdxl", "lumina_2", "omnigen2"}
+                    models_none = {"sdxl", "lumina_2", "omnigen2", "z_image"}
                     if sel_norm in models_none:
                         transformer_dtype_dropdown_ref.current.value = "None"
                     else:
@@ -228,6 +236,7 @@ def get_training_config_page_content():
                     and (not is_cosmos_p2)
                     and (not is_hunyuan_video)
                     and (not is_lumina)
+                    and (not is_z_image)
                 )
             if single_file_row_ref.current:
                 single_file_row_ref.current.visible = is_ltx
@@ -241,6 +250,8 @@ def get_training_config_page_content():
                 llama3_row_ref.current.visible = is_hidream
             if clip_row_ref.current:
                 clip_row_ref.current.visible = is_hunyuan_video
+            if z_image_row_ref.current:
+                z_image_row_ref.current.visible = is_z_image
         except Exception:
             pass
         # Ensure all model-specific toggles are hidden for Cosmos
@@ -290,10 +301,11 @@ def get_training_config_page_content():
                 and (not is_hunyuan_video)
                 and (not is_hunyuan_image)
                 and (not is_lumina)
+                and (not is_z_image)
             )
         if transformer_path_field_ref.current:
-            # Show standard transformer path for most models (Qwen included), hide for Chroma/SDXL
-            transformer_path_field_ref.current.visible = (not is_sdxl) and (not is_chroma) and (not is_omnigen2) and (not is_hidream) and (not is_ltx) and (not is_sd3)
+            # Show standard transformer path for most models (Qwen included), hide for Chroma/SDXL/z_image
+            transformer_path_field_ref.current.visible = (not is_sdxl) and (not is_chroma) and (not is_omnigen2) and (not is_hidream) and (not is_ltx) and (not is_sd3) and (not is_z_image)
         if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
             try:
                 if transformer_path_full_ref.current:
@@ -315,6 +327,7 @@ def get_training_config_page_content():
                 and (not is_hunyuan_image)
                 and (not is_ltx)
                 and (not is_sd3)
+                and (not is_z_image)
             )
         if text_encoder_path_field_ref.current:
             text_encoder_path_field_ref.current.visible = (
@@ -332,6 +345,7 @@ def get_training_config_page_content():
                 and (not is_ltx)
                 and (not is_cosmos_p2)
                 and (not is_sd3)
+                and (not is_z_image)
             )
         if vae_path_field_ref.current:
             vae_path_field_ref.current.visible = (
@@ -346,6 +360,7 @@ def get_training_config_page_content():
                 and (not is_hidream)
                 and (not is_ltx)
                 and (not is_sd3)
+                and (not is_z_image)
             )
         if is_auraflow and not skip_defaults:
             try:
@@ -440,6 +455,25 @@ def get_training_config_page_content():
                         vae_path_field_ref.current.value = 'models/lumina2/flux_vae.safetensors'
                 if lumina_shift_checkbox_ref.current:
                     lumina_shift_checkbox_ref.current.value = True
+            except Exception:
+                pass
+        # Set z_image defaults when selected
+        if sel_norm == 'z_image' and not skip_defaults:
+            try:
+                if z_image_diffusion_model_field_ref.current:
+                    if not z_image_diffusion_model_field_ref.current.value or z_image_diffusion_model_field_ref.current.value.strip() == '':
+                        z_image_diffusion_model_field_ref.current.value = 'models/z_image/z_image_turbo_bf16.safetensors'
+                if z_image_vae_field_ref.current:
+                    if not z_image_vae_field_ref.current.value or z_image_vae_field_ref.current.value.strip() == '':
+                        z_image_vae_field_ref.current.value = 'models/z_image/flux_vae.safetensors'
+                if z_image_text_encoders_field_ref.current:
+                    if not z_image_text_encoders_field_ref.current.value or z_image_text_encoders_field_ref.current.value.strip() == '':
+                        z_image_text_encoders_field_ref.current.value = 'models/z_image/qwen_3_4b.safetensors'
+                if z_image_merge_adapters_field_ref.current:
+                    if not z_image_merge_adapters_field_ref.current.value or z_image_merge_adapters_field_ref.current.value.strip() == '':
+                        z_image_merge_adapters_field_ref.current.value = 'models/z_image/zimage_turbo_training_adapter_v2.safetensors'
+                if z_image_diffusion_model_dtype_checkbox_ref.current:
+                    z_image_diffusion_model_dtype_checkbox_ref.current.value = False
             except Exception:
                 pass
         # Set Qwen Image defaults when selected
@@ -751,6 +785,7 @@ def get_training_config_page_content():
                                     and settings.train_def_model != "cosmos_predict2"
                                     and settings.train_def_model != "hunyuan-video"
                                     and settings.train_def_model != "lumina_2"
+                                    and settings.train_def_model != "z_image"
                                 )
                             ),
                         ], spacing=2,
@@ -764,6 +799,7 @@ def get_training_config_page_content():
                             and settings.train_def_model != "cosmos_predict2"
                             and settings.train_def_model != "hunyuan-video"
                             and settings.train_def_model != "lumina_2"
+                            and settings.train_def_model != "z_image"
                         )
                     ),
                     ft.ResponsiveRow(
@@ -818,10 +854,45 @@ def get_training_config_page_content():
                             ref=clip_path_field_ref, visible=(settings.train_def_model == "hunyuan-video")
                         ),
                     ], spacing=2, ref=clip_row_ref, visible=(settings.train_def_model == "hunyuan-video")),
+                    # z_image specific fields
+                    ft.ResponsiveRow(
+                        controls=[
+                            ft.Column([
+                                create_textfield(
+                                    "diffusion_model", "models/z_image/z_image_turbo_bf16.safetensors",
+                                    col=12, expand=True, ref=z_image_diffusion_model_field_ref
+                                ),
+                                create_textfield(
+                                    "vae", "models/z_image/flux_vae.safetensors",
+                                    col=12, expand=True, ref=z_image_vae_field_ref
+                                ),
+                            ], col=6, spacing=2),
+                            ft.Column([
+                                create_textfield(
+                                    "text_encoders", "models/z_image/qwen_3_4b.safetensors",
+                                    col=12, expand=True, ref=z_image_text_encoders_field_ref
+                                ),
+                                create_textfield(
+                                    "merge_adapters", "models/z_image/zimage_turbo_training_adapter_v2.safetensors",
+                                    col=12, expand=True, ref=z_image_merge_adapters_field_ref
+                                ),
+                                ft.Checkbox(
+                                    label="diffusion_model_dtype_fp8",
+                                    value=False,
+                                    scale=0.8,
+                                    ref=z_image_diffusion_model_dtype_checkbox_ref,
+                                    data="diffusion_model_dtype",  # actual key for config
+                                ),
+                            ], col=6, spacing=2),
+                        ],
+                        spacing=2,
+                        ref=z_image_row_ref,
+                        visible=(settings.train_def_model == "z_image")
+                    ),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "transformer_path", "", col=6, expand=True,
-                            ref=transformer_path_field_ref, visible=(settings.train_def_model != "sdxl" and settings.train_def_model != "chroma" and settings.train_def_model != "omnigen2")
+                            ref=transformer_path_field_ref, visible=(settings.train_def_model != "sdxl" and settings.train_def_model != "chroma" and settings.train_def_model != "omnigen2" and settings.train_def_model != "z_image")
                         ),
                         ft.Checkbox(
                             label="float8_e5m2",
@@ -852,6 +923,7 @@ def get_training_config_page_content():
                                 and settings.train_def_model != "omnigen2"
                                 and settings.train_def_model != "flux"
                                 and settings.train_def_model != "hidream"
+                                and settings.train_def_model != "z_image"
                             )
                         ),
                     ], spacing=2),
@@ -868,6 +940,7 @@ def get_training_config_page_content():
                             and settings.train_def_model != "lumina_2"
                             and settings.train_def_model != "cosmos_predict2"
                             and settings.train_def_model != "longcat"
+                            and settings.train_def_model != "z_image"
                         )),
                         create_textfield("vae_path", "", col=6, expand=True, ref=vae_path_field_ref, visible=(
                             settings.train_def_model != "sdxl"
@@ -877,6 +950,7 @@ def get_training_config_page_content():
                             and settings.train_def_model != "omnigen2"
                             and settings.train_def_model != "flux"
                             and settings.train_def_model != "longcat"
+                            and settings.train_def_model != "z_image"
                         )),
                 ], spacing=2),
                     ft.ResponsiveRow(controls=[
@@ -1359,5 +1433,30 @@ def update_longcat_ckpt_visibility(is_longcat: bool, ckpt_value=None):
                 ckpt_path_wan22_field_ref.current.value = str(ckpt_value)
         if ckpt_path_wan22_field_ref.current and ckpt_path_wan22_field_ref.current.page:
             ckpt_path_wan22_field_ref.current.page.update()
+    except Exception:
+        pass
+
+def update_z_image_fields_visibility(is_z_image: bool, diffusion_model_value=None, vae_value=None, text_encoders_value=None, merge_adapters_value=None):
+    """Update visibility and values for z_image specific fields."""
+    try:
+        if z_image_diffusion_model_field_ref.current:
+            z_image_diffusion_model_field_ref.current.visible = is_z_image
+            if diffusion_model_value is not None:
+                z_image_diffusion_model_field_ref.current.value = str(diffusion_model_value)
+        if z_image_vae_field_ref.current:
+            z_image_vae_field_ref.current.visible = is_z_image
+            if vae_value is not None:
+                z_image_vae_field_ref.current.value = str(vae_value)
+        if z_image_text_encoders_field_ref.current:
+            z_image_text_encoders_field_ref.current.visible = is_z_image
+            if text_encoders_value is not None:
+                z_image_text_encoders_field_ref.current.value = str(text_encoders_value)
+        if z_image_merge_adapters_field_ref.current:
+            z_image_merge_adapters_field_ref.current.visible = is_z_image
+            if merge_adapters_value is not None:
+                z_image_merge_adapters_field_ref.current.value = str(merge_adapters_value)
+        # Update page once if possible
+        if z_image_row_ref.current and z_image_row_ref.current.page:
+            z_image_row_ref.current.page.update()
     except Exception:
         pass
