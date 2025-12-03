@@ -462,16 +462,16 @@ def get_training_config_page_content():
             try:
                 if z_image_diffusion_model_field_ref.current:
                     if not z_image_diffusion_model_field_ref.current.value or z_image_diffusion_model_field_ref.current.value.strip() == '':
-                        z_image_diffusion_model_field_ref.current.value = 'models/z_image/z_image_turbo_bf16.safetensors'
+                        z_image_diffusion_model_field_ref.current.value = 'models/z_image_turbo/split_files/diffusion_models/z_image_turbo_bf16.safetensors'
                 if z_image_vae_field_ref.current:
                     if not z_image_vae_field_ref.current.value or z_image_vae_field_ref.current.value.strip() == '':
-                        z_image_vae_field_ref.current.value = 'models/z_image/flux_vae.safetensors'
+                        z_image_vae_field_ref.current.value = 'models/z_image_turbo/split_files/vae/ae.safetensors'
                 if z_image_text_encoders_field_ref.current:
                     if not z_image_text_encoders_field_ref.current.value or z_image_text_encoders_field_ref.current.value.strip() == '':
-                        z_image_text_encoders_field_ref.current.value = 'models/z_image/qwen_3_4b.safetensors'
+                        z_image_text_encoders_field_ref.current.value = 'models/z_image_turbo/split_files/text_encoders/qwen_3_4b.safetensors'
                 if z_image_merge_adapters_field_ref.current:
                     if not z_image_merge_adapters_field_ref.current.value or z_image_merge_adapters_field_ref.current.value.strip() == '':
-                        z_image_merge_adapters_field_ref.current.value = 'models/z_image/zimage_turbo_training_adapter_v2.safetensors'
+                        z_image_merge_adapters_field_ref.current.value = 'models/z_image_turbo/zimage_turbo_training_adapter_v2.safetensors'
                 if z_image_diffusion_model_dtype_checkbox_ref.current:
                     z_image_diffusion_model_dtype_checkbox_ref.current.value = False
             except Exception:
@@ -859,21 +859,21 @@ def get_training_config_page_content():
                         controls=[
                             ft.Column([
                                 create_textfield(
-                                    "diffusion_model", "models/z_image/z_image_turbo_bf16.safetensors",
+                                    "diffusion_model", "models/z_image_turbo/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
                                     col=12, expand=True, ref=z_image_diffusion_model_field_ref
                                 ),
                                 create_textfield(
-                                    "vae", "models/z_image/flux_vae.safetensors",
+                                    "vae", "models/z_image_turbo/split_files/vae/ae.safetensors",
                                     col=12, expand=True, ref=z_image_vae_field_ref
                                 ),
                             ], col=6, spacing=2),
                             ft.Column([
                                 create_textfield(
-                                    "text_encoders", "models/z_image/qwen_3_4b.safetensors",
+                                    "text_encoders", "models/z_image_turbo/text_encoders/split_files/qwen_3_4b.safetensors",
                                     col=12, expand=True, ref=z_image_text_encoders_field_ref
                                 ),
                                 create_textfield(
-                                    "merge_adapters", "models/z_image/zimage_turbo_training_adapter_v2.safetensors",
+                                    "merge_adapters", "models/z_image_turbo/zimage_turbo_training_adapter_v2.safetensors",
                                     col=12, expand=True, ref=z_image_merge_adapters_field_ref
                                 ),
                                 ft.Checkbox(
