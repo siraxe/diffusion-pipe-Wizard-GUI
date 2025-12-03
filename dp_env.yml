@@ -28,7 +28,7 @@ dependencies:
     - einops==0.8.1
     - accelerate==1.7.0
     - loguru==0.7.3
-    - flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.1/flash_attn-2.8.1+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+    - flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp312-cp312-linux_x86_64.whl
     - omegaconf==2.3.0
     - iopath==0.1.10
     - termcolor==3.1.0
