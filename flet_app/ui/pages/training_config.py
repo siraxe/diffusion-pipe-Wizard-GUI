@@ -869,7 +869,7 @@ def get_training_config_page_content():
                             ], col=6, spacing=2),
                             ft.Column([
                                 create_textfield(
-                                    "text_encoders", "models/z_image_turbo/text_encoders/split_files/qwen_3_4b.safetensors",
+                                    "text_encoders", "models/z_image_turbo/split_files/text_encoders/qwen_3_4b.safetensors",
                                     col=12, expand=True, ref=z_image_text_encoders_field_ref
                                 ),
                                 create_textfield(
