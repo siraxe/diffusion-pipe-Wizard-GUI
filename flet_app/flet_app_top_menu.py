@@ -158,6 +158,8 @@ def build_menu_bar(page: ft.Page, on_menu_item_click, text_size=10):
                             style=ft.MenuStyle(
                                 alignment=ft.alignment.top_left,
                                 shape=ft.RoundedRectangleBorder(radius=0),
+                                elevation=0,
+                                shadow_color="transparent",
                             ),
                             controls=[
                                 build_file_menu(on_menu_item_click, page, text_size),
@@ -185,7 +187,7 @@ def build_menu_bar(page: ft.Page, on_menu_item_click, text_size=10):
             expand=True,
         ),
         expand=True,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.BLUE_GREY_50),
+        bgcolor="#1d2024",
         padding=ft.padding.symmetric(horizontal=10, vertical=5),
     )
 

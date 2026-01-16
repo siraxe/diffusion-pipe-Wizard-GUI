@@ -17,11 +17,12 @@ import flet as ft
 # Local imports - UI components
 from flet_app.ui.flet_hotkeys import global_hotkey_handler
 from flet_app.ui.tab_training_view import get_training_tab_content
-from flet_app.ui.dataset_manager.dataset_layout_tab import dataset_tab_layout, on_main_tab_change, is_in_dataset_tab, update_sort_controls_visibility
+from flet_app.ui.dataset_manager.dataset_layout_tab import dataset_tab_layout, on_main_tab_change, update_sort_controls_visibility, _initialize_page_state
 from flet_app.ui.tab_tools_view import get_models_tab_content
 from flet_app.flet_app_top_menu import create_app_menu_bar
 from flet_app.ui.utils.utils_top_menu import TopBarUtils
 from flet_app.ui_popups.popup_dialog_base import PopupDialogBase
+from flet_app.ui.theme_config import DPipeTheme
 
 # Local imports - configuration
 from flet_app.settings import settings
@@ -62,14 +63,17 @@ def build_menu_bar_column(page):
 
 def build_main_tabs(page):
     """Creates the main tab control with Training, Datasets, and Models tabs."""
+    # Initialize all page state for this browser tab
+    _initialize_page_state(page)
+
     training_tab_container = get_training_tab_content(page)
-    
+
     # Create dataset tab content first to get the ABC container
     dataset_tab_content, abc_container, sort_controls_container = dataset_tab_layout(page)
 
     # Initialize the tab state since we start on Training tab (index 0)
-    is_in_dataset_tab["value"] = False
-    update_sort_controls_visibility()
+    page.is_in_dataset_tab = False
+    update_sort_controls_visibility(page)
 
     main_tabs = ft.Tabs(
         selected_index=0,
@@ -123,6 +127,11 @@ def build_base_dialog(page):
 
 def main(page: ft.Page):
     """Main entry point for the DPipe Trainer Flet application."""
+    # =====================
+    # Theme Setup (Browser Compatibility)
+    # =====================
+    DPipeTheme.apply_to_page(page, theme_mode="dark")
+
     # Store project location in settings.json
     try:
         # Get the project directory (one level higher than flet_app directory)

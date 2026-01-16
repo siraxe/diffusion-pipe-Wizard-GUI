@@ -28,10 +28,19 @@ from flet_app.ui.flet_hotkeys import is_d_key_pressed_global # Import global D k
 # Global State (Keep track of UI controls and running processes)
 # ======================================================================================
 
-# References to UI controls
+# NOTE: Most state is now per-page to support multiple browser tabs with independent states.
+# See _initialize_page_state() function below.
+# Fallback globals are kept for non-page code paths (deprecated, prefer page state)
+
+# Fallback global state (deprecated - use page-scoped state instead)
 selected_dataset = {"value": None}
-DATASETS_TYPE = {"value": None} # "image" or "video"
+DATASETS_TYPE = {"value": None}
+selected_thumbnails_set = set()
+last_clicked_thumbnail_index = -1
 video_files_list = {"value": []}
+pending_uploads_count = {"value": 0}
+
+# References to UI controls (these are global refs to controls, not state)
 thumbnails_grid_ref = ft.Ref[ft.GridView]()
 refresh_button_ref = ft.Ref[ft.IconButton]()
 thumbnails_refresh_in_progress = False
@@ -41,17 +50,10 @@ processed_progress_bar = ft.ProgressBar(visible=False)
 processed_output_field = ft.TextField(
     label="Processed Output", text_size=10, multiline=True, read_only=True,
     visible=False, min_lines=6, max_lines=15, expand=True)
-pending_uploads_count = {"value": 0}
-
-# Multi-selection state
-selected_thumbnails_set = set() # Stores video_path of selected thumbnails
-last_clicked_thumbnail_index = -1 # Stores the index of the last clicked checkbox
 
 # ABC Action Container (A, Duplicate, Delete)
 abc_action_container = None
 
-# Track if we're currently in the dataset tab
-is_in_dataset_tab = {"value": False}
 
 # Global controls (defined here but created in _create_global_controls)
 bucket_size_textfield: ft.TextField = None
@@ -80,6 +82,72 @@ joy_prompt_dropdown_ref = ft.Ref[ft.Dropdown]()
 affix_text_field_ref = ft.Ref[ft.TextField]()
 find_text_field_ref = ft.Ref[ft.TextField]()
 replace_text_field_ref = ft.Ref[ft.TextField]()
+
+# ======================================================================================
+# Page State Initialization (Per-tab independent state)
+# ======================================================================================
+
+def _initialize_page_state(page: ft.Page):
+    """Initialize all page-scoped state for a browser tab instance.
+
+    Each browser tab gets its own independent state:
+    - selected_dataset: which dataset is currently selected
+    - DATASETS_TYPE: image or video type
+    - selected_thumbnails_set: set of selected items
+    - last_clicked_thumbnail_index: for range selection
+    - video_files_list: list of video files for current dataset
+    - pending_uploads_count: number of uploads pending
+    """
+    if not hasattr(page, '_state_initialized'):
+        page.selected_dataset = None
+        page.DATASETS_TYPE = None
+        page.selected_thumbnails_set = set()
+        page.last_clicked_thumbnail_index = -1
+        page.video_files_list = []
+        page.pending_uploads_count = 0
+        page.is_in_dataset_tab = False
+        page._state_initialized = True
+
+# Accessor helpers for page-scoped state (for backward compatibility)
+def get_selected_dataset(page=None):
+    """Get the currently selected dataset for this page/tab"""
+    if page:
+        _initialize_page_state(page)
+        return page.selected_dataset
+    return None
+
+def set_selected_dataset(page, value):
+    """Set the selected dataset for this page/tab"""
+    if page:
+        _initialize_page_state(page)
+        page.selected_dataset = value
+
+def get_datasets_type(page=None):
+    """Get the dataset type (image or video) for this page/tab"""
+    if page:
+        _initialize_page_state(page)
+        return page.DATASETS_TYPE
+    return None
+
+def set_datasets_type(page, value):
+    """Set the dataset type for this page/tab"""
+    if page:
+        _initialize_page_state(page)
+        page.DATASETS_TYPE = value
+
+def get_selected_thumbnails_set(page=None):
+    """Get the set of selected thumbnails for this page/tab"""
+    if page:
+        _initialize_page_state(page)
+        return page.selected_thumbnails_set
+    return set()
+
+def get_video_files_list(page=None):
+    """Get the list of video files for this page/tab"""
+    if page:
+        _initialize_page_state(page)
+        return page.video_files_list
+    return []
 
 # ======================================================================================
 # GUI Update/Utility Functions (Functions that update the UI state)
@@ -147,8 +215,17 @@ def _build_thumbnails_loading_indicator(message: str = "Refreshing thumbnails...
 
 
 def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_index: int, page_ctx=None):
-    global selected_thumbnails_set, last_clicked_thumbnail_index
     import flet_app.ui.flet_hotkeys as ui_fh # Re-import to get a mutable reference to the module itself
+
+    # Ensure page is initialized
+    if page_ctx:
+        _initialize_page_state(page_ctx)
+
+    # Get mutable references to page-scoped state
+    if not page_ctx:
+        return
+
+    selected_thumbnails_set = page_ctx.selected_thumbnails_set
 
     # Support range-select when Shift is held (web-safe) or legacy 'D' hotkey is used.
     is_range = False
@@ -157,16 +234,16 @@ def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_i
     except Exception:
         is_range = bool(ui.flet_hotkeys.is_d_key_pressed_global)
 
-    if is_range and last_clicked_thumbnail_index != -1:
-        start_index = min(last_clicked_thumbnail_index, thumbnail_index)
-        end_index = max(last_clicked_thumbnail_index, thumbnail_index)
+    if is_range and page_ctx.last_clicked_thumbnail_index != -1:
+        start_index = min(page_ctx.last_clicked_thumbnail_index, thumbnail_index)
+        end_index = max(page_ctx.last_clicked_thumbnail_index, thumbnail_index)
 
         for i in range(start_index, end_index + 1):
             if i < len(thumbnails_grid_ref.current.controls):
                 control = thumbnails_grid_ref.current.controls[i]
                 if isinstance(control, ft.Container) and isinstance(control.content, ft.Stack) and len(control.content.controls) > 1:
                     set_thumbnail_selection_state(control, is_checked)
-                    
+
                     if is_checked:
                         selected_thumbnails_set.add(control.data)
                     else:
@@ -185,17 +262,11 @@ def _on_thumbnail_checkbox_change(video_path: str, is_checked: bool, thumbnail_i
         else:
             selected_thumbnails_set.discard(video_path)
 
-    last_clicked_thumbnail_index = thumbnail_index
+    page_ctx.last_clicked_thumbnail_index = thumbnail_index
 
     # Update ABC container visibility based on selection
     try:
-        if page_ctx and hasattr(page_ctx, 'abc_container'):
-            # Show ABC container if there are selected thumbnails
-            page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
-            page_ctx.abc_container.update()
-
-        # Update local ABC container visibility
-        update_abc_container_visibility()
+        update_abc_container_visibility(page_ctx)
     except Exception:
         # If page is not available or update fails, continue without error
         pass
@@ -533,7 +604,7 @@ def create_abc_action_container():
                 ], spacing=8),
             ],
             alignment=ft.MainAxisAlignment.START,
-            expand=True
+            expand=False
         ),
         top=0,
         right=160,  # 30px offset from the right
@@ -575,54 +646,67 @@ def create_sort_controls_container():
 
     return dataset_sort_controls_container
 
-def update_abc_container_visibility():
+def update_abc_container_visibility(page=None):
     """Update ABC container visibility based on selection state and tab state"""
     global abc_action_container
     if abc_action_container:
+        # Get page if not provided
+        if page is None and abc_action_container.page:
+            page = abc_action_container.page
+
+        # Initialize page state if needed
+        if page:
+            _initialize_page_state(page)
+
+        # Get the is_in_dataset_tab flag and selections from page, with safe defaults
+        is_in_dataset_tab_flag = getattr(page, 'is_in_dataset_tab', False) if page else False
+        selected_thumbnails_set = getattr(page, 'selected_thumbnails_set', set()) if page else set()
+
         # Main container visible only if we are in dataset tab AND have selections
-        abc_action_container.visible = is_in_dataset_tab["value"] and len(selected_thumbnails_set) > 0
-        
+        abc_action_container.visible = is_in_dataset_tab_flag and len(selected_thumbnails_set) > 0
+
         if abc_action_container.page:
             abc_action_container.update()
 
 
-def update_sort_controls_visibility():
+def update_sort_controls_visibility(page=None):
     global dataset_sort_controls_container
     if dataset_sort_controls_container:
-        dataset_sort_controls_container.visible = is_in_dataset_tab["value"]
+        # Get page if not provided
+        if page is None and dataset_sort_controls_container.page:
+            page = dataset_sort_controls_container.page
+
+        # Initialize page state if we have a page
+        if page:
+            _initialize_page_state(page)
+
+        # Get the is_in_dataset_tab flag from page, with safe default to False
+        is_in_dataset_tab_flag = getattr(page, 'is_in_dataset_tab', False) if page else False
+
+        dataset_sort_controls_container.visible = is_in_dataset_tab_flag
         if dataset_sort_controls_container.page:
             dataset_sort_controls_container.update()
 
 def on_main_tab_change(e):
     """Handle main tab switching - manage dataset selections and container visibility"""
     try:
+        # Ensure page state is initialized
+        _initialize_page_state(e.page)
+
         # Check which tab we're switching to
         new_tab_index = e.control.selected_index
 
         if new_tab_index == 1:  # Switching to Datasets tab
             # Set that we're in dataset tab
-            is_in_dataset_tab["value"] = True
-            # Update visibility (will show if there are preserved selections)
-            update_abc_container_visibility()
-            update_sort_controls_visibility()
-
-            # Also update the page's abc_container to match our local container
-            if hasattr(e.page, 'abc_container') and e.page.abc_container:
-                e.page.abc_container.visible = is_in_dataset_tab["value"] and len(selected_thumbnails_set) > 0
-                e.page.abc_container.update()
+            e.page.is_in_dataset_tab = True
         else:  # Switching away from dataset tab
             # Set that we're not in dataset tab
-            is_in_dataset_tab["value"] = False
+            e.page.is_in_dataset_tab = False
 
-            # DON'T clear selections - preserve them for when we return
-            # Just hide the container
-            update_abc_container_visibility()
-            update_sort_controls_visibility()
-
-            # Also update the page's abc_container
-            if hasattr(e.page, 'abc_container') and e.page.abc_container:
-                e.page.abc_container.visible = False
-                e.page.abc_container.update()
+        # Update visibility based on current tab state
+        # This will show/hide the ABC container appropriately
+        update_abc_container_visibility(e.page)
+        update_sort_controls_visibility(e.page)
 
     except Exception as ex:
         print(f"Error handling tab change: {ex}")
@@ -641,16 +725,24 @@ async def on_dataset_dropdown_change(
         processed_progress_bar.visible = False
 
     # Clear selections when dataset changes
-    global selected_thumbnails_set, last_clicked_thumbnail_index
-    selected_thumbnails_set.clear()
-    last_clicked_thumbnail_index = -1
+    # Use page-scoped state if available
+    if ev.page:
+        _initialize_page_state(ev.page)
+        ev.page.selected_thumbnails_set.clear()
+        ev.page.last_clicked_thumbnail_index = -1
+        ev.page.selected_dataset = ev.control.value
 
-    selected_dataset["value"] = ev.control.value
-
-    base_dir, dataset_type = dataset_utils._get_dataset_base_dir(selected_dataset["value"])
-    DATASETS_TYPE["value"] = dataset_type
-
-    bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(selected_dataset["value"])
+        base_dir, dataset_type = dataset_utils._get_dataset_base_dir(ev.page.selected_dataset)
+        ev.page.DATASETS_TYPE = dataset_type
+        bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(ev.page.selected_dataset)
+    else:
+        # Fallback if page not available
+        selected_thumbnails_set.clear()
+        last_clicked_thumbnail_index = -1
+        selected_dataset["value"] = ev.control.value
+        base_dir, dataset_type = dataset_utils._get_dataset_base_dir(selected_dataset["value"])
+        DATASETS_TYPE["value"] = dataset_type
+        bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(selected_dataset["value"])
     # Preprocess panel removed; these controls may not be mounted. Guard updates.
     if bucket_size_textfield_control is not None:
         try:
@@ -693,7 +785,15 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
     _set_refresh_ui_state(True, page_ctx, grid_control)
 
     try:
-        current_selection = selected_dataset.get("value")
+        # Get current selection from page state if available, otherwise fall back to global
+        if page_ctx:
+            _initialize_page_state(page_ctx)
+            current_selection = page_ctx.selected_dataset
+            datasets_type = page_ctx.DATASETS_TYPE
+        else:
+            current_selection = selected_dataset.get("value")
+            datasets_type = DATASETS_TYPE["value"]
+
         grid_control.controls.clear()
         grid_control.controls.append(_build_thumbnails_loading_indicator())
         if grid_control.page:
@@ -705,7 +805,7 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
             folders_exist = folders is not None and len(folders) > 0
             grid_control.controls.append(ft.Text("Select a dataset to view media." if folders_exist else "No datasets found."))
         else:
-            thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, DATASETS_TYPE["value"], force_refresh)
+            thumbnail_paths_map, video_info = get_videos_and_thumbnails(current_selection, datasets_type, force_refresh)
             dataset_captions = load_dataset_captions(current_selection)
 
             grid_control.controls.clear()
@@ -741,7 +841,11 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
                     )
 
                 # Keep video_files_list in the same order as the visible thumbnails
-                video_files_list["value"] = [video_path for video_path, _ in sorted_thumbnail_items]
+                video_files_list_data = [video_path for video_path, _ in sorted_thumbnail_items]
+                if page_ctx:
+                    page_ctx.video_files_list = video_files_list_data
+                else:
+                    video_files_list["value"] = video_files_list_data
 
                 for i, (video_path, thumb_path) in enumerate(sorted_thumbnail_items):
                     has_caption = any(
@@ -756,12 +860,12 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
                             thumb_path=thumb_path,
                             video_info=video_info,
                             has_caption=has_caption,
-                            video_files_list=video_files_list["value"],
+                            video_files_list=video_files_list_data,
                             update_thumbnails_callback=update_thumbnails,
                             grid_control=grid_control,
                             on_checkbox_change_callback=_on_thumbnail_checkbox_change,
                             thumbnail_index=i,
-                            is_selected_initially=(video_path in selected_thumbnails_set)
+                            is_selected_initially=(video_path in (page_ctx.selected_thumbnails_set if page_ctx else selected_thumbnails_set))
                         )
                     )
 
@@ -769,11 +873,7 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
             grid_control.update()
 
         try:
-            if page_ctx and hasattr(page_ctx, 'abc_container'):
-                page_ctx.abc_container.visible = len(selected_thumbnails_set) > 0
-                page_ctx.abc_container.update()
-
-            update_abc_container_visibility()
+            update_abc_container_visibility(page_ctx)
         except Exception:
             pass
 
@@ -807,16 +907,22 @@ def update_dataset_dropdown(
     delete_button: ft.ElevatedButton
 ):
     # Clear selections when updating dataset list
-    global selected_thumbnails_set, last_clicked_thumbnail_index
-    selected_thumbnails_set.clear()
-    last_clicked_thumbnail_index = -1
+    if p_page:
+        _initialize_page_state(p_page)
+        p_page.selected_thumbnails_set.clear()
+        p_page.last_clicked_thumbnail_index = -1
+        p_page.selected_dataset = None
+    else:
+        global selected_thumbnails_set, last_clicked_thumbnail_index
+        selected_thumbnails_set.clear()
+        last_clicked_thumbnail_index = -1
+        selected_dataset["value"] = None
 
     folders = get_dataset_folders()
     # Sort dataset names A-Z by their display name
     folders = dict(sorted(folders.items(), key=lambda item: item[1].lower())) if folders else {}
     current_dataset_dropdown.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
     current_dataset_dropdown.value = None
-    selected_dataset["value"] = None
 
     bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(None)
     if bucket_size_textfield: bucket_size_textfield.value = bucket_val
@@ -851,9 +957,16 @@ def reload_current_dataset(
         processed_progress_bar.visible = False
 
     # Clear selections when reloading datasets
-    global selected_thumbnails_set, last_clicked_thumbnail_index
-    selected_thumbnails_set.clear()
-    last_clicked_thumbnail_index = -1
+    if p_page:
+        _initialize_page_state(p_page)
+        p_page.selected_thumbnails_set.clear()
+        p_page.last_clicked_thumbnail_index = -1
+        prev_selected_name = p_page.selected_dataset
+    else:
+        global selected_thumbnails_set, last_clicked_thumbnail_index
+        selected_thumbnails_set.clear()
+        last_clicked_thumbnail_index = -1
+        prev_selected_name = selected_dataset.get("value")
 
     folders = get_dataset_folders()
     # Sort dataset names A-Z by their display name
@@ -861,11 +974,12 @@ def reload_current_dataset(
     current_dataset_dropdown.options = [ft.dropdown.Option(key=name, text=display_name) for name, display_name in folders.items()] if folders else []
     current_dataset_dropdown.disabled = len(folders) == 0
 
-    prev_selected_name = selected_dataset.get("value")
-
     if prev_selected_name and prev_selected_name in folders:
         current_dataset_dropdown.value = prev_selected_name
-        selected_dataset["value"] = prev_selected_name
+        if p_page:
+            p_page.selected_dataset = prev_selected_name
+        else:
+            selected_dataset["value"] = prev_selected_name
         bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(prev_selected_name)
         if bucket_size_textfield: bucket_size_textfield.value = bucket_val
         if model_name_dropdown: model_name_dropdown.value = model_val if model_val in settings.train_models else settings.train_def_model
@@ -874,7 +988,10 @@ def reload_current_dataset(
         snack_bar_text = f"Dataset '{prev_selected_name}' reloaded."
     else:
         current_dataset_dropdown.value = None
-        selected_dataset["value"] = None
+        if p_page:
+            p_page.selected_dataset = None
+        else:
+            selected_dataset["value"] = None
         bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(None)
         if bucket_size_textfield: bucket_size_textfield.value = bucket_val
         if model_name_dropdown: model_name_dropdown.value = model_val
@@ -1184,7 +1301,8 @@ def _on_blend_click(e: ft.ControlEvent, s_frames_textfield: ft.TextField):
         print(f"s_frames value: {s_frames}")
 
         # Get selected items
-        if not selected_thumbnails_set or len(selected_thumbnails_set) != 2:
+        _initialize_page_state(e.page)
+        if not e.page.selected_thumbnails_set or len(e.page.selected_thumbnails_set) != 2:
             e.page.snack_bar = ft.SnackBar(
                 ft.Text("Please select exactly 1 image and 1 video"),
                 open=True
@@ -1192,7 +1310,7 @@ def _on_blend_click(e: ft.ControlEvent, s_frames_textfield: ft.TextField):
             e.page.update()
             return
 
-        selected_items = list(selected_thumbnails_set)
+        selected_items = list(e.page.selected_thumbnails_set)
 
         # Determine which is image and which is video
         image_path = None
@@ -1466,8 +1584,10 @@ def dataset_tab_layout(page=None):
 
     sort_controls_container_ref = create_sort_controls_container()
 
-    # Initialize tab state (we're creating the dataset tab, so we're in it)
-    is_in_dataset_tab["value"] = True
+    # Initialize all page state for this tab
+    if page:
+        _initialize_page_state(page)
+        page.is_in_dataset_tab = True
 
     folders = get_dataset_folders()
     # Sort dataset names A-Z by their display name
