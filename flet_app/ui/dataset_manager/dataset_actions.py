@@ -248,7 +248,7 @@ async def run_dataset_script_command(
 # GUI Event Handlers (Handle user interactions)
 # ======================================================================================
 
-async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS_TYPE_ref, change_fps_textfield_ref_obj, thumbnails_grid_ref_obj, update_thumbnails_func):
+async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS_TYPE_ref, change_fps_textfield_ref_obj, thumbnails_grid_ref_obj, update_thumbnails_func, change_fps_checkbox_ref_obj=None):
     current_dataset_name = selected_dataset_ref.get("value")
     if not current_dataset_name:
         if e.page:
@@ -373,14 +373,83 @@ async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS
                 skipped_files += 1
                 continue
 
-            # Change FPS using ffmpeg with re-encoding (required for actual FPS change)
-            ffmpeg_cmd = [
-                ffmpeg_exe, "-y", "-i", input_video_path,
-                "-r", str(target_fps_float),
-                *vpu.VideoEncodingSettings.get_cpu_encoding_flags(),
-                "-an",                    # No audio (faster processing)
-                temp_output_video_path
-            ]
+            # Check if "Don't care about time" checkbox is enabled
+            dont_care_about_time = False
+            if change_fps_checkbox_ref_obj and change_fps_checkbox_ref_obj.current:
+                dont_care_about_time = change_fps_checkbox_ref_obj.current.value
+
+            # Change FPS using different methods based on checkbox
+            if dont_care_about_time:
+                # Speed up/slow down video by changing FPS without changing frame count
+                # Use setpts filter to change timestamps: PTS*old_fps/new_fps
+                speed_factor = original_fps / target_fps_float
+                print(f"Speeding up {video_file_name}: keeping {int(original_fps)} frames, FPS {original_fps:.2f} -> {target_fps_float} (speed factor: {speed_factor:.3f})")
+
+                # Check if video has an audio stream
+                has_audio = False
+                try:
+                    ffprobe_audio_cmd = [
+                        ffprobe_exe, "-v", "error", "-select_streams", "a:0",
+                        "-show_entries", "stream=codec_type", "-of",
+                        "default=noprint_wrappers=1:nokey=1", input_video_path
+                    ]
+                    result = subprocess.run(ffprobe_audio_cmd, capture_output=True, text=True, check=False)
+                    has_audio = "audio" in result.stdout.lower()
+                except Exception:
+                    has_audio = False
+
+                # Build audio filter chain if speed factor is not 1.0 and audio exists
+                audio_filter_str = None
+                if has_audio:
+                    audio_filters = []
+                    remaining_speed = speed_factor
+
+                    # atempo filter has range 0.5 to 2.0, so we need to chain filters for extreme speeds
+                    while abs(remaining_speed - 1.0) > 0.01:  # If not essentially 1.0
+                        if remaining_speed > 2.0:
+                            audio_filters.append("atempo=2.0")
+                            remaining_speed /= 2.0
+                        elif remaining_speed < 0.5:
+                            audio_filters.append("atempo=0.5")
+                            remaining_speed /= 0.5
+                        else:
+                            audio_filters.append(f"atempo={remaining_speed}")
+                            remaining_speed = 1.0
+
+                    audio_filter_str = ",".join(audio_filters) if audio_filters else None
+
+                # Use -r BEFORE input to reinterpret framerate without changing frame count
+                # This keeps 65 frames @ 16fps as 65 frames but reinterprets them as 24fps
+                ffmpeg_cmd = [
+                    ffmpeg_exe, "-y",
+                    "-r", str(target_fps_float),  # Reinterpret input framerate
+                    "-i", input_video_path,
+                    *vpu.VideoEncodingSettings.get_cpu_encoding_flags(),  # Re-encode video
+                ]
+
+                # Add audio handling
+                if has_audio:
+                    if audio_filter_str:
+                        # Apply tempo filter to match new video duration
+                        ffmpeg_cmd.extend(["-filter:a", audio_filter_str, "-c:a", "aac", "-b:a", "128k"])
+                    else:
+                        # Keep audio as-is
+                        ffmpeg_cmd.extend(["-c:a", "copy"])
+                else:
+                    # No audio, exclude it
+                    ffmpeg_cmd.append("-an")
+
+                ffmpeg_cmd.append(temp_output_video_path)
+            else:
+                # Normal FPS change with re-encoding (changes duration to match new FPS)
+                print(f"Changing FPS for {video_file_name}: {original_fps:.2f} -> {target_fps_float}")
+                ffmpeg_cmd = [
+                    ffmpeg_exe, "-y", "-i", input_video_path,
+                    "-r", str(target_fps_float),
+                    *vpu.VideoEncodingSettings.get_cpu_encoding_flags(),
+                    "-c:a", "copy",           # Preserve original audio
+                    temp_output_video_path
+                ]
             print(f"Running: {' '.join(ffmpeg_cmd)}")
             result_ffmpeg = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=False)
 
@@ -408,7 +477,10 @@ async def on_change_fps_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS
         e.page.update()
 
     if processed_files > 0 and thumbnails_grid_ref_obj.current and e.page:
-        update_thumbnails_func(e.page, thumbnails_grid_ref_obj.current, force_refresh=True)
+        if asyncio.iscoroutinefunction(update_thumbnails_func):
+            await update_thumbnails_func(e.page, thumbnails_grid_ref_obj.current, force_refresh=True)
+        else:
+            update_thumbnails_func(e.page, thumbnails_grid_ref_obj.current, force_refresh=True)
 
 async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS_TYPE_ref, rename_textfield_obj, thumbnails_grid_ref_obj, update_thumbnails_func):
     print("\n=== RENAME FUNCTION CALLED (dataset_actions.py) ===")
@@ -1251,13 +1323,11 @@ async def on_caption_to_json_click(e: ft.ControlEvent, selected_dataset_ref, DAT
 
         if e.page:
             e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Updated {updated_count} captions in captions.json from .txt files."), open=True)
-            update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)
+            if asyncio.iscoroutinefunction(update_thumbnails_func):
+                await update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)
+            else:
+                update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)
             e.page.update()
-        # Remove captions.json after creating txt files
-        try:
-            os.remove(captions_json_path)
-        except Exception:
-            pass
 
     except Exception as ex:
         if e.page:
@@ -1307,7 +1377,10 @@ async def on_caption_to_txt_click(e: ft.ControlEvent, selected_dataset_ref, DATA
             # Refresh thumbnails so the [cap - yes/no] indicator updates after video captioning
             try:
                 if update_thumbnails_func and thumbnails_grid_control is not None:
-                    update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_control, force_refresh=True)
+                    if asyncio.iscoroutinefunction(update_thumbnails_func):
+                        await update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_control, force_refresh=True)
+                    else:
+                        update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_control, force_refresh=True)
             except Exception:
                 pass
             e.page.update()

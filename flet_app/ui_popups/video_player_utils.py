@@ -34,7 +34,7 @@ def load_caption_for_video(video_path: str) -> Tuple[str, str, Optional[str]]:
     base_filename, _ = os.path.splitext(os.path.basename(video_path))
     caption_txt_path = os.path.join(video_dir, f"{base_filename}.txt")
     neg_caption_txt_path = os.path.join(video_dir, f"{base_filename}_neg.txt")
-    no_caption_text = "No captions found, add it here and press Update"
+    no_caption_text = "No captions found, add it here"
     
     caption_value = ""
     negative_caption_value = ""
@@ -628,7 +628,7 @@ def crop_video_from_overlay(
         ffmpeg_exe, "-y", "-i", current_video_path,
         "-vf", ",".join(vf_filters),
         *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        "-c:a", "aac", "-b:a", "128k", # Or copy audio: "-c:a", "copy"
+        "-c:a", "copy",  # Preserve original audio
         temp_output_path
     ]
 
@@ -678,7 +678,7 @@ def crop_video_to_dimensions(
         ffmpeg_exe, "-y", "-i", current_video_path,
         "-vf", scale_crop_filter,
         *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        "-c:a", "aac", "-b:a", "128k", # Or copy: "-c:a", "copy"
+        "-c:a", "copy",  # Preserve original audio
         temp_output_path
     ]
 
@@ -870,7 +870,7 @@ def cut_video_by_frames(
         "-ss", str(start_time),   # Seek to start time
         "-i", current_video_path,
         "-frames:v", str(frame_count),  # Extract exact number of frames
-        "-c:a", "aac",           # Include audio with AAC encoding
+        "-c:a", "copy",          # Preserve original audio
         *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
         temp_output_path
     ]
@@ -927,7 +927,7 @@ def split_video_by_frame(
         ffmpeg_exe, "-y", "-i", current_video_path,
         "-vf", f"select='between(n,0,{frame_count_1-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
         "-vframes", str(frame_count_1),  # Ensure exact frame count
-        "-an",                    # No audio (faster processing)
+        "-c:a", "copy",                  # Preserve audio
         *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
         temp_output_path_1
     ]
@@ -946,7 +946,7 @@ def split_video_by_frame(
         "-i", current_video_path,
         "-vf", f"select='between(n,0,{frame_count_2-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
         "-vframes", str(frame_count_2),  # Ensure exact frame count
-        "-an",                    # No audio (faster processing)
+        "-c:a", "copy",                  # Preserve audio
         *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
         temp_output_path_2
     ]
@@ -1033,7 +1033,7 @@ def clean_video_from_overlay(
         ffmpeg_exe, "-y", "-i", current_video_path,
         "-vf", ",".join(vf_filters),
         *_get_video_codec_and_flags(), # Use dynamic codec and flags
-        "-c:a", "aac", "-b:a", "128k", # Or copy audio: "-c:a", "copy"
+        "-c:a", "copy",  # Preserve original audio
         temp_output_path
     ]
 

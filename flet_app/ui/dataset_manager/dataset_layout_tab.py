@@ -74,6 +74,7 @@ hf_checkbox_ref = ft.Ref[ft.Checkbox]() # HF backend for Qwen
 cap_command_textfield_ref = ft.Ref[ft.TextField]()
 max_tokens_textfield_ref = ft.Ref[ft.TextField]()
 change_fps_textfield_ref = ft.Ref[ft.TextField]() # Ref for the Change FPS textfield
+change_fps_checkbox_ref = ft.Ref[ft.Checkbox]() # Ref for the Change FPS "Don't care about time" checkbox
 joy_prompt_dropdown_ref = ft.Ref[ft.Dropdown]()
 
 affix_text_field_ref = ft.Ref[ft.TextField]()
@@ -1056,12 +1057,41 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
         ft.Container(content=reencode_checkbox, col=2,),
     ], spacing=5)
 
+    # Create blend section with s_frames input
+    s_frames_textfield = create_textfield(
+        "s_frames",
+        "8",
+        expand=True,
+        hint_text="Number of frames",
+        col=4
+    )
+
+    blend_button = create_styled_button(
+        "Blend",
+        tooltip="Blend selected videos",
+        expand=True,
+        col=8,
+        on_click=lambda e: _on_blend_click(e, s_frames_textfield),
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30
+    )
+
+    blend_section = ft.ResponsiveRow([
+        ft.Container(content=blend_button, col=8,),
+        ft.Container(content=s_frames_textfield, col=4,),
+    ], spacing=5)
+
     return build_expansion_tile(
         title="Batch files",
         controls=[
             change_fps_section,
             ft.Divider(thickness=1),
             slice_section,
+            ft.Divider(thickness=1),
+            blend_section,
             ft.Divider(thickness=1),
             rename_textfield,
             rename_files_button,
@@ -1144,6 +1174,282 @@ def _on_slice_to_click(e: ft.ControlEvent, seconds_textfield: ft.TextField, reen
         print(f"Error in slice click: {ex}")
         e.page.snack_bar = ft.SnackBar(ft.Text(f"Error: {str(ex)}"), open=True)
         e.page.update()
+
+def _on_blend_click(e: ft.ControlEvent, s_frames_textfield: ft.TextField):
+    """Handle Blend button click"""
+    print("Blend button clicked!")
+
+    try:
+        s_frames = int(s_frames_textfield.value or "8")
+        print(f"s_frames value: {s_frames}")
+
+        # Get selected items
+        if not selected_thumbnails_set or len(selected_thumbnails_set) != 2:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("Please select exactly 1 image and 1 video"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        selected_items = list(selected_thumbnails_set)
+
+        # Determine which is image and which is video
+        image_path = None
+        video_path = None
+
+        for item_path in selected_items:
+            ext = os.path.splitext(item_path)[1].lower()
+            if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+                image_path = item_path
+            elif ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm']:
+                video_path = item_path
+
+        if not image_path or not video_path:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("Please select exactly 1 image and 1 video"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        # Show feedback to the user
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text(f"Blend processing with {s_frames} frames..."),
+            open=True
+        )
+        e.page.update()
+
+        # Run the blend operation in a background thread
+        def run_blend():
+            _perform_blend_operation(e.page, image_path, video_path, s_frames)
+
+        e.page.run_thread(run_blend)
+
+    except ValueError:
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text("Please enter a valid number for s_frames."),
+            open=True
+        )
+        e.page.update()
+    except Exception as ex:
+        print(f"Error in blend click: {ex}")
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text(f"Error: {str(ex)}"),
+            open=True
+        )
+        e.page.update()
+
+def _perform_blend_operation(page: ft.Page, image_path: str, video_path: str, s_frames: int):
+    """Perform the actual blend operation using FFmpeg for web-compatible encoding"""
+    import cv2
+    import numpy as np
+    from pathlib import Path
+    import tempfile
+    import subprocess
+    from flet_app.ui_popups import video_player_utils as vpu
+
+    temp_frames_dir = None
+    try:
+        # Get video metadata
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            page.snack_bar = ft.SnackBar(ft.Text("Failed to open video"), open=True)
+            page.update()
+            return
+
+        video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+
+        print(f"Video dimensions: {video_width}x{video_height}, FPS: {fps}")
+
+        # Load and resize image to match video dimensions
+        img = cv2.imread(image_path)
+        if img is None:
+            page.snack_bar = ft.SnackBar(ft.Text("Failed to load image"), open=True)
+            page.update()
+            cap.release()
+            return
+
+        img_height, img_width = img.shape[:2]
+        print(f"Image dimensions: {img_width}x{img_height}")
+
+        # Scale and crop image to match video dimensions (same logic as Crop button)
+        scale_w = video_width / img_width
+        scale_h = video_height / img_height
+        scale = max(scale_w, scale_h)
+
+        new_width = int(img_width * scale)
+        new_height = int(img_height * scale)
+        img_resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4)
+
+        start_x = (new_width - video_width) // 2
+        start_y = (new_height - video_height) // 2
+        img_cropped = img_resized[start_y:start_y + video_height, start_x:start_x + video_width]
+
+        print(f"Resized and cropped image to: {img_cropped.shape[1]}x{img_cropped.shape[0]}")
+
+        half_frames = s_frames // 2
+
+        # Create temporary directory for frames
+        temp_frames_dir = tempfile.mkdtemp(prefix="blend_frames_")
+        print(f"Temporary frames directory: {temp_frames_dir}")
+
+        # Save pure image frames
+        for i in range(half_frames):
+            frame_path = os.path.join(temp_frames_dir, f"frame_{i:06d}.png")
+            cv2.imwrite(frame_path, img_cropped)
+
+        # Save blended frames
+        for i in range(half_frames):
+            ret, frame = cap.read()
+            if not ret:
+                frame = np.zeros((video_height, video_width, 3), dtype=np.uint8)
+
+            alpha = 1.0 - (i / half_frames) * 0.75
+            blended = cv2.addWeighted(img_cropped, alpha, frame, 1 - alpha, 0)
+
+            frame_path = os.path.join(temp_frames_dir, f"frame_{half_frames + i:06d}.png")
+            cv2.imwrite(frame_path, blended)
+
+        # Save remaining video frames
+        frame_idx = s_frames
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_path = os.path.join(temp_frames_dir, f"frame_{frame_idx:06d}.png")
+            cv2.imwrite(frame_path, frame)
+            frame_idx += 1
+
+        cap.release()
+
+        total_frames = frame_idx
+        print(f"Total frames: {total_frames} ({half_frames} pure image + {half_frames} blended + {total_frames - s_frames} rest)")
+
+        # Create output path with both image and video names
+        image_name = Path(image_path).stem
+        video_name = Path(video_path).stem
+        video_ext = Path(video_path).suffix
+        video_dir = Path(video_path).parent
+        output_path = video_dir / f"{image_name}_{video_name}_blend{video_ext}"
+        temp_video_path = video_dir / f"{image_name}_{video_name}_blend_temp{video_ext}"
+        temp_audio_path = video_dir / f"{image_name}_{video_name}_blend_audio.aac"
+
+        # Use FFmpeg to create video from frames with proper H.264 encoding
+        ffmpeg_exe = vpu._get_ffmpeg_exe_path()
+        codec_flags = vpu._get_video_codec_and_flags()
+
+        # Step 1: Extract audio from original video
+        print("Extracting audio from original video...")
+        audio_extracted = False
+        audio_command = [
+            ffmpeg_exe, "-y",
+            "-i", video_path,
+            "-q:a", "9",  # Extract audio with good quality
+            "-map", "a:0",  # Map only audio stream
+            str(temp_audio_path)
+        ]
+        print(f"Running audio extraction: {' '.join(audio_command)}")
+        audio_result = subprocess.run(audio_command, capture_output=True, text=True)
+        if audio_result.returncode == 0 and os.path.exists(temp_audio_path):
+            print("Audio extracted successfully")
+            audio_extracted = True
+        else:
+            print(f"Audio extraction skipped (video may not have audio): {audio_result.stderr}")
+
+        # Step 2: Create video from frames (without audio)
+        print("Encoding video from frames...")
+        command = [
+            ffmpeg_exe, "-y",
+            "-framerate", str(fps),
+            "-i", os.path.join(temp_frames_dir, "frame_%06d.png"),
+            *codec_flags,
+            "-pix_fmt", "yuv420p",  # Web-compatible pixel format
+            str(temp_video_path)
+        ]
+
+        print(f"Running FFmpeg command: {' '.join(command)}")
+        result = subprocess.run(command, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"FFmpeg error: {result.stderr}")
+            page.snack_bar = ft.SnackBar(ft.Text(f"FFmpeg encoding failed"), open=True)
+            page.update()
+            # Clean up temp files
+            if os.path.exists(temp_video_path):
+                os.remove(temp_video_path)
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+            return
+
+        # Step 3: Merge audio with video if audio was extracted
+        if audio_extracted and os.path.exists(temp_audio_path):
+            print("Merging audio with video...")
+            merge_command = [
+                ffmpeg_exe, "-y",
+                "-i", str(temp_video_path),
+                "-i", str(temp_audio_path),
+                "-c:v", "copy",  # Copy video stream as-is
+                "-c:a", "aac",   # Re-encode audio to AAC
+                "-map", "0:v:0",  # Map video from first input
+                "-map", "1:a:0",  # Map audio from second input
+                "-shortest",     # End at shortest stream
+                str(output_path)
+            ]
+            print(f"Running merge command: {' '.join(merge_command)}")
+            merge_result = subprocess.run(merge_command, capture_output=True, text=True)
+
+            if merge_result.returncode == 0:
+                print(f"Blend video created with audio: {output_path}")
+                # Clean up temp files
+                if os.path.exists(temp_video_path):
+                    os.remove(temp_video_path)
+                if os.path.exists(temp_audio_path):
+                    os.remove(temp_audio_path)
+            else:
+                print(f"Merge error: {merge_result.stderr}")
+                # Fallback: use video without audio
+                if os.path.exists(temp_video_path):
+                    shutil.move(str(temp_video_path), str(output_path))
+                if os.path.exists(temp_audio_path):
+                    os.remove(temp_audio_path)
+        else:
+            # No audio or extraction failed, just use the video
+            if os.path.exists(temp_video_path):
+                shutil.move(str(temp_video_path), str(output_path))
+
+        print(f"Blend video created: {output_path}")
+
+        # Show success message and refresh thumbnails
+        page.snack_bar = ft.SnackBar(
+            ft.Text(f"Blend video created: {output_path.name}"),
+            open=True
+        )
+        page.update()
+
+        # Refresh thumbnails
+        if thumbnails_grid_ref and thumbnails_grid_ref.current:
+            page.run_task(update_thumbnails, page_ctx=page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+
+    except Exception as ex:
+        print(f"Error in blend operation: {ex}")
+        import traceback
+        traceback.print_exc()
+        page.snack_bar = ft.SnackBar(
+            ft.Text(f"Blend error: {str(ex)}"),
+            open=True
+        )
+        page.update()
+    finally:
+        # Clean up temporary frames
+        if temp_frames_dir and os.path.exists(temp_frames_dir):
+            try:
+                shutil.rmtree(temp_frames_dir)
+                print(f"Cleaned up temporary frames directory")
+            except Exception as e:
+                print(f"Error cleaning up temp directory: {e}")
 
 # ======================================================================================
 # Main GUI Layout Builder (Assembles the sections)
@@ -1431,12 +1737,20 @@ def dataset_tab_layout(page=None):
     )
     change_fps_textfield_ref.current = change_fps_textfield
 
+    change_fps_dont_care_checkbox = ft.Checkbox(
+        label="Don't care about time",
+        value=False,
+        tooltip="Ignore time-based changes",
+        label_style=ft.TextStyle(size=12)
+    )
+    change_fps_checkbox_ref.current = change_fps_dont_care_checkbox
+
     change_fps_button = create_styled_button(
         "Change fps",
         tooltip="Change fps",
         expand=True,
         on_click=lambda e: e.page.run_task(on_change_fps_click,
-            e, selected_dataset, DATASETS_TYPE, change_fps_textfield_ref, thumbnails_grid_ref, update_thumbnails, settings
+            e, selected_dataset, DATASETS_TYPE, change_fps_textfield_ref, thumbnails_grid_ref, update_thumbnails, change_fps_checkbox_ref
         ),
         button_style=ft.ButtonStyle(
             text_style=ft.TextStyle(size=10),  # Smaller font
@@ -1445,8 +1759,9 @@ def dataset_tab_layout(page=None):
         height=30  # Smaller height
     )
     change_fps_section = ft.ResponsiveRow([
+        ft.Container(content=change_fps_dont_care_checkbox, col=2,),
         ft.Container(content=change_fps_textfield, col=4,),
-        ft.Container(content=change_fps_button, col=8,),
+        ft.Container(content=change_fps_button, col=6,),
     ], spacing=5)
 
     rename_files_button = create_styled_button(
@@ -1529,7 +1844,7 @@ def dataset_tab_layout(page=None):
     # No preprocess button handler (panel removed)
 
     change_fps_button.on_click = lambda e: e.page.run_task(on_change_fps_click,
-        e, selected_dataset, DATASETS_TYPE, change_fps_textfield_ref, thumbnails_grid_ref, update_thumbnails
+        e, selected_dataset, DATASETS_TYPE, change_fps_textfield_ref, thumbnails_grid_ref, update_thumbnails, change_fps_checkbox_ref
     )
     rename_files_button.on_click = lambda e: e.page.run_task(on_rename_files_click,
         e, selected_dataset, DATASETS_TYPE, rename_textfield, thumbnails_grid_ref, update_thumbnails

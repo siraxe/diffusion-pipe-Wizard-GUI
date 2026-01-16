@@ -54,7 +54,7 @@
     "LORA_MODELS_DIR": "workspace/lora_models",
     "FFMPEG_PATH": "flet_app/ffmpeg/bin/ffmpeg.exe",
     "IMAGE_EDITOR_PATH": "C:/Program Files/Adobe/Adobe Photoshop 2025/Photoshop.exe",
-    "enable_audio": false,
+    "enable_audio": true,
     "use_gpu_ffmpeg": true,
     "project_location": "/home/e/Dpipe"
 }

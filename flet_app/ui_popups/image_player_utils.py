@@ -15,7 +15,7 @@ def load_caption_for_image(image_path: str) -> Tuple[str, str, Optional[str]]:
     base_filename, _ = os.path.splitext(os.path.basename(image_path))
     caption_txt_path = os.path.join(image_dir, f"{base_filename}.txt")
     neg_caption_txt_path = os.path.join(image_dir, f"{base_filename}_neg.txt")
-    no_caption_text = "No captions found, add it here and press Update"
+    no_caption_text = "No captions found, add it here"
     
     caption_value = ""
     negative_caption_value = ""
