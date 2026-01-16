@@ -97,6 +97,28 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         bge_bool = str(bge).strip().lower() in ('1', 'true', 'yes', 'on') if not isinstance(bge, bool) else bge
         lines.append(f"bypass_guidance_embedding = {'true' if bge_bool else 'false'}")
 
+    # flux2 and klein variants
+    if mt in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'):
+        # diffusion_model, vae, text_encoders, shift
+        diffusion_model = get_value('diffusion_model', None)
+        if diffusion_model and str(diffusion_model).strip():
+            expanded_dm_path = expand_model_path(str(diffusion_model))
+            lines.append(f"diffusion_model = '{expanded_dm_path}'")
+        vae = get_value('vae', None)
+        if vae and str(vae).strip():
+            expanded_vae = expand_model_path(str(vae))
+            lines.append(f"vae = '{expanded_vae}'")
+        text_encoders = get_value('text_encoders', None)
+        if text_encoders and str(text_encoders).strip():
+            expanded_te = expand_model_path(str(text_encoders))
+            # Save text_encoders as a list with path and type, like z_image does
+            lines.append(f"text_encoders = [")
+            lines.append(f"    {{path = '{expanded_te}', type = 'flux2'}}")
+            lines.append(f"]")
+        shift = get_value('shift', None)
+        if _has(shift):
+            lines.append(f"shift = {shift}")
+
     # hidream
     if mt == 'hidream':
         fs = get_value('flux_shift', True)
@@ -232,6 +254,27 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
             label_vals['flux_shift'] = model_dict.get('flux_shift')
         if 'bypass_guidance_embedding' in model_dict:
             label_vals['bypass_g_emb'] = model_dict.get('bypass_guidance_embedding')
+    elif mt_lower in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'):
+        # flux2 uses custom field names similar to z_image
+        if 'diffusion_model' in model_dict:
+            label_vals['diffusion_model'] = collapse_model_path(model_dict.get('diffusion_model'))
+        if 'vae' in model_dict:
+            label_vals['vae'] = collapse_model_path(model_dict.get('vae'))
+        if 'text_encoders' in model_dict:
+            # text_encoders is stored as a list with {path, type}, extract path for UI (like z_image)
+            text_encoders_val = model_dict.get('text_encoders')
+            if isinstance(text_encoders_val, list) and len(text_encoders_val) > 0:
+                first_encoder = text_encoders_val[0]
+                if isinstance(first_encoder, dict) and 'path' in first_encoder:
+                    label_vals['text_encoders'] = collapse_model_path(first_encoder['path'])
+                elif isinstance(first_encoder, str):
+                    # Fallback if it's a simple string in the list
+                    label_vals['text_encoders'] = collapse_model_path(first_encoder)
+            elif isinstance(text_encoders_val, str):
+                # Fallback if it's a string (for backwards compatibility)
+                label_vals['text_encoders'] = collapse_model_path(text_encoders_val)
+        if 'shift' in model_dict:
+            label_vals['shift'] = model_dict.get('shift')
     elif mt_lower == 'sd3':
         if 'flux_shift' in model_dict:
             label_vals['flux_shift'] = model_dict.get('flux_shift')
@@ -309,13 +352,14 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
         is_auraflow = (mt == 'auraflow')
         is_chroma = (mt == 'chroma')
         is_flux = (mt == 'flux')
+        is_flux2 = (mt in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'))
         is_sd3 = (mt == 'sd3')
         is_ltx = (mt in ('ltx-video', 'ltx'))
         is_lumina = (mt in ('lumina', 'lumina_2'))
@@ -334,6 +378,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_auraflow = is_auraflow or (curv == 'auraflow')
             is_chroma = is_chroma or (curv == 'chroma')
             is_flux = is_flux or (curv == 'flux')
+            is_flux2 = is_flux2 or (curv in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'))
             is_sd3 = is_sd3 or (curv == 'sd3')
             is_ltx = is_ltx or (curv in ('ltx-video', 'ltx'))
             is_lumina = is_lumina or (curv in ('lumina', 'lumina_2'))
@@ -395,6 +440,17 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             label_vals.get('vae'),
             label_vals.get('text_encoders'),
             label_vals.get('merge_adapters'),
+        )
+    except Exception:
+        pass
+    try:
+        from flet_app.ui.pages.training_config import update_flux2_fields_visibility
+        update_flux2_fields_visibility(
+            is_flux2,
+            label_vals.get('diffusion_model'),
+            label_vals.get('vae'),
+            label_vals.get('text_encoders'),
+            label_vals.get('shift'),
         )
     except Exception:
         pass

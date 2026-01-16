@@ -57,6 +57,12 @@ z_image_text_encoders_field_ref = ft.Ref[ft.TextField]()
 z_image_merge_adapters_field_ref = ft.Ref[ft.TextField]()
 z_image_diffusion_model_dtype_checkbox_ref = ft.Ref[ft.Checkbox]()
 z_image_row_ref = ft.Ref[ft.ResponsiveRow]()
+# flux2 specific fields
+flux2_diffusion_model_field_ref = ft.Ref[ft.TextField]()
+flux2_vae_field_ref = ft.Ref[ft.TextField]()
+flux2_text_encoders_field_ref = ft.Ref[ft.TextField]()
+flux2_shift_field_ref = ft.Ref[ft.TextField]()
+flux2_row_ref = ft.Ref[ft.ResponsiveRow]()
 
 _suppress_model_defaults = False
 
@@ -82,6 +88,7 @@ def get_training_config_page_content():
         is_auraflow = (str(sel).strip().lower() == "auraflow")
         is_chroma = (str(sel).strip().lower() == "chroma")
         is_flux = (str(sel).strip().lower() == "flux")
+        is_flux2 = (str(sel).strip().lower() in ("flux2", "flux2_klein_4b", "flux2_klein_9b"))
         is_sd3 = (str(sel).strip().lower() == "sd3")
         is_ltx = (str(sel).strip().lower() in ("ltx-video", "ltx"))
         is_lumina = (str(sel).strip().lower() in ("lumina", "lumina_2"))
@@ -135,6 +142,14 @@ def get_training_config_page_content():
                     single_file_path_field_ref.current.value = ""
                 if t5_path_field_ref.current:
                     t5_path_field_ref.current.value = ""
+                if flux2_diffusion_model_field_ref.current:
+                    flux2_diffusion_model_field_ref.current.value = ""
+                if flux2_vae_field_ref.current:
+                    flux2_vae_field_ref.current.value = ""
+                if flux2_text_encoders_field_ref.current:
+                    flux2_text_encoders_field_ref.current.value = ""
+                if flux2_shift_field_ref.current:
+                    flux2_shift_field_ref.current.value = ""
             except Exception:
                 # Be resilient to any missing/hidden controls
                 pass
@@ -151,7 +166,7 @@ def get_training_config_page_content():
         if not skip_defaults:
             try:
                 if timestep_sm_dropdown_ref.current:
-                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "wan22", "longcat", "qwen_image", "qwen_image_plus", "auraflow"}
+                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "wan22", "longcat", "qwen_image", "qwen_image_plus", "auraflow", "flux2", "flux2_klein_4b", "flux2_klein_9b"}
                     if sel_norm in models_logit:
                         timestep_sm_dropdown_ref.current.value = "logit_normal"
                     else:
@@ -237,6 +252,7 @@ def get_training_config_page_content():
                     and (not is_hunyuan_video)
                     and (not is_lumina)
                     and (not is_z_image)
+                    and (not is_flux2)
                 )
             if single_file_row_ref.current:
                 single_file_row_ref.current.visible = is_ltx
@@ -252,6 +268,8 @@ def get_training_config_page_content():
                 clip_row_ref.current.visible = is_hunyuan_video
             if z_image_row_ref.current:
                 z_image_row_ref.current.visible = is_z_image
+            if flux2_row_ref.current:
+                flux2_row_ref.current.visible = is_flux2
         except Exception:
             pass
         # Ensure all model-specific toggles are hidden for Cosmos
@@ -302,10 +320,11 @@ def get_training_config_page_content():
                 and (not is_hunyuan_image)
                 and (not is_lumina)
                 and (not is_z_image)
+                and (not is_flux2)
             )
         if transformer_path_field_ref.current:
-            # Show standard transformer path for most models (Qwen included), hide for Chroma/SDXL/z_image
-            transformer_path_field_ref.current.visible = (not is_sdxl) and (not is_chroma) and (not is_omnigen2) and (not is_hidream) and (not is_ltx) and (not is_sd3) and (not is_z_image)
+            # Show standard transformer path for most models (Qwen included), hide for Chroma/SDXL/z_image/flux2
+            transformer_path_field_ref.current.visible = (not is_sdxl) and (not is_chroma) and (not is_omnigen2) and (not is_hidream) and (not is_ltx) and (not is_sd3) and (not is_z_image) and (not is_flux2)
         if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
             try:
                 if transformer_path_full_ref.current:
@@ -323,6 +342,7 @@ def get_training_config_page_content():
                 and (not is_cosmos_p2)
                 and (not is_omnigen2)
                 and (not is_flux)
+                and (not is_flux2)
                 and (not is_hidream)
                 and (not is_hunyuan_image)
                 and (not is_ltx)
@@ -339,6 +359,7 @@ def get_training_config_page_content():
                 and (not is_qwen_plus)
                 and (not is_omnigen2)
                 and (not is_flux)
+                and (not is_flux2)
                 and (not is_hunyuan_video)
                 and (not is_hidream)
                 and (not is_lumina)
@@ -357,6 +378,7 @@ def get_training_config_page_content():
                 and (not is_qwen_plus)
                 and (not is_omnigen2)
                 and (not is_flux)
+                and (not is_flux2)
                 and (not is_hidream)
                 and (not is_ltx)
                 and (not is_sd3)
@@ -555,6 +577,33 @@ def get_training_config_page_content():
                         transformer_path_field_ref.current.value = 'models/flux-dev-single-files/flux1-kontext-dev.safetensors'
                 if flux_shift_checkbox_ref.current:
                     flux_shift_checkbox_ref.current.value = True
+            except Exception:
+                pass
+        # Set Flux2/Klein defaults when selected
+        if is_flux2 and not skip_defaults:
+            try:
+                if flux2_diffusion_model_field_ref.current:
+                    if not flux2_diffusion_model_field_ref.current.value or flux2_diffusion_model_field_ref.current.value.strip() == '':
+                        if sel_norm == 'flux2_klein_4b':
+                            flux2_diffusion_model_field_ref.current.value = 'models/FLUX.2-klein-4B/flux-2-klein-base-4b.safetensors'
+                        elif sel_norm == 'flux2_klein_9b':
+                            flux2_diffusion_model_field_ref.current.value = 'models/FLUX.2-klein-9B/flux-2-klein-base-9b.safetensors'
+                        else:  # flux2
+                            flux2_diffusion_model_field_ref.current.value = 'models/FLUX.2-dev/flux2-dev.safetensors'
+                if flux2_vae_field_ref.current:
+                    if not flux2_vae_field_ref.current.value or flux2_vae_field_ref.current.value.strip() == '':
+                        flux2_vae_field_ref.current.value = 'models/vae/flux2-vae.safetensors'
+                if flux2_text_encoders_field_ref.current:
+                    if not flux2_text_encoders_field_ref.current.value or flux2_text_encoders_field_ref.current.value.strip() == '':
+                        if sel_norm == 'flux2_klein_4b':
+                            flux2_text_encoders_field_ref.current.value = "models/text_encoders/qwen_3_4b.safetensors"
+                        elif sel_norm == 'flux2_klein_9b':
+                            flux2_text_encoders_field_ref.current.value = "models/text_encoders/qwen_3_8b.safetensors"
+                        else:  # flux2
+                            flux2_text_encoders_field_ref.current.value = "models/text_encoders/mistral_3_small_flux2_fp8.safetensors"
+                if flux2_shift_field_ref.current:
+                    if not flux2_shift_field_ref.current.value or flux2_shift_field_ref.current.value.strip() == '':
+                        flux2_shift_field_ref.current.value = '3'
             except Exception:
                 pass
         # Set HiDream defaults when selected
@@ -889,10 +938,38 @@ def get_training_config_page_content():
                         ref=z_image_row_ref,
                         visible=(settings.train_def_model == "z_image")
                     ),
+                    # flux2 specific fields
+                    ft.ResponsiveRow(
+                        controls=[
+                            ft.Column([
+                                create_textfield(
+                                    "diffusion_model", "",
+                                    col=12, expand=True, ref=flux2_diffusion_model_field_ref
+                                ),
+                                create_textfield(
+                                    "vae", "models/vae/flux2-vae.safetensors",
+                                    col=12, expand=True, ref=flux2_vae_field_ref
+                                ),
+                            ], col=6, spacing=2),
+                            ft.Column([
+                                create_textfield(
+                                    "text_encoders", "models/text_encoders/mistral_3_small_flux2_fp8.safetensors",
+                                    col=12, expand=True, ref=flux2_text_encoders_field_ref
+                                ),
+                                create_textfield(
+                                    "shift", "3",
+                                    col=12, expand=True, ref=flux2_shift_field_ref
+                                ),
+                            ], col=6, spacing=2),
+                        ],
+                        spacing=2,
+                        ref=flux2_row_ref,
+                        visible=(settings.train_def_model in ("flux2", "flux2_klein_4b", "flux2_klein_9b"))
+                    ),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "transformer_path", "", col=6, expand=True,
-                            ref=transformer_path_field_ref, visible=(settings.train_def_model != "sdxl" and settings.train_def_model != "chroma" and settings.train_def_model != "omnigen2" and settings.train_def_model != "z_image")
+                            ref=transformer_path_field_ref, visible=(settings.train_def_model != "sdxl" and settings.train_def_model != "chroma" and settings.train_def_model != "omnigen2" and settings.train_def_model != "z_image" and settings.train_def_model not in ("flux2", "flux2_klein_4b", "flux2_klein_9b"))
                         ),
                         ft.Checkbox(
                             label="float8_e5m2",
@@ -922,6 +999,9 @@ def get_training_config_page_content():
                                 and settings.train_def_model != "cosmos_predict2"
                                 and settings.train_def_model != "omnigen2"
                                 and settings.train_def_model != "flux"
+                                and settings.train_def_model != "flux2"
+                                and settings.train_def_model != "flux2_klein_4b"
+                                and settings.train_def_model != "flux2_klein_9b"
                                 and settings.train_def_model != "hidream"
                                 and settings.train_def_model != "z_image"
                             )
@@ -935,6 +1015,9 @@ def get_training_config_page_content():
                             and settings.train_def_model != "chroma"
                             and settings.train_def_model != "omnigen2"
                             and settings.train_def_model != "flux"
+                            and settings.train_def_model != "flux2"
+                            and settings.train_def_model != "flux2_klein_4b"
+                            and settings.train_def_model != "flux2_klein_9b"
                             and settings.train_def_model != "hunyuan-video"
                             and settings.train_def_model != "hidream"
                             and settings.train_def_model != "lumina_2"
@@ -949,6 +1032,9 @@ def get_training_config_page_content():
                             and settings.train_def_model != "chroma"
                             and settings.train_def_model != "omnigen2"
                             and settings.train_def_model != "flux"
+                            and settings.train_def_model != "flux2"
+                            and settings.train_def_model != "flux2_klein_4b"
+                            and settings.train_def_model != "flux2_klein_9b"
                             and settings.train_def_model != "longcat"
                             and settings.train_def_model != "z_image"
                         )),
@@ -1458,5 +1544,30 @@ def update_z_image_fields_visibility(is_z_image: bool, diffusion_model_value=Non
         # Update page once if possible
         if z_image_row_ref.current and z_image_row_ref.current.page:
             z_image_row_ref.current.page.update()
+    except Exception:
+        pass
+
+def update_flux2_fields_visibility(is_flux2: bool, diffusion_model_value=None, vae_value=None, text_encoders_value=None, shift_value=None):
+    """Update visibility and values for flux2 specific fields."""
+    try:
+        if flux2_diffusion_model_field_ref.current:
+            flux2_diffusion_model_field_ref.current.visible = is_flux2
+            if diffusion_model_value is not None:
+                flux2_diffusion_model_field_ref.current.value = str(diffusion_model_value)
+        if flux2_vae_field_ref.current:
+            flux2_vae_field_ref.current.visible = is_flux2
+            if vae_value is not None:
+                flux2_vae_field_ref.current.value = str(vae_value)
+        if flux2_text_encoders_field_ref.current:
+            flux2_text_encoders_field_ref.current.visible = is_flux2
+            if text_encoders_value is not None:
+                flux2_text_encoders_field_ref.current.value = str(text_encoders_value)
+        if flux2_shift_field_ref.current:
+            flux2_shift_field_ref.current.visible = is_flux2
+            if shift_value is not None:
+                flux2_shift_field_ref.current.value = str(shift_value)
+        # Update page once if possible
+        if flux2_row_ref.current and flux2_row_ref.current.page:
+            flux2_row_ref.current.page.update()
     except Exception:
         pass

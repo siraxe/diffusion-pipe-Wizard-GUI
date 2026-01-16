@@ -237,7 +237,20 @@ async def save_training_config_to_toml(training_tab_container):
                 converted_lines.append(line)
             return '\n'.join(converted_lines)
 
+        # Convert flux2_klein variants to flux2 for last_config.toml
+        def _convert_flux2_klein_to_flux2(content: str) -> str:
+            """Convert flux2_klein_4b/9b model type to flux2 in last_config.toml"""
+            lines = content.split('\n')
+            converted_lines = []
+            for line in lines:
+                # Look for "type = 'flux2_klein_*'" in model section
+                if line.strip().startswith("type = ") and ("'flux2_klein_4b'" in line or "'flux2_klein_9b'" in line):
+                    line = line.replace("'flux2_klein_4b'", "'flux2'").replace("'flux2_klein_9b'", "'flux2'")
+                converted_lines.append(line)
+            return '\n'.join(converted_lines)
+
         train_toml_text = _convert_wan22_to_wan(train_toml_text)
+        train_toml_text = _convert_flux2_klein_to_flux2(train_toml_text)
 
         # 3) Save last_config.toml with updated dataset pointer
         out_path = last_config_path
