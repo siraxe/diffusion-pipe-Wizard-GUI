@@ -53,31 +53,62 @@ git clone --recurse-submodules https://github.com/tdrussell/diffusion-pipe
 conda env create -f dp_env.yml -p ./dp_env
 ```
 
-## Apply qwen_edit_plus patch (optional/wip)
+## 🔧 Apply Optional Patches
 
+A unified patch manager script is available to apply patches to diffusion-pipe:
+
+```bash
+# Make script executable
+chmod +x patch_diffpipe.sh
+
+# Interactive mode - choose which patches to apply
+./patch_diffpipe.sh
+
+# Or apply specific patches
+./patch_diffpipe.sh --patch batch      # Batch size fix
+./patch_diffpipe.sh --patch longcat    # LongCat-Video model
+./patch_diffpipe.sh --patch qwen       # Qwen Plus model
+
+# Apply all patches at once
+./patch_diffpipe.sh --all
+
+# Preview changes without applying
+./patch_diffpipe.sh --dry-run
+
+# List available patches
+./patch_diffpipe.sh --list
+
+# Rollback to previous state
+./patch_diffpipe.sh --rollback
 ```
-chmod +x apply_qwen_patch.sh
-./apply_qwen_patch.sh
+
+### Available Patches
+
+**1. Batch Size Change Fix** (`batch`)
+- Resume training with different batch sizes without crashes
+- Auto-detects batch size changes and recovers gracefully
+- Works with old checkpoints
+- **NEW**: Automatically applies learning rate from config file on resume
+
+**2. LongCat-Video Model** (`longcat`)
+- Thanks to https://github.com/tdrussell/diffusion-pipe/pull/453
+- Support for LongCat-Video model training
+- Auto-initializes submodules
+
+**3. Qwen Plus Model** (`qwen`)
+- Enhanced Qwen image model support
+- Additional dataset and tool improvements
+
+For detailed information, see:
+```bash
+cat flet_app/modules/batch_patch/README.md
 ```
 
-## Apply LongCat-Video patch (optional)
+### Running the GUI
 
-Thanks to https://github.com/tdrussell/diffusion-pipe/pull/453
-you can add LongCat-Video model support to diffusion-pipe by running :
+After applying patches (or skip if not needed):
 
-```
-chmod +x apply_longcat_patch.sh
-./apply_longcat_patch.sh
-```
-
-This script will:
-- Apply the LongCat-Video model patches to diffusion-pipe
-- Automatically download and initialize the LongCat-Video submodule
-- Update the necessary configuration files
-
-That's it , you can run it now.
-
-```
+```bash
 conda activate ./dp_env && python3 -m flet_app.flet_app
 ```
 

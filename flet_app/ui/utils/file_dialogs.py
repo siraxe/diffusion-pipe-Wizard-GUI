@@ -302,13 +302,19 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
 
     from .utils_top_menu import TopBarUtils  # Import to access methods
     from .config_utils import build_toml_config_from_ui  # Import for TOML building
+    from .ltx2_config_utils import build_ltx2_toml_from_ui  # Import LTX2 builder
 
     # Build TOML text from current UI
     training_tab = getattr(page, 'training_tab_container', None)
     if not training_tab:
         return ft.Column([ft.Text("Error: No training tab available")])
     try:
-        toml_text = build_toml_config_from_ui(training_tab)
+        # Use LTX2-specific config builder if LTX2 is selected
+        if TopBarUtils._is_ltx2_selected(training_tab):
+            logger.debug("LTX2 detected in Save As dialog, using LTX2-specific builder.")
+            toml_text = build_ltx2_toml_from_ui(training_tab)
+        else:
+            toml_text = build_toml_config_from_ui(training_tab)
     except Exception as e:
         logger.error(f"Error building TOML in Save As: {e}")
         toml_text = ""

@@ -1296,7 +1296,7 @@ async def on_caption_to_json_click(e: ft.ControlEvent, selected_dataset_ref, DAT
             captions_data = []
 
         media_files = get_media_files(dataset_folder_path, dataset_type)
-        
+
         captions_dict = {os.path.basename(item['media_path']): item for item in captions_data if 'media_path' in item}
 
         updated_count = 0
@@ -1307,7 +1307,7 @@ async def on_caption_to_json_click(e: ft.ControlEvent, selected_dataset_ref, DAT
             if os.path.exists(txt_caption_path):
                 with open(txt_caption_path, 'r', encoding='utf-8') as f:
                     caption_text = f.read().strip()
-                
+
                 media_basename = os.path.basename(media_path)
                 if media_basename in captions_dict:
                     captions_dict[media_basename]['caption'] = caption_text

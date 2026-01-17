@@ -3,8 +3,16 @@ from flet_app.ui._styles import create_textfield
 from flet_app.ui.pages.training_config import get_training_config_page_content
 from flet_app.ui.pages.training_data_config import get_training_data_config_page_content
 from flet_app.ui.pages.training_monitor import get_training_monitor_page_content
-from flet_app.ui.utils.console_cleanup import cleanup_training_console
 from flet_app.ui_popups import dataset_not_selected
+# Import from new training module
+from flet_app.ui.training import (
+    cleanup_training_console,
+    set_button_state,
+    reset_to_start_button,
+    terminate_process,
+    handle_cancel_click,
+    run_ltx2_training_flow,
+)
 import os
 import subprocess
 import signal
@@ -185,7 +193,7 @@ async def save_training_config_to_toml(training_tab_container):
         return "\n".join(lines) + "\n"
 
     def _save_both():
-        from .utils.config_utils import build_toml_config_from_ui
+        from .utils.config_utils import build_toml_config_from_ui, extract_config_from_controls
 
         ws_dir, last_config_path, last_data_config_path = _get_workspace_last_config_paths()
 
@@ -213,17 +221,43 @@ async def save_training_config_to_toml(training_tab_container):
         data_toml_path = last_data_config_path
         _write_atomic(data_toml_path, data_toml_text)
 
-        # 2) Build training TOML and rewrite dataset pointer to last_data_config.toml
-        train_toml_text = build_toml_config_from_ui(training_tab_container)
+        # 2) Detect model type and build training TOML
+        # Check if this is an LTX2 model
+        config_page = getattr(training_tab_container, 'config_page_content', None)
+        cfg = {}
+        if config_page:
+            try:
+                cfg = extract_config_from_controls(config_page) or {}
+            except Exception:
+                pass
+
+        model_type = cfg.get('Model Type', '').strip().lower() if cfg else ''
+
+        # Use appropriate builder based on model type
+        if model_type == 'ltx-video-2':
+            from .utils.ltx2_config_utils import build_ltx2_toml_from_ui
+            train_toml_text = build_ltx2_toml_from_ui(training_tab_container)
+        else:
+            train_toml_text = build_toml_config_from_ui(training_tab_container)
         data_toml_path_abs = os.path.abspath(data_toml_path).replace('\\', '/')
 
-        # Replace the dataset = '...' line to point to our last_data_config.toml
+        # Replace the dataset pointer to point to our last_data_config.toml
         def _replace_dataset_line(content: str, new_path: str) -> str:
+            # For standard models: dataset = '...'
             pattern = r"^(\s*dataset\s*=\s*)['\"]([^'\"]*)['\"]\s*$"
             repl = r"\1'" + new_path + r"'"
             return re.sub(pattern, repl, content, flags=re.MULTILINE)
 
-        train_toml_text = _replace_dataset_line(train_toml_text, data_toml_path_abs)
+        def _replace_preprocessed_data_root(content: str, new_path: str) -> str:
+            # For LTX2 models: preprocessed_data_root = '...' in [data] section
+            pattern = r"^(\s*preprocessed_data_root\s*=\s*)['\"]([^'\"]*)['\"]\s*$"
+            repl = r"\1'" + new_path + r"'"
+            return re.sub(pattern, repl, content, flags=re.MULTILINE)
+
+        if model_type == 'ltx-video-2':
+            train_toml_text = _replace_preprocessed_data_root(train_toml_text, data_toml_path_abs)
+        else:
+            train_toml_text = _replace_dataset_line(train_toml_text, data_toml_path_abs)
 
         # Convert wan22 to wan for runtime backend compatibility
         def _convert_wan22_to_wan(content: str) -> str:
@@ -902,6 +936,20 @@ def get_training_tab_content(page: ft.Page):
             else:
                 out_path, _ = await save_training_config_to_toml(training_tab_container)
 
+            # Check if model type is ltx-video-2
+            from LTX_2 import handle_ltx_model
+            if handle_ltx_model(out_path):
+                # Use the new centralized LTX2 training flow
+                await run_ltx2_training_flow(
+                    out_path=out_path,
+                    trust_cache=trust_cache_checkbox.value,
+                    cache_only=cache_only_checkbox.value,
+                    main_container=main_container,
+                    training_tab_container=training_tab_container,
+                    page=page,
+                    trust_cache_checkbox=trust_cache_checkbox,
+                )
+                return
             # Determine launch parameters
             use_multi_gpu = multi_gpu_checkbox.value
             trust_cache = trust_cache_checkbox.value
@@ -1004,9 +1052,9 @@ def get_training_tab_content(page: ft.Page):
                                         drained = []
                                         while _buffer:
                                             drained.extend(_buffer.pop(0))
-                                        # Apply once: prepend drained to existing spans
+                                        # Apply once: append drained to existing spans (normal order)
                                         spans_current = list((training_console_text.spans or [])) if training_console_text is not None else []
-                                        new_total = drained + spans_current
+                                        new_total = spans_current + drained
                                         if training_console_text is not None:
                                             training_console_text.spans = new_total
 
@@ -1075,9 +1123,10 @@ def get_training_tab_content(page: ft.Page):
                             pass
                         # Reset Start button and clear proc handle
                         try:
-                            if hasattr(training_tab_container, 'start_btn') and training_tab_container.start_btn is not None:
-                                training_tab_container.start_btn.text = "Start"
+                            if hasattr(main_container, 'start_btn') and main_container.start_btn is not None:
+                                main_container.start_btn.text = "Start"
                             training_tab_container.training_proc = None
+                            main_container.training_proc = None
                         except Exception:
                             pass
                         try:
@@ -1170,66 +1219,48 @@ def get_training_tab_content(page: ft.Page):
                     e.page.update()
             except Exception:
                 pass
-            # If a training process is running, treat as Cancel
-            proc = getattr(main_container, 'training_proc', None)
-            if proc is not None:
+            # Check if this is LTX2 model by checking the training container
+            from LTX_2 import handle_ltx_model
+            training_proc = None
+
+            # Try to get training_proc from LTX2 specific container
+            try:
+                if hasattr(e.page, 'training_tab_container'):
+                    training_tab = e.page.training_tab_container
+                    # Check if this is LTX2 by checking the config
+                    last_config_path = getattr(training_tab, 'last_config_path', None)
+                    if last_config_path and os.path.exists(last_config_path):
+                        if handle_ltx_model(last_config_path):
+                            training_proc = getattr(training_tab, 'training_proc', None)
+                            # Also check main_container as backup
+                            if training_proc is None:
+                                training_proc = getattr(main_container, 'training_proc', None)
+            except Exception:
+                pass
+
+            # Fallback to main_container if not found
+            if training_proc is None:
+                training_proc = getattr(main_container, 'training_proc', None)
+
+            if training_proc is not None:
                 try:
-                    alive = (proc.poll() is None)
+                    alive = (training_proc.poll() is None)
                 except Exception:
                     alive = False
                 if alive:
-                    # Append a cancel notice to console
-                    try:
-                        monitor_content = getattr(main_container, 'monitor_page_content', None)
-                        training_console_text = getattr(monitor_content, 'training_console_text', None)
-                        spans = list((training_console_text.spans or [])) if training_console_text is not None else []
-                        spans.append(ft.TextSpan("\n[Action] Cancel requested. Terminating...\n", style=ft.TextStyle(color=ft.Colors.WHITE)))
-                        if training_console_text is not None:
-                            training_console_text.spans = spans
-                            try:
-                                training_console_text.update()
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                    # Request termination (robustly)
-                    try:
-                        if os.name == 'posix':
-                            try:
-                                os.killpg(proc.pid, signal.SIGTERM)
-                            except Exception:
-                                proc.terminate()
-                        else:
-                            try:
-                                proc.send_signal(getattr(signal, 'CTRL_BREAK_EVENT', signal.SIGTERM))
-                            except Exception:
-                                proc.terminate()
-                        # brief wait and force kill if still alive
-                        try:
-                            for _ in range(30):
-                                if proc.poll() is not None:
-                                    break
-                                import time as _t
-                                _t.sleep(0.1)
-                            if proc.poll() is None:
-                                if os.name == 'posix':
-                                    try:
-                                        os.killpg(proc.pid, signal.SIGKILL)
-                                    except Exception:
-                                        proc.kill()
-                                else:
-                                    proc.kill()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                    # Do not flip button text here; _reader will reset on exit
+                    # Use the new centralized cancel handler
+                    if handle_cancel_click(e, main_container):
+                        return
+
+            # Safety check: if button shows "Cancel" but no process is running, reset it
+            if hasattr(main_container, 'start_btn') and main_container.start_btn is not None:
+                if main_container.start_btn.text == "Cancel" and training_proc is None:
+                    # Button state is out of sync, reset to Start
+                    main_container.start_btn.text = "Start"
                     if e and e.page:
-                        try:
-                            e.page.update()
-                        except Exception:
-                            pass
-                    return
+                        e.page.update()
+                    return  # Don't start training after resetting button
+
             # Otherwise, start training
             e.page.run_task(handle_start_click, e, main_container)
         except Exception as ex:

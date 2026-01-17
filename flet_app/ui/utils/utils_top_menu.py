@@ -13,6 +13,9 @@ from .config_utils import (
     extract_config_from_controls,
     _save_and_scale_image,
 )
+from .ltx2_config_utils import (
+    build_ltx2_toml_from_ui,
+)
 from .file_dialogs import (
     _create_open_content,
     _create_save_as_content,
@@ -40,6 +43,42 @@ except NameError:
 
 class TopBarUtils:
     @staticmethod
+    def _get_selected_model_type(training_tab_container) -> str:
+        """Extract the selected model type from the UI."""
+        try:
+            def _find_model_type(control):
+                if hasattr(control, 'controls') and control.controls:
+                    for c in control.controls:
+                        result = _find_model_type(c)
+                        if result:
+                            return result
+                if hasattr(control, 'content') and control.content:
+                    result = _find_model_type(control.content)
+                    if result:
+                        return result
+                label = getattr(control, 'label', None)
+                if label == 'Model Type' and isinstance(control, ft.Dropdown):
+                    val = str(control.value or '').strip()
+                    return val.lower()
+                return None
+
+            config_content = getattr(training_tab_container, 'config_page_content', None)
+            if config_content:
+                model_type = _find_model_type(config_content)
+                if model_type:
+                    return model_type
+        except Exception as e:
+            logger.warning(f"Error in _get_selected_model_type: {e}")
+        return ''
+
+    @staticmethod
+    def _is_ltx2_selected(training_tab_container) -> bool:
+        """Check if LTX2 model is selected."""
+        model_type = TopBarUtils._get_selected_model_type(training_tab_container)
+        is_ltx2 = model_type in ('ltx-video-2', 'ltx2')
+        return is_ltx2
+
+    @staticmethod
     def _is_web_platform(page: ft.Page) -> bool:
         platform = getattr(page, "platform", None)
         if isinstance(platform, str):
@@ -62,7 +101,6 @@ class TopBarUtils:
         # Navigate to workspace/configs from project root
         default_dir = project_root / "workspace" / "configs"
         default_dir.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"Default config dir resolved to: {default_dir}")
         return default_dir
 
     
@@ -181,12 +219,10 @@ class TopBarUtils:
 
     @staticmethod
     def handle_save(page: ft.Page):
-        logger.debug("Handle Save triggered.")
         path = getattr(page, 'y_name', None)
         is_default_loaded = getattr(page, 'is_default_config_loaded', False)
 
         if is_default_loaded or (path and os.path.basename(path).lower() == "config_default.yaml"):
-            logger.debug("Default config loaded or path is default, redirecting to Save As.")
             TopBarUtils.handle_save_as(page)
             return
 
@@ -197,7 +233,11 @@ class TopBarUtils:
                 logger.error("Training tab container not found while saving TOML.")
                 return
             try:
-                toml_text = build_toml_config_from_ui(training_tab)
+                # Use LTX2-specific config builder if LTX2 is selected
+                if TopBarUtils._is_ltx2_selected(training_tab):
+                    toml_text = build_ltx2_toml_from_ui(training_tab)
+                else:
+                    toml_text = build_toml_config_from_ui(training_tab)
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(toml_text)
                 logger.info(f"Config saved to {path}")
@@ -208,16 +248,12 @@ class TopBarUtils:
                 logger.error(f"Error saving file to {path}: {e}")
                 logger.error(traceback.format_exc())
         else:
-            logger.debug("No path set, redirecting to Save As.")
             TopBarUtils.handle_save_as(page)
 
     @staticmethod
     def handle_save_as(page: ft.Page):
-        logger.debug("Handle Save As triggered.")
         is_web = TopBarUtils._is_web_platform(page)
-        logger.debug(f"Is web platform: {is_web}")
         if is_web:
-            logger.debug("Calling _handle_save_as_web")
             _handle_save_as_web(page)
             return
 
@@ -233,7 +269,11 @@ class TopBarUtils:
                     logger.error("Training tab container not found while saving TOML (Save As).")
                     return
                 try:
-                    toml_text = build_toml_config_from_ui(training_tab)
+                    # Use LTX2-specific config builder if LTX2 is selected
+                    if TopBarUtils._is_ltx2_selected(training_tab):
+                        toml_text = build_ltx2_toml_from_ui(training_tab)
+                    else:
+                        toml_text = build_toml_config_from_ui(training_tab)
                     with open(path, 'w', encoding='utf-8') as f:
                         f.write(toml_text)
                     logger.info(f"Config saved as to {path}")
@@ -243,8 +283,6 @@ class TopBarUtils:
                 except Exception as ex_save:
                     logger.error(f"Error saving file (Save As) to {path}: {ex_save}")
                     logger.error(traceback.format_exc())
-            else:
-                logger.debug("Save As dialog cancelled or no path selected.")
         file_picker.on_result = on_save_result
         default_name = "dpipe_config.toml"
         default_dir = str(TopBarUtils._ensure_default_config_dir())
@@ -255,7 +293,6 @@ class TopBarUtils:
 
     @staticmethod
     def handle_open(page: ft.Page, file_path=None, set_as_current=True):
-        logger.debug("Handle Open triggered.")
         def _has_commented_timestep(text: str) -> bool:
             try:
                 import re
@@ -325,6 +362,7 @@ class TopBarUtils:
                         _toml_parser = None
 
                 if isinstance(toml_data, dict):
+                    # Use the standard loader - it already handles model type changes properly
                     update_ui_from_toml(training_tab, toml_data)
                     if _has_commented_timestep(raw_text):
                         _set_timestep_none(training_tab)
@@ -339,9 +377,7 @@ class TopBarUtils:
             return
 
         is_web = TopBarUtils._is_web_platform(page)
-        logger.debug(f"Open: Is web platform: {is_web}")
         if is_web:
-            logger.debug("Calling _handle_open_web")
             _handle_open_web(page, set_as_current=set_as_current)
             return
 
@@ -375,6 +411,7 @@ class TopBarUtils:
 
                         training_tab = getattr(page, 'training_tab_container', None)
                         if training_tab and isinstance(toml_data, dict):
+                            # Use standard loader - it handles all model types including LTX2
                             update_ui_from_toml(training_tab, toml_data)
                             if _has_commented_timestep(raw_text):
                                 _set_timestep_none(training_tab)
@@ -401,6 +438,7 @@ class TopBarUtils:
 
                         training_tab = getattr(page, 'training_tab_container', None)
                         if training_tab and isinstance(toml_data, dict):
+                            # Use standard loader - it handles all model types including LTX2
                             update_ui_from_toml(training_tab, toml_data)
                             try:
                                 if 'raw_text' in locals() and _has_commented_timestep(raw_text):

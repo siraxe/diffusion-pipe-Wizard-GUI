@@ -743,6 +743,10 @@ async def on_dataset_dropdown_change(
         base_dir, dataset_type = dataset_utils._get_dataset_base_dir(selected_dataset["value"])
         DATASETS_TYPE["value"] = dataset_type
         bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(selected_dataset["value"])
+
+    # Always update the global dictionary to keep it in sync
+    selected_dataset["value"] = ev.control.value
+    DATASETS_TYPE["value"] = dataset_type if 'dataset_type' in locals() else (ev.page.DATASETS_TYPE if ev.page else None)
     # Preprocess panel removed; these controls may not be mounted. Guard updates.
     if bucket_size_textfield_control is not None:
         try:

@@ -94,3 +94,6 @@ opencode.json
 /assets/output
 flet_app/ui/utils/recent_files.txt
 diffusion-pipe_new/
+diffusion-pipe_kl/
+diffusion-trainers/LTX-2/
+1.png

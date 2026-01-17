@@ -76,11 +76,48 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         if _has(msl):
             lines.append(f"max_sequence_length = {msl}")
 
-    # ltx-video
+    # ltx-video (but not ltx-video-2 which uses the new format)
     if mt in ('ltx-video', 'ltx'):
         ffc = get_value('first_frame_conditioning_p', None)
         if _has(ffc):
             lines.append(f"first_frame_conditioning_p = {ffc}")
+
+    # Also add checkpoint_path and diffusers_path for LTX models
+    if mt in ('ltx-video', 'ltx', 'ltx-video-2'):
+        checkpoint_path = get_value('checkpoint_path', None)
+        if checkpoint_path and str(checkpoint_path).strip():
+            expanded_checkpoint_path = expand_model_path(str(checkpoint_path))
+            lines.append(f"checkpoint_path = '{expanded_checkpoint_path}'")
+
+        diffusers_path = get_value('diffusers_path', None)
+        if diffusers_path and str(diffusers_path).strip():
+            expanded_diffusers_path = expand_model_path(str(diffusers_path))
+            lines.append(f"diffusers_path = '{expanded_diffusers_path}'")
+
+        # Add LTX2-specific adapter targets for LoRA
+        def _to_bool(val):
+            if isinstance(val, bool):
+                return val
+            s = str(val).strip().lower()
+            return s in ('1', 'true', 'yes', 'on')
+
+        if mt == 'ltx-video-2':
+            # Add adapter.lora_targets section for LTX2
+            all_modules = get_value('all_modules', False)
+            video_attn = get_value('video_attn', True)
+            video_ff = get_value('video_ff', False)
+            audio_attn = get_value('audio_attn', False)
+            audio_ff = get_value('audio_ff', False)
+            cross_modal_attn = get_value('cross_modal_attn', False)
+
+            lines.append("")
+            lines.append("[adapter.lora_targets]")
+            lines.append(f"all_modules = {'true' if _to_bool(all_modules) else 'false'}")
+            lines.append(f"video_attn = {'true' if _to_bool(video_attn) else 'false'}")
+            lines.append(f"video_ff = {'true' if _to_bool(video_ff) else 'false'}")
+            lines.append(f"audio_attn = {'true' if _to_bool(audio_attn) else 'false'}")
+            lines.append(f"audio_ff = {'true' if _to_bool(audio_ff) else 'false'}")
+            lines.append(f"cross_modal_attn = {'true' if _to_bool(cross_modal_attn) else 'false'}")
 
     # chroma
     if mt == 'chroma':
@@ -196,6 +233,17 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         if _has(te2):
             lines.append(f"text_encoder_2_lr = {te2}")
 
+    # Add with_audio for both SDXL and LTX2 models
+    def _to_bool(val):
+        if isinstance(val, bool):
+            return val
+        s = str(val).strip().lower()
+        return s in ('1', 'true', 'yes', 'on')
+
+    if mt in ('sdxl', 'ltx-video-2'):
+        with_audio = get_value('with_audio', True)
+        lines.append(f"with_audio = {'true' if _to_bool(with_audio) else 'false'}")
+
 
 def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     """Populate label_vals from [model] dict and return normalized model_type string.
@@ -278,9 +326,33 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     elif mt_lower == 'sd3':
         if 'flux_shift' in model_dict:
             label_vals['flux_shift'] = model_dict.get('flux_shift')
-    elif mt_lower in ('ltx-video', 'ltx'):
-        if 'first_frame_conditioning_p' in model_dict:
+    elif mt_lower in ('ltx-video', 'ltx', 'ltx-video-2'):
+        # Skip old first_frame_conditioning_p for LTX2 (uses new format)
+        if mt_lower != 'ltx-video-2' and 'first_frame_conditioning_p' in model_dict:
             label_vals['first_frame_conditioning_p'] = model_dict.get('first_frame_conditioning_p')
+        if 'checkpoint_path' in model_dict:
+            label_vals['checkpoint_path'] = collapse_model_path(model_dict.get('checkpoint_path'))
+        if 'diffusers_path' in model_dict:
+            label_vals['diffusers_path'] = collapse_model_path(model_dict.get('diffusers_path'))
+
+        # Handle LTX2-specific adapter.lora_targets fields
+        if mt_lower == 'ltx-video-2' and 'adapter' in model_dict:
+            adapter_dict = model_dict['adapter']
+            if isinstance(adapter_dict, dict) and 'lora_targets' in adapter_dict:
+                lora_targets = adapter_dict['lora_targets']
+                if isinstance(lora_targets, dict):
+                    if 'all_modules' in lora_targets:
+                        label_vals['all_modules'] = lora_targets['all_modules']
+                    if 'video_attn' in lora_targets:
+                        label_vals['video_attn'] = lora_targets['video_attn']
+                    if 'video_ff' in lora_targets:
+                        label_vals['video_ff'] = lora_targets['video_ff']
+                    if 'audio_attn' in lora_targets:
+                        label_vals['audio_attn'] = lora_targets['audio_attn']
+                    if 'audio_ff' in lora_targets:
+                        label_vals['audio_ff'] = lora_targets['audio_ff']
+                    if 'cross_modal_attn' in lora_targets:
+                        label_vals['cross_modal_attn'] = lora_targets['cross_modal_attn']
     elif mt_lower in ('lumina', 'lumina_2'):
         if 'lumina_shift' in model_dict:
             label_vals['lumina_shift'] = model_dict.get('lumina_shift')
@@ -315,13 +387,15 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
             elif isinstance(merge_adapters_val, str):
                 # Fallback if it's a string (for backwards compatibility)
                 label_vals['merge_adapters'] = collapse_model_path(merge_adapters_val)
-    elif mt_lower == 'sdxl':
+    elif mt_lower in ('sdxl', 'ltx-video-2'):
         if 'v_pred' in model_dict:
             label_vals['v_pred'] = model_dict.get('v_pred')
         if 'debiased_estimation_loss' in model_dict:
             label_vals['d_est_loss'] = model_dict.get('debiased_estimation_loss')
         if 'checkpoint_path' in model_dict:
             label_vals['checkpoint_path'] = collapse_model_path(model_dict.get('checkpoint_path'))
+        if 'with_audio' in model_dict:
+            label_vals['with_audio'] = model_dict.get('with_audio')
         for k in ('min_snr_gamma', 'unet_lr', 'text_encoder_1_lr', 'text_encoder_2_lr'):
             if k in model_dict:
                 label_vals[k] = model_dict.get(k)
@@ -342,7 +416,6 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             update_auraflow_fields_visibility,
             update_chroma_fields_visibility,
             update_flux_fields_visibility,
-            update_ltx_fields_visibility,
         )
     except Exception:
         return
@@ -352,7 +425,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -361,7 +434,8 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_flux = (mt == 'flux')
         is_flux2 = (mt in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'))
         is_sd3 = (mt == 'sd3')
-        is_ltx = (mt in ('ltx-video', 'ltx'))
+        is_ltx = (mt in ('ltx-video', 'ltx', 'ltx-video-2'))
+        is_ltx2 = (mt == 'ltx-video-2')
         is_lumina = (mt in ('lumina', 'lumina_2'))
         is_z_image = (mt == 'z_image')
         is_sdxl = (mt == 'sdxl')
@@ -380,7 +454,8 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_flux = is_flux or (curv == 'flux')
             is_flux2 = is_flux2 or (curv in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'))
             is_sd3 = is_sd3 or (curv == 'sd3')
-            is_ltx = is_ltx or (curv in ('ltx-video', 'ltx'))
+            is_ltx = is_ltx or (curv in ('ltx-video', 'ltx', 'ltx-video-2'))
+            is_ltx2 = is_ltx2 or (curv == 'ltx-video-2')
             is_lumina = is_lumina or (curv in ('lumina', 'lumina_2'))
             is_z_image = is_z_image or (curv == 'z_image')
             is_sdxl = is_sdxl or (curv == 'sdxl')
@@ -412,7 +487,19 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     update_auraflow_fields_visibility(is_auraflow, label_vals.get('max_sequence_length'))
     update_chroma_fields_visibility(is_chroma or is_sd3, label_vals.get('flux_shift'))
     update_flux_fields_visibility(is_flux, label_vals.get('flux_shift'), label_vals.get('bypass_g_emb'))
-    update_ltx_fields_visibility(is_ltx, label_vals.get('first_frame_conditioning_p'))
+    try:
+        from flet_app.ui.pages.training_config import update_ltx2_fields_visibility
+        update_ltx2_fields_visibility(
+            is_ltx2,
+            label_vals.get('all_modules'),
+            label_vals.get('video_attn'),
+            label_vals.get('video_ff'),
+            label_vals.get('audio_attn'),
+            label_vals.get('audio_ff'),
+            label_vals.get('cross_modal_attn')
+        )
+    except Exception:
+        pass
     try:
         from flet_app.ui.pages.training_config import update_lumina_fields_visibility
         update_lumina_fields_visibility(is_lumina, label_vals.get('lumina_shift'))
@@ -429,7 +516,19 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             label_vals.get('text_encoder_1_lr'),
             label_vals.get('text_encoder_2_lr'),
             label_vals.get('checkpoint_path'),
+            is_ltx2=is_ltx2,  # Pass the LTX2 flag to handle checkpoint_path visibility
         )
+    except Exception:
+        pass
+
+    # Update with_audio checkbox if it exists (only if value is explicitly provided)
+    try:
+        from flet_app.ui.pages.training_config import with_audio_checkbox_ref
+        if with_audio_checkbox_ref.current:
+            if 'with_audio' in label_vals:
+                with_audio_checkbox_ref.current.value = label_vals['with_audio']
+                if with_audio_checkbox_ref.current.page:
+                    with_audio_checkbox_ref.current.update()
     except Exception:
         pass
     try:
