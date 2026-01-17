@@ -16,8 +16,6 @@ except Exception:  # pragma: no cover
 
 def _create_open_content(page: ft.Page) -> ft.Column:
     """Create the Open dialog content"""
-    logger.debug("Creating Open dialog content")
-
     from .utils_top_menu import TopBarUtils  # Import to access methods
 
     default_dir = TopBarUtils._ensure_default_config_dir()
@@ -36,9 +34,10 @@ def _create_open_content(page: ft.Page) -> ft.Column:
 
     # No input field needed for Open dialog - just file selection
     status_text = ft.Text(value="", color=ft.Colors.GREEN)
+    search_query = ""  # For filtering files
 
     # Sorting state variables
-    sort_mode = "name"  # "name" or "date"
+    sort_mode = "date"  # "name" or "date"
     name_sort_ascending = True  # A-Z when True, Z-A when False
     date_sort_ascending = False  # newest first when False, oldest first when True
 
@@ -64,12 +63,16 @@ def _create_open_content(page: ft.Page) -> ft.Column:
         date_sort_ascending = not date_sort_ascending
         refresh_file_list()
 
+    def on_search_change(e):
+        """Handle search input changes"""
+        nonlocal search_query
+        search_query = e.control.value
+        refresh_file_list()
+
     def load_existing_files():
         """Load existing .toml files from the base configs directory and subdirectories"""
         try:
             base_config_dir = default_dir
-            logger.debug(f"Looking for .toml files in base directory: {base_config_dir}")
-
             found_files = []
 
             if base_config_dir.exists():
@@ -78,8 +81,6 @@ def _create_open_content(page: ft.Page) -> ft.Column:
                     rel_path = toml_file.relative_to(base_config_dir)
                     mod_time = toml_file.stat().st_mtime
                     found_files.append((rel_path, toml_file, mod_time))
-
-                logger.debug(f"Found {len(found_files)} .toml files total")
                 # Default sort by name (A-Z)
                 found_files.sort(key=lambda x: str(x[0]).lower())
                 return found_files
@@ -95,6 +96,11 @@ def _create_open_content(page: ft.Page) -> ft.Column:
         try:
             existing_files = load_existing_files()
             file_list_controls.clear()
+
+            # Apply search filter
+            if search_query:
+                query_lower = search_query.lower()
+                existing_files = [f for f in existing_files if query_lower in str(f[0]).lower()]
 
             # Apply sorting
             if sort_mode == "name":
@@ -183,7 +189,7 @@ def _create_open_content(page: ft.Page) -> ft.Column:
                     file_list_controls.append(file_row)
             else:
                 file_list_controls.append(
-                    ft.Text("No .toml files found", italic=True, color=ft.Colors.GREY_600)
+                    ft.Text("No .toml files found" if not search_query else f"No .toml files matching '{search_query}'", italic=True, color=ft.Colors.GREY_600)
                 )
 
             # Update the container content
@@ -200,7 +206,6 @@ def _create_open_content(page: ft.Page) -> ft.Column:
             except Exception:
                 pass
             # Don't call page.update() here - PopupDialogBase will handle higher-level updates
-            logger.debug("File list refreshed successfully")
         except Exception as e:
             logger.error(f"Error refreshing file list: {e}")
             logger.error(traceback.format_exc())
@@ -290,7 +295,12 @@ def _create_open_content(page: ft.Page) -> ft.Column:
 
     return ft.Column([
         dir_display,
-        ft.Text("Select a configuration file to open:", size=12, color=ft.Colors.GREY_600),
+        ft.TextField(
+            hint_text="Search files...",
+            prefix_icon=ft.Icons.SEARCH,
+            on_change=on_search_change,
+            border=ft.InputBorder.OUTLINE,
+        ),
         file_list_container,
         status_text,
     ], spacing=10)
@@ -298,17 +308,20 @@ def _create_open_content(page: ft.Page) -> ft.Column:
 
 def _create_save_as_content(page: ft.Page) -> ft.Column:
     """Create the Save As dialog content"""
-    logger.debug("Creating Save As dialog content")
-
     from .utils_top_menu import TopBarUtils  # Import to access methods
     from .config_utils import build_toml_config_from_ui  # Import for TOML building
+    from .ltx2_config_utils import build_ltx2_toml_from_ui  # Import LTX2 builder
 
     # Build TOML text from current UI
     training_tab = getattr(page, 'training_tab_container', None)
     if not training_tab:
         return ft.Column([ft.Text("Error: No training tab available")])
     try:
-        toml_text = build_toml_config_from_ui(training_tab)
+        # Use LTX2-specific config builder if LTX2 is selected
+        if TopBarUtils._is_ltx2_selected(training_tab):
+            toml_text = build_ltx2_toml_from_ui(training_tab)
+        else:
+            toml_text = build_toml_config_from_ui(training_tab)
     except Exception as e:
         logger.error(f"Error building TOML in Save As: {e}")
         toml_text = ""
@@ -395,8 +408,6 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
         """Load existing .toml files from the base configs directory and subdirectories"""
         try:
             base_config_dir = default_dir
-            logger.debug(f"Looking for .toml files in base directory: {base_config_dir}")
-
             found_files = []
 
             if base_config_dir.exists():
@@ -405,8 +416,6 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
                     rel_path = toml_file.relative_to(base_config_dir)
                     mod_time = toml_file.stat().st_mtime
                     found_files.append((rel_path, toml_file, mod_time))
-
-                logger.debug(f"Found {len(found_files)} .toml files total")
                 # Default sort by name (A-Z)
                 found_files.sort(key=lambda x: str(x[0]).lower())
                 return found_files
@@ -529,7 +538,6 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
             except Exception:
                 pass
             # Don't call update() elsewhere; keep dialog responsive
-            logger.debug("File list refreshed successfully")
         except Exception as e:
             logger.error(f"Error refreshing file list: {e}")
             logger.error(traceback.format_exc())
@@ -560,10 +568,29 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
         if not str(full_path).lower().endswith('.toml'):
             full_path = Path(str(full_path) + '.toml')
 
+        # Extract config name (filename without extension) for LTX2 configs
+        config_name = Path(full_path).stem
+
+        # Inject name field into TOML for LTX2 configs
+        final_toml_text = toml_text
+        if TopBarUtils._is_ltx2_selected(training_tab):
+            # Insert name field after [model] line
+            lines = toml_text.split('\n')
+            for i, line in enumerate(lines):
+                if line.strip() == '[model]':
+                    # Insert name field after [model] and type
+                    insert_idx = i + 1
+                    # Skip type line to find insert position
+                    while insert_idx < len(lines) and lines[insert_idx].strip().startswith('type'):
+                        insert_idx += 1
+                    lines.insert(insert_idx, f"name = '{config_name}'")
+                    break
+            final_toml_text = '\n'.join(lines)
+
         try:
             full_path.parent.mkdir(parents=True, exist_ok=True)
             with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(toml_text)
+                f.write(final_toml_text)
             logger.info(f"Config (TOML) saved (web) to {full_path}")
             TopBarUtils.set_yaml_path_and_title(page, str(full_path))
             TopBarUtils.add_recent_file(str(full_path), page)
@@ -613,41 +640,33 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
 
 
 def _handle_open_web(page: ft.Page, set_as_current: bool = True):
-    logger.debug("In _handle_open_web")
-
     # Create the dialog content using PopupDialogBase system
     dialog_content = _create_open_content(page)
 
     # Use PopupDialogBase if available, otherwise fall back to overlay method
     if hasattr(page, 'base_dialog') and page.base_dialog:
-        logger.debug("Using PopupDialogBase for Open dialog")
         page.base_dialog.show_dialog(
             content=dialog_content,
             title="Open Configuration",
             new_width=550  # Same width as Save As dialog
         )
     else:
-        logger.debug("Using fallback overlay method for Open dialog")
         # Fallback to original overlay method if PopupDialogBase not available
         _show_open_overlay(page, dialog_content)
 
 
 def _handle_save_as_web(page: ft.Page):
-    logger.debug("In _handle_save_as_web")
-
     # Create the dialog content using PopupDialogBase system
     dialog_content = _create_save_as_content(page)
 
     # Use PopupDialogBase if available, otherwise fall back to overlay method
     if hasattr(page, 'base_dialog') and page.base_dialog:
-        logger.debug("Using PopupDialogBase for Save As dialog")
         page.base_dialog.show_dialog(
             content=dialog_content,
             title="Save Data Config",
             new_width=550  # Slightly wider for better layout
         )
     else:
-        logger.debug("Using fallback overlay method for Save As dialog")
         # Fallback to original overlay method if PopupDialogBase not available
         _show_save_as_overlay(page, dialog_content)
 

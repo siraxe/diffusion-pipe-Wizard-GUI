@@ -2,6 +2,7 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module='diffusers')
 
 import torch
+import torch.nn.functional as F
 from diffusers.utils import export_to_video
 from decord import VideoReader
 from diffusers.models import AutoencoderKLWan
@@ -12,6 +13,7 @@ from PIL import Image
 import numpy as np
 import argparse
 import os
+from einops import rearrange
 
 random_seed = 42
 device = torch.device("cuda:0")
@@ -60,6 +62,47 @@ def load_video(video_path):
     fps = vr.get_avg_fps()
     images = vr.get_batch(list(range(video_length))).asnumpy()
     images = torch.from_numpy(images)/127.5 - 1.0
+
+    original_video_length = video_length
+
+    # Wan VAE requires spatial dimensions divisible by 32
+    # (due to encoder padding with kernel_size=3, stride=2)
+    SPATIAL_DIVISOR = 32
+    target_h = ((height + SPATIAL_DIVISOR - 1) // SPATIAL_DIVISOR) * SPATIAL_DIVISOR
+    target_w = ((width + SPATIAL_DIVISOR - 1) // SPATIAL_DIVISOR) * SPATIAL_DIVISOR
+
+    # Resize if needed
+    if height != target_h or width != target_w:
+        images = rearrange(images, "f h w c -> f c h w")
+        images = F.interpolate(images.float(), (target_h, target_w), mode='bilinear', align_corners=False)
+        images = rearrange(images, "f c h w -> f h w c")
+        images = images.to(torch.float16)
+        height, width = target_h, target_w
+        print(f"Video resized to {width}x{height} for model compatibility")
+
+    # For temporal dimension, Wan VAE uses temporal downsampling
+    # Extend frame count to be compatible (instead of truncating)
+    temporal_scale = 4  # Wan VAE temporal downsample factor
+    if video_length % temporal_scale != 0:
+        # Extend to next multiple of temporal_scale by duplicating frames
+        adjusted_length = ((video_length + temporal_scale - 1) // temporal_scale) * temporal_scale
+        frames_to_add = adjusted_length - video_length
+
+        if frames_to_add > 0:
+            # Duplicate the last few frames to extend
+            last_frames = images[-frames_to_add:] if frames_to_add <= video_length else images
+            # If we need more frames than we have, cycle through the video
+            if frames_to_add > video_length:
+                cycles_needed = frames_to_add // video_length
+                remainder = frames_to_add % video_length
+                extra = torch.cat([images] * cycles_needed + [images[:remainder]], dim=0)
+            else:
+                extra = last_frames
+
+            images = torch.cat([images, extra], dim=0)
+            video_length = adjusted_length
+            print(f"Extended from {original_video_length} to {video_length} frames for temporal compatibility (duplicated last {frames_to_add} frame(s))")
+
     return images, video_length, height, width, fps
 
 def load_image_mask(image_path, video_length, height, width):

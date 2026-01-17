@@ -16,7 +16,7 @@ def build_expansion_tile(
         title=ft.Text(title, size=12),
         bgcolor=EXPANSION_TILE_INSIDE_BG_COLOR,
         collapsed_bgcolor=EXPANSION_TILE_HEADER_BG_COLOR,
-        controls=[ft.Divider(), ft.Column(controls, spacing=10) ,ft.Divider()], # Wrap controls in a Column
+        controls=[ft.Divider(height=1), ft.Column(controls, spacing=3) ,ft.Divider(height=1)], # Wrap controls in a Column
         initially_expanded=initially_expanded,
         collapsed_shape=ft.RoundedRectangleBorder(radius=EXPANSION_TILE_BORDER_RADIUS),
         shape=ft.RoundedRectangleBorder(radius=EXPANSION_TILE_BORDER_RADIUS),

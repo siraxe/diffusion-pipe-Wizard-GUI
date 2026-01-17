@@ -22,7 +22,7 @@ from flet_app.ui.dataset_manager.dataset_utils import (
     _get_dataset_base_dir, get_videos_and_thumbnails, get_dataset_folders, get_media_files,
     parse_bucket_string_to_list # Add this import
 )
-from flet_app.ui.dataset_manager.dataset_thumb_layout import create_thumbnail_container, set_thumbnail_selection_state
+from flet_app.ui.dataset_manager.dataset_thumb_layout import create_thumbnail_container, set_thumbnail_selection_state, update_thumbnail_caption_status
 from flet_app.ui.flet_hotkeys import is_d_key_pressed_global # Import global D key state
 
 # Global references from dataset_layout_tab.py that need to be accessed here
@@ -67,6 +67,7 @@ def build_caption_command(
     instruction: str,
     max_new_tokens: int,
     selected_files: list[str] = None, # New parameter
+    custom_model_path: str = None, # Custom model path for "custom" type
 ) -> str:
     # Prefer current interpreter; fallback to common venv paths or python
     python_exe = (
@@ -77,7 +78,15 @@ def build_caption_command(
     )
     script_file = os.path.normpath("scripts/caption_videos.py")
 
-    command = f'"{python_exe}" -u "{script_file}" "{dataset_folder_path}/" --output "{output_json_path}" --captioner-type {selected_model}'
+    # For custom models, use qwen3_vl_8b_hf as the captioner type
+    sm = (selected_model or "").lower()
+    captioner_type = selected_model
+    if sm == "custom":
+        # For custom models, use HF backend (qwen3_vl_8b_hf or qwen3_vl_4b_hf based on preference)
+        # Default to qwen3_vl_8b_hf for custom models
+        captioner_type = "qwen3_vl_8b_hf"
+
+    command = f'"{python_exe}" -u "{script_file}" "{dataset_folder_path}/" --output "{output_json_path}" --captioner-type {captioner_type}'
 
     if use_8bit:
         command += " --use-8bit"
@@ -90,8 +99,10 @@ def build_caption_command(
     command += f' --max-new-tokens {max_new_tokens}'
 
     # If using LLaVA or Qwen3, point to local curated folder under models/_misc
-    sm = (selected_model or "").lower()
-    if sm == "llava_next_7b":
+    # For custom models, use the provided custom path
+    if sm == "custom" and custom_model_path:
+        command += f' --qwen-model "{custom_model_path}"'
+    elif sm == "llava_next_7b":
         command += ' --llava-model "models/_misc/LLaVA-NeXT-Video-7B-hf"'
     elif sm == "qwen3_vl_8b":
         command += ' --qwen-model "models/_misc/Qwen3-VL-8B-Instruct"'
@@ -590,29 +601,76 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
         new_name = f"{base_name}_{idx:02d}{ext}"
         new_names.append(new_name)
 
-    # Check for duplicate new names
+    # Check for duplicate new names (within the batch being renamed)
     if len(set(new_names)) != len(new_names):
         if e.page:
             e.page.snack_bar = ft.SnackBar(content=ft.Text("Naming collision detected. Aborting."), open=True)
             e.page.update()
         return
 
-    # Ensure no existing file will be overwritten (excluding files being renamed)
-    # We use the initial set of existing files for this check
-    for new_name in new_names:
-        if new_name in existing_files and new_name not in new_names: # Check against original existing files, exclude the new names being created
-            if e.page:
-                e.page.snack_bar = ft.SnackBar(content=ft.Text(f"File {new_name} already exists and is not part of this renaming batch. Aborting."), open=True)
-                e.page.update()
-            return
+    # Handle collisions: rename conflicting existing files to temporary names first
+    # These are files that would be overwritten because their names match new_names
+    files_to_rename_set = set(files_to_rename)
+    conflicting_files = []
+    temp_new_name_map = {}  # Maps temp name -> final new name for text file handling
 
-    # Rename files and build old_to_new map
+    for new_name in new_names:
+        # Check if this new name would overwrite an existing file that's NOT in our rename batch
+        if new_name in existing_files and new_name not in files_to_rename_set:
+            conflicting_files.append(new_name)
+
+    # Thumbnail directory for renaming thumbnails
+    thumbnails_dir = os.path.join(settings.THUMBNAILS_BASE_DIR, clean_current_name)
+
+    if conflicting_files:
+        print(f"[DEBUG] Found {len(conflicting_files)} conflicting files: {conflicting_files}")
+        # Rename conflicting files to temporary names first
+        # We'll use high numbers to avoid any conflicts
+        temp_offset = max(len(files_to_rename) + len(conflicting_files), 100)
+        for idx, conflict_name in enumerate(conflicting_files):
+            old_path = os.path.join(source_dir, conflict_name)
+            ext = os.path.splitext(conflict_name)[1]
+            temp_name = f"__temp_rename_{temp_offset + idx:04d}{ext}"
+            temp_path = os.path.join(source_dir, temp_name)
+
+            try:
+                os.rename(old_path, temp_path)
+                temp_new_name_map[temp_name] = conflict_name  # Remember what this temp file should become
+                print(f"[DEBUG] Renamed conflicting file {conflict_name} to temporary {temp_name}")
+
+                # Also rename corresponding .txt if it exists
+                conflict_base = os.path.splitext(conflict_name)[0]
+                old_txt = os.path.join(source_dir, f"{conflict_base}.txt")
+                if os.path.exists(old_txt):
+                    temp_txt = os.path.join(source_dir, f"__temp_rename_{temp_offset + idx:04d}.txt")
+                    os.rename(old_txt, temp_txt)
+                    print(f"[DEBUG] Renamed conflicting txt {conflict_base}.txt to temporary {os.path.basename(temp_txt)}")
+
+                # Also rename corresponding thumbnail to temp if it exists
+                if os.path.exists(thumbnails_dir):
+                    for thumb_ext in ['.jpg', '.png']:
+                        old_thumb = os.path.join(thumbnails_dir, f"{conflict_base}{thumb_ext}")
+                        if os.path.exists(old_thumb):
+                            temp_thumb = os.path.join(thumbnails_dir, f"__temp_rename_{temp_offset + idx:04d}{thumb_ext}")
+                            os.rename(old_thumb, temp_thumb)
+                            print(f"[DEBUG] Renamed conflicting thumbnail {conflict_base}{thumb_ext} to temporary {os.path.basename(temp_thumb)}")
+                            break
+
+            except Exception as ex:
+                error_msg = f"Failed to rename conflicting file {conflict_name}: {ex}"
+                print(f"[ERROR] {error_msg}")
+                if e.page:
+                    e.page.snack_bar = ft.SnackBar(content=ft.Text(error_msg), open=True)
+                    e.page.update()
+                return
+
+    # Now safe to rename files (conflicting ones are now at temp names)
     old_to_new = {}
     renaming_successful = True
     for old_name, new_name in zip(files_to_rename, new_names):
         old_path = os.path.join(source_dir, old_name)
         new_path = os.path.join(source_dir, new_name)
-        
+
         old_base, old_ext = os.path.splitext(old_name)
         new_base, new_ext = os.path.splitext(new_name)
 
@@ -628,6 +686,17 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
                 os.rename(old_txt_path, new_txt_path)
                 print(f"[DEBUG] Renamed {os.path.basename(old_txt_path)} to {os.path.basename(new_txt_path)}")
 
+            # Rename corresponding thumbnail if it exists
+            if os.path.exists(thumbnails_dir):
+                # Try both .jpg and .png extensions for thumbnails
+                for thumb_ext in ['.jpg', '.png']:
+                    old_thumb_path = os.path.join(thumbnails_dir, f"{old_base}{thumb_ext}")
+                    new_thumb_path = os.path.join(thumbnails_dir, f"{new_base}{thumb_ext}")
+                    if os.path.exists(old_thumb_path):
+                        os.rename(old_thumb_path, new_thumb_path)
+                        print(f"[DEBUG] Renamed thumbnail {old_base}{thumb_ext} to {new_base}{thumb_ext}")
+                        break  # Only rename the first matching thumbnail
+
         except Exception as ex:
             renaming_successful = False
             error_msg = f"Failed to rename {old_name} to {new_name}: {ex}"
@@ -637,6 +706,63 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
                 e.page.update()
             # Decide whether to stop or continue. Stopping is safer to avoid partial renames.
             return # Stop if any rename fails
+
+    # Finally, rename the temporary files to their final intended names
+    # Find available numbers that don't collide with any existing files
+    if conflicting_files:
+        # Get current files in directory (after main batch rename)
+        current_files = set(os.listdir(source_dir))
+
+        # Helper function to find next available number
+        def find_available_number(base_nm, extension, start_idx, existing):
+            idx = start_idx
+            while True:
+                candidate = f"{base_nm}_{idx:02d}{extension}"
+                if candidate not in existing:
+                    return idx, candidate
+                idx += 1
+
+        base_idx = 1
+        for temp_name, final_name_base in sorted(temp_new_name_map.items()):
+            temp_path = os.path.join(source_dir, temp_name)
+            ext = os.path.splitext(temp_name)[1]
+
+            # Find an available number that doesn't collide
+            base_idx, final_name = find_available_number(base_name, ext, base_idx, current_files)
+            final_path = os.path.join(source_dir, final_name)
+
+            try:
+                os.rename(temp_path, final_path)
+                current_files.add(final_name)  # Track this new name
+                print(f"[DEBUG] Renamed temp {temp_name} to final {final_name}")
+
+                # Also rename the corresponding .txt file
+                temp_base = os.path.splitext(temp_name)[0]
+                final_base = os.path.splitext(final_name)[0]
+                temp_txt = os.path.join(source_dir, f"{temp_base}.txt")
+                final_txt = os.path.join(source_dir, f"{final_base}.txt")
+                if os.path.exists(temp_txt):
+                    os.rename(temp_txt, final_txt)
+                    current_files.add(f"{final_base}.txt")  # Track txt too
+                    print(f"[DEBUG] Renamed temp txt {temp_base}.txt to final {final_base}.txt")
+
+                # Also rename the corresponding thumbnail if it exists
+                if os.path.exists(thumbnails_dir):
+                    for thumb_ext in ['.jpg', '.png']:
+                        temp_thumb = os.path.join(thumbnails_dir, f"{temp_base}{thumb_ext}")
+                        final_thumb = os.path.join(thumbnails_dir, f"{final_base}{thumb_ext}")
+                        if os.path.exists(temp_thumb):
+                            os.rename(temp_thumb, final_thumb)
+                            print(f"[DEBUG] Renamed temp thumbnail {temp_base}{thumb_ext} to final {final_base}{thumb_ext}")
+                            break
+
+                # Track this rename for info.json updates
+                old_to_new[final_name_base] = final_name
+                base_idx += 1  # Move to next number for next file
+
+            except Exception as ex:
+                print(f"[ERROR] Failed to rename temp file {temp_name} to {final_name}: {ex}")
+                # Non-critical, the file is safe at temp name
 
     
 
@@ -690,25 +816,13 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
 
     # Success feedback and UI update
     if renaming_successful:
-        # Determine the correct thumbnail directory (unified)
-        thumbnails_dir = os.path.join(settings.THUMBNAILS_BASE_DIR, clean_current_name)
-
-        # Clean up all existing thumbnails in the directory
-        if os.path.exists(thumbnails_dir):
-            for thumb_file in os.listdir(thumbnails_dir):
-                try:
-                    os.remove(os.path.join(thumbnails_dir, thumb_file))
-                    print(f"[DEBUG] Deleted old thumbnail: {thumb_file}")
-                except Exception as ex:
-                    print(f"[ERROR] Failed to delete old thumbnail {thumb_file}: {ex}")
-
         if e.page:
-            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Renamed {len(files_to_rename)} files successfully and cleaned up old thumbnails."), open=True)
+            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Renamed {len(files_to_rename)} files successfully."), open=True)
             if update_thumbnails_func:
                 if asyncio.iscoroutinefunction(update_thumbnails_func):
-                    await update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)  # Force refresh to update image sources
+                    await update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=False)  # Just reload, don't regenerate
                 else:
-                    update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)  # Force refresh to update image sources
+                    update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=False)  # Just reload, don't regenerate
             e.page.update()
 
 async def on_bucket_or_model_change(e: ft.ControlEvent, selected_dataset_ref, bucket_size_textfield_obj, model_name_dropdown_obj, trigger_word_textfield_obj):
@@ -752,6 +866,7 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
                                      caption_model_dropdown: ft.Dropdown,
                                      captions_checkbox: ft.Checkbox,
                                      hf_checkbox: ft.Checkbox,
+                                     custom_model_path_textfield: ft.TextField,
                                      cap_command_textfield: ft.TextField,
                                      max_tokens_textfield: ft.TextField,
                                      dataset_add_captions_button_control: ft.ElevatedButton,
@@ -780,6 +895,7 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
         return
 
     selected_model = caption_model_dropdown.value or "llava_next_7b"
+    custom_model_path = None
     # If Qwen model and HF checkbox set, map to *_hf variant
     try:
         sm = (selected_model or "").lower()
@@ -788,6 +904,14 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
                 selected_model = "qwen3_vl_4b_hf"
             elif sm == "qwen3_vl_8b":
                 selected_model = "qwen3_vl_8b_hf"
+        # Handle custom model - store the path separately
+        elif sm == "custom":
+            custom_path = getattr(custom_model_path_textfield, 'value', 'models/Qwen') or 'models/Qwen'
+            # Convert relative path to absolute
+            from flet_app.project_root import get_project_root
+            project_root = get_project_root()
+            custom_path_abs = os.path.normpath(os.path.join(project_root, custom_path))
+            custom_model_path = custom_path_abs
     except Exception:
         pass
     try:
@@ -951,8 +1075,8 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
         )
         if sel_arg:
             command += f" --selected-files {sel_arg}"
-        # JoyCaption writes .txt files directly; just refresh thumbnails
-        post_success_cb = lambda: update_thumbnails_func(e.page, thumbnails_grid_control, force_refresh=True)
+        # JoyCaption writes .txt files directly; just update caption status
+        post_success_cb = lambda: update_thumbnail_caption_status(thumbnails_grid_control, dataset_folder_path, dataset_type)
     else:
         # Default path: use our caption_videos.py pipeline (video/image)
         command = build_caption_command(
@@ -962,10 +1086,15 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
             use_8bit=((selected_model or "").lower() == "llava_next_7b" and captions_checkbox.value),
             instruction=cap_command_textfield.value.strip(),
             max_new_tokens=int(max_tokens_textfield.value.strip() or 100),
-            selected_files=selected_filenames # Pass selected files
+            selected_files=selected_filenames, # Pass selected files
+            custom_model_path=custom_model_path # Pass custom model path
         )
-        # After captioning (video/mixed), convert captions.json to .txt and refresh thumbnails
-        post_success_cb = (lambda: e.page.run_task(on_caption_to_txt_click, e, selected_dataset_ref, DATASETS_TYPE_ref, update_thumbnails_func, thumbnails_grid_control))
+        # After captioning (video/mixed), convert captions.json to .txt and update caption status
+        async def convert_and_update_status():
+            await on_caption_to_txt_click(e, selected_dataset_ref, DATASETS_TYPE_ref, None, None)
+            # Update caption status after conversion
+            update_thumbnail_caption_status(thumbnails_grid_control, dataset_folder_path, dataset_type)
+        post_success_cb = lambda: e.page.run_task(convert_and_update_status)
     # Echo built command
     try:
         processed_output_field_ref.value += f"[Built] {command}\n"
@@ -1075,7 +1204,9 @@ def perform_delete_captions(page_context: ft.Page, thumbnails_grid_control: ft.G
 
     if page_context:
         page_context.snack_bar = ft.SnackBar(content=ft.Text(f"Deleted {deleted_count} caption file(s) for {current_dataset_name}."), open=True)
-    update_thumbnails_func(page_ctx=page_context, grid_control=thumbnails_grid_control, force_refresh=True) # Force refresh after deleting captions
+        page_context.update()
+    # Just update caption status instead of full thumbnail refresh
+    update_thumbnail_caption_status(thumbnails_grid_control, dataset_folder_path, dataset_type)
 
 
 def stop_captioning(e: ft.ControlEvent,
@@ -1296,26 +1427,45 @@ async def on_caption_to_json_click(e: ft.ControlEvent, selected_dataset_ref, DAT
             captions_data = []
 
         media_files = get_media_files(dataset_folder_path, dataset_type)
-        
+
         captions_dict = {os.path.basename(item['media_path']): item for item in captions_data if 'media_path' in item}
 
         updated_count = 0
         for media_path in media_files:
             base_filename, _ = os.path.splitext(os.path.basename(media_path))
             txt_caption_path = os.path.join(dataset_folder_path, f"{base_filename}.txt")
+            neg_caption_path = os.path.join(dataset_folder_path, f"{base_filename}_neg.txt")
 
+            caption_text = None
+            neg_caption_text = None
+
+            # Read positive caption
             if os.path.exists(txt_caption_path):
                 with open(txt_caption_path, 'r', encoding='utf-8') as f:
                     caption_text = f.read().strip()
-                
+
+            # Read negative caption
+            if os.path.exists(neg_caption_path):
+                with open(neg_caption_path, 'r', encoding='utf-8') as f:
+                    neg_caption_text = f.read().strip()
+
+            # Only update if we have at least a positive caption
+            if caption_text:
                 media_basename = os.path.basename(media_path)
                 if media_basename in captions_dict:
                     captions_dict[media_basename]['caption'] = caption_text
+                    # Add/update negative_caption if it exists
+                    if neg_caption_text:
+                        captions_dict[media_basename]['negative_caption'] = neg_caption_text
                 else:
-                    captions_dict[media_basename] = {
+                    new_entry = {
                         "media_path": media_basename,
                         "caption": caption_text
                     }
+                    # Add negative_caption if it exists
+                    if neg_caption_text:
+                        new_entry['negative_caption'] = neg_caption_text
+                    captions_dict[media_basename] = new_entry
                 updated_count += 1
 
         with open(captions_json_path, 'w', encoding='utf-8') as f:
@@ -1465,6 +1615,47 @@ async def apply_affix_from_textfield(e: ft.ControlEvent, affix_type: str, select
         e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Error applying affix: {ex}"), open=True)
     finally:
         if e.page: e.page.update()
+
+async def on_fill_empty_txt_click(e: ft.ControlEvent, selected_dataset_ref, DATASETS_TYPE_ref, update_thumbnails_func, thumbnails_grid_ref_obj):
+    """Create empty .txt files for media files that don't have corresponding caption files."""
+    current_dataset_name = selected_dataset_ref.get("value")
+    if not current_dataset_name:
+        if e.page:
+            e.page.snack_bar = ft.SnackBar(content=ft.Text("Error: No dataset selected."), open=True)
+            e.page.update()
+        return
+
+    base_dir, dataset_type = _get_dataset_base_dir(current_dataset_name)
+    clean_dataset_name = current_dataset_name
+    dataset_folder_path = os.path.abspath(os.path.join(base_dir, clean_dataset_name))
+
+    try:
+        media_files = get_media_files(dataset_folder_path, dataset_type)
+
+        created_count = 0
+        for media_path in media_files:
+            base_filename, _ = os.path.splitext(os.path.basename(media_path))
+            txt_caption_path = os.path.join(dataset_folder_path, f"{base_filename}.txt")
+
+            # Only create if .txt doesn't exist
+            if not os.path.exists(txt_caption_path):
+                with open(txt_caption_path, 'w', encoding='utf-8') as f:
+                    f.write("")  # Create empty file
+                created_count += 1
+
+        if e.page:
+            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Created {created_count} empty .txt file(s)."), open=True)
+            if asyncio.iscoroutinefunction(update_thumbnails_func):
+                await update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)
+            else:
+                update_thumbnails_func(page_ctx=e.page, grid_control=thumbnails_grid_ref_obj.current, force_refresh=True)
+            e.page.update()
+
+    except Exception as ex:
+        if e.page:
+            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"An error occurred: {ex}"), open=True)
+            e.page.update()
+
 
 async def find_and_replace_in_captions(e: ft.ControlEvent, selected_dataset_ref, DATASETS_TYPE_ref, find_text_field_ref: ft.Ref[ft.TextField], replace_text_field_ref: ft.Ref[ft.TextField], update_thumbnails_func, thumbnails_grid_ref_obj):
     if not selected_dataset_ref["value"]:

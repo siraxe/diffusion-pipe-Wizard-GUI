@@ -1,6 +1,9 @@
 import os
 import glob
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import json
 import flet as ft # Keep flet import for type hints if needed, but not for UI elements
 from flet_app.settings import settings
@@ -376,20 +379,43 @@ def get_videos_and_thumbnails(dataset_name, dataset_type, force_metadata_refresh
 
         # Determine per-file type by extension
         ext = os.path.splitext(media_name)[1].lower()
-        is_image_file = ext in [e.lower() for e in settings.IMAGE_EXTENSIONS]
+        # Strip the leading dot for comparison (e.g., ".png" -> "png")
+        ext_without_dot = ext.lstrip('.')
+        is_image_file = ext_without_dot in [e.lower() for e in settings.IMAGE_EXTENSIONS]
 
         # Get media dimensions/info if not already in media_info or if it's an image file
-        if media_name not in media_info or is_image_file or force_metadata_refresh or (not is_image_file and "fps" not in media_info.get(media_name, {})):
+        # For images, always refresh if width/height is missing to handle cases where info.json has incomplete data
+        needs_refresh = (
+            media_name not in media_info or
+            is_image_file or
+            force_metadata_refresh or
+            (is_image_file and media_name in media_info and ("width" not in media_info[media_name] or "height" not in media_info[media_name])) or
+            (not is_image_file and "fps" not in media_info.get(media_name, {}))
+        )
+        if needs_refresh:
             try:
                 if is_image_file:
-                    img = cv2.imread(media_path)
-                    if img is not None:
-                        height, width = img.shape[:2]
-                        media_info[media_name] = {"width": width, "height": height, "frames": 1, "fps": 0}
-                        info_changed = True
-                        os.makedirs(dataset_path, exist_ok=True)
-                    else:
-                        print(f"Could not read image file: {media_path}")
+                    # Try PIL first for better PNG support
+                    try:
+                        from PIL import Image
+                        with Image.open(media_path) as pil_img:
+                            width, height = pil_img.size
+                            media_info[media_name] = {"width": width, "height": height, "frames": 1, "fps": 0}
+                            info_changed = True
+                    except ImportError:
+                        # PIL not available, fall back to cv2
+                        img = cv2.imread(media_path)
+                        if img is not None:
+                            height, width = img.shape[:2]
+                            media_info[media_name] = {"width": width, "height": height, "frames": 1, "fps": 0}
+                            info_changed = True
+                    except Exception:
+                        # Try cv2 as fallback
+                        img = cv2.imread(media_path)
+                        if img is not None:
+                            height, width = img.shape[:2]
+                            media_info[media_name] = {"width": width, "height": height, "frames": 1, "fps": 0}
+                            info_changed = True
                 else:
                     vid = cv2.VideoCapture(media_path)
                     if vid.isOpened():

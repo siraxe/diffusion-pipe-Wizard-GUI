@@ -356,9 +356,15 @@ def cut_all_videos_to_max(
         if not refreshed_current_video: 
             page.update()
 
-def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coords: Tuple[int, int, int, int], video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable]):
+def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coords: Tuple[int, int, int, int], padding: int = 80, video_list: Optional[List[str]] = None, on_caption_updated_callback: Optional[Callable] = None):
     """
-    Handles the 'clean' action by creating a mask and calling an external script.
+    Handles the 'clean' action using ROI-based processing.
+    Only processes the selected area (expanded region) for much faster processing.
+
+    Parameters
+    ----------
+    padding : int, default=80
+        Padding in pixels to expand around the selected area for processing.
     """
     if not current_video_path or not os.path.exists(current_video_path):
         if page: page.snack_bar = ft.SnackBar(ft.Text("Error: Invalid video path for cleaning."), open=True); page.update()
@@ -372,10 +378,6 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
     if not video_width or not video_height:
         if page: page.snack_bar = ft.SnackBar(ft.Text(f"Error: Could not get video resolution for {os.path.basename(current_video_path)}"), open=True); page.update()
         return
-
-    # Create a black image with video resolution
-    mask_image = Image.new('L', (video_width, video_height), 0) # 'L' for black/white (grayscale)
-    draw = ImageDraw.Draw(mask_image)
 
     # selected_area_zone is (left, top, width, height) in display coordinates
     display_area_width = VIDEO_PLAYER_DIALOG_WIDTH - 40
@@ -404,7 +406,7 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
 
     # Scale the selected area coordinates, adjusting for offsets
     x1_display, y1_display, w_display, h_display = overlay_coords
-    
+
     x1_scaled = int((x1_display - offset_x) * scale_x)
     y1_scaled = int((y1_display - offset_y) * scale_y)
     w_scaled = int(w_display * scale_x)
@@ -416,28 +418,14 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
     w_scaled = min(w_scaled, video_width - x1_scaled)
     h_scaled = min(h_scaled, video_height - y1_scaled)
 
-    x2_scaled = x1_scaled + w_scaled
-    y2_scaled = y1_scaled + h_scaled
+    # These are the coordinates in the ORIGINAL video space
+    selected_left = x1_scaled
+    selected_top = y1_scaled
+    selected_w = w_scaled
+    selected_h = h_scaled
 
-    draw.rectangle([x1_scaled, y1_scaled, x2_scaled, y2_scaled], fill=255) # fill=255 for white
-
-    # Construct mask image filename and path
-    video_basename = os.path.basename(current_video_path)
-    video_name_without_ext = os.path.splitext(video_basename)[0]
-    mask_filename = f"{video_name_without_ext}_mask.png"
-    
-    # Get the directory of the current video
-    video_dir = os.path.dirname(current_video_path)
-    
-    # Create temp_processing folder next to the video
-    temp_processing_dir = os.path.join(video_dir, "temp_processing")
-    os.makedirs(temp_processing_dir, exist_ok=True) # Ensure directory exists
-
-    mask_image_path = os.path.join(temp_processing_dir, mask_filename)
-    mask_image.save(mask_image_path)
-    print(f"Mask image saved to: {mask_image_path}")
-
-    script_path = os.path.join("flet_app", "modules", "minimax-remover", "run_remover_with_image_mask.py")
+    # Use the new ROI-based script
+    script_path = os.path.join("flet_app", "modules", "minimax-remover", "run_remover_roi.py")
 
     # Find a Python interpreter to use: prefer venv python if present, else fallback to current
     venv_py_win = os.path.join("venv", "Scripts", "python.exe")
@@ -450,20 +438,45 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
     else:
         python_exe = sys.executable or "python"
 
+    # Format selected area as "left,top,width,height"
+    selected_area_str = f"{selected_left},{selected_top},{selected_w},{selected_h}"
+
     cmd = [
         python_exe,
         script_path,
         "--video_path", current_video_path,
-        "--image_mask_path", mask_image_path,
+        "--selected_area", selected_area_str,
+        "--padding", str(padding),
     ]
 
+    print(f"Executing ROI-based clean: selected area = {selected_area_str}")
+    print(f"Original video: {video_width}x{video_height}")
     print(f"Executing command: {' '.join([str(c) for c in cmd])}")
     try:
         # Run the command without shell for cross-platform safety
         result = subprocess.run(cmd, check=True, stdout=sys.stdout, stderr=sys.stderr)
-        print("Command execution finished.")
-        # After successful execution, update UI and video info
-        _generic_video_operation_ui_update(page, current_video_path, video_list, on_caption_updated_callback, "Video cleaned using external script!")
+        print("ROI-based clean finished.")
+
+        # The output file will be named {video_name}_clean.{ext}
+        video_dir, video_filename = os.path.split(current_video_path)
+        video_name, video_ext = os.path.splitext(video_filename)
+        cleaned_video_path = os.path.join(video_dir, f"{video_name}_clean{video_ext}")
+
+        # Check if cleaned video was created
+        if os.path.exists(cleaned_video_path):
+            # DON'T replace the original - keep the _clean file
+            print(f"Cleaned video saved to: {cleaned_video_path}")
+            print(f"Original video preserved at: {current_video_path}")
+
+            # Update UI to show success with the new file path
+            cleaned_filename = os.path.basename(cleaned_video_path)
+            msg = f"Cleaned video saved as: {cleaned_filename}"
+            if page:
+                page.snack_bar = ft.SnackBar(ft.Text(msg), open=True)
+                page.update()
+        else:
+            raise FileNotFoundError(f"Expected output file not found: {cleaned_video_path}")
+
     except subprocess.CalledProcessError as e:
         msg = f"Command failed with error code {e.returncode}. See console for details."
         if page: page.snack_bar = ft.SnackBar(ft.Text(msg), open=True); page.update()
@@ -476,14 +489,6 @@ def on_clean_action_handler(page: ft.Page, current_video_path: str, overlay_coor
         msg = f"An unexpected error occurred during cleaning: {e}"
         if page: page.snack_bar = ft.SnackBar(ft.Text(msg), open=True); page.update()
         print(msg)
-    finally:
-        # Clean up the mask image after use
-        if os.path.exists(mask_image_path):
-            try:
-                os.remove(mask_image_path)
-                print(f"Cleaned up mask file: {mask_image_path}")
-            except Exception as e_del:
-                print(f"Error deleting mask file {mask_image_path}: {e_del}")
 
 def split_selected_videos_into_chunks(page: ft.Page, seconds_per_chunk: float, thumbnail_update_callback: Optional[Callable] = None, force_reencode: bool = False):
     """

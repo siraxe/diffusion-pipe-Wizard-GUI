@@ -765,7 +765,7 @@ def reverse_video(current_video_path: str) -> Tuple[bool, str, Optional[str]]:
 def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) -> Tuple[bool, str, Optional[str]]:
     """
     Remaps video timing by a speed multiplier (e.g., 0.5 for half speed, 2.0 for double speed).
-    This is a proper time remap that changes the speed of the video, not just its length.
+    This is a proper time remap that changes the speed of the video while preserving the original FPS.
     Returns (success, message, output_path_or_none).
     """
     if speed_multiplier <= 0:
@@ -774,6 +774,12 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
     # If speed is effectively 1.0, do nothing.
     if math.isclose(speed_multiplier, 1.0):
         return True, "Speed is 1.0, no remapping needed.", current_video_path
+
+    # Get original FPS to preserve it
+    metadata = get_video_metadata(current_video_path)
+    if not metadata or not metadata.get('fps') or metadata['fps'] <= 0:
+        return False, "Could not get valid FPS for time remap.", None
+    original_fps = metadata['fps']
 
     ffmpeg_exe = _get_ffmpeg_exe_path()
 
@@ -802,6 +808,7 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
     command = [
         ffmpeg_exe, "-y", "-i", current_video_path,
         "-vf", video_filter,
+        "-r", str(original_fps),  # Preserve original FPS
     ]
 
     # Add audio filter only if it was generated and is not trivial
@@ -814,7 +821,7 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
         # If no audio filter, just copy the audio stream
         command.extend(["-c:a", "copy"])
 
-    # Add the rest of the command. Note: -r is removed as it can conflict with setpts.
+    # Add the rest of the command
     command.extend([
         *_get_video_codec_and_flags(),
         temp_output_path
@@ -834,8 +841,9 @@ def cut_video_by_frames(
     force_reencode: bool = False
 ) -> Tuple[bool, str, Optional[str]]:
     """
-    Cuts video from start_frame to end_frame using frame-accurate cutting.
-    Always uses re-encoding for precise frame cutting accuracy.
+    Cuts video from start_frame to end_frame using stream copy (fast, no re-encoding).
+    Discards frames by copying video/audio streams without quality loss.
+    Use force_reencode=True for frame-accurate cutting at keyframe boundaries.
     Returns (success, message, output_path_or_none).
     """
     ffmpeg_exe = _get_ffmpeg_exe_path()
@@ -863,17 +871,33 @@ def cut_video_by_frames(
 
     temp_output_path = _get_temp_output_path(current_video_path, "cut")
 
-    # Use frame-accurate cutting with two-pass approach
-    # First: extract exact frames from start_frame to end_frame
-    command = [
-        ffmpeg_exe, "-y",
-        "-ss", str(start_time),   # Seek to start time
-        "-i", current_video_path,
-        "-frames:v", str(frame_count),  # Extract exact number of frames
-        "-c:a", "copy",          # Preserve original audio
-        *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
-        temp_output_path
-    ]
+    # Stream copy only works correctly when cutting from frame 0 (keyframe-aligned)
+    # When start_frame > 0, stream copy causes frozen frames at the start
+    # because it can only seek to the nearest keyframe, not exact frames.
+    # Auto-re-encode when start_frame > 0 for frame-accurate cutting.
+    needs_reencode = force_reencode or (start_frame > 0)
+
+    if not needs_reencode:
+        # Fast stream copy - only accurate when cutting from frame 0
+        command = [
+            ffmpeg_exe, "-y",
+            "-i", current_video_path,
+            "-t", str(duration),      # Duration to extract
+            "-c:v", "copy",           # Copy video stream (no re-encoding)
+            "-c:a", "copy",           # Copy audio stream (no re-encoding)
+            "-avoid_negative_ts", "make_zero",
+            temp_output_path
+        ]
+    else:
+        # Re-encode for frame-accurate cutting (needed when start_frame > 0)
+        command = [
+            ffmpeg_exe, "-y",
+            "-ss", str(start_time),
+            "-i", current_video_path,
+            "-t", str(duration),
+            *_get_video_codec_and_flags(),  # Uses GPU if enabled in settings
+            temp_output_path
+        ]
 
     success, _, stderr = _run_ffmpeg_process(command)
     if success and os.path.exists(temp_output_path):
@@ -881,13 +905,17 @@ def cut_video_by_frames(
         output_metadata = get_video_metadata(temp_output_path)
         output_frames = output_metadata.get('total_frames', 0) if output_metadata else 0
 
-        if output_frames == frame_count or (output_frames > 0 and abs(output_frames - frame_count) <= 1):
-            return True, f"Video cut from frame {start_frame} to {end_frame} ({frame_count} frames).", temp_output_path
+        # Stream copy may vary slightly due to keyframe alignment (acceptable)
+        tolerance = 5 if not needs_reencode else 1
+        if output_frames > 0 and abs(output_frames - frame_count) <= tolerance:
+            method = "fast stream copy" if not needs_reencode else "re-encode"
+            return True, f"Video cut ({method}) from frame {start_frame} to {end_frame} ({output_frames} frames).", temp_output_path
         else:
-            print(f"Frame count mismatch: expected {frame_count}, got {output_frames}")
+            print(f"Frame count: expected ~{frame_count}, got {output_frames}")
             # Still return success if we got a reasonable number of frames
             if output_frames > 0:
-                return True, f"Video cut from frame {start_frame} to {end_frame} ({output_frames} frames).", temp_output_path
+                method = "fast stream copy" if not needs_reencode else "re-encode"
+                return True, f"Video cut ({method}) from frame {start_frame} to {end_frame} ({output_frames} frames).", temp_output_path
             else:
                 # If no frames, something went wrong
                 if os.path.exists(temp_output_path):
@@ -928,7 +956,7 @@ def split_video_by_frame(
         "-vf", f"select='between(n,0,{frame_count_1-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
         "-vframes", str(frame_count_1),  # Ensure exact frame count
         "-c:a", "copy",                  # Preserve audio
-        *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
+        *_get_video_codec_and_flags(),  # Uses GPU if enabled in settings
         temp_output_path_1
     ]
     success1, _, stderr1 = _run_ffmpeg_process(command1)
@@ -947,7 +975,7 @@ def split_video_by_frame(
         "-vf", f"select='between(n,0,{frame_count_2-1})',setpts=PTS-STARTPTS",  # Frame-accurate selection
         "-vframes", str(frame_count_2),  # Ensure exact frame count
         "-c:a", "copy",                  # Preserve audio
-        *get_web_video_encoding_flags(),  # Use standardized web-compatible encoding
+        *_get_video_codec_and_flags(),  # Uses GPU if enabled in settings
         temp_output_path_2
     ]
     success2, _, stderr2 = _run_ffmpeg_process(command2)

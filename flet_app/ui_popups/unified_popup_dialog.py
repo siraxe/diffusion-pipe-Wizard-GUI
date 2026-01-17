@@ -30,6 +30,7 @@ from .area_editor import (
     apply_clean_from_overlay as area_apply_clean,
     apply_crop_from_overlay as area_apply_crop,
     toggle_area_editor as area_toggle_editor,
+    create_mask_from_overlay as area_create_mask,
 )
 
 # Import for thumbnail updates - using a different approach to avoid circular imports
@@ -144,6 +145,9 @@ def open_unified_popup_dialog(
     neg_caption_tf: Optional[ft.TextField] = None
     caption_timer: Optional[threading.Timer] = None
     neg_caption_timer: Optional[threading.Timer] = None
+
+    # Track video play/pause state (resets to playing when switching videos)
+    video_is_playing = True
 
     dialog = page.base_dialog if hasattr(page, "base_dialog") and page.base_dialog else PopupDialogBase(page, content=ft.Container())
     if not hasattr(page, "base_dialog") or not page.base_dialog:
@@ -641,6 +645,8 @@ def open_unified_popup_dialog(
         nonlocal caption_tf, neg_caption_tf, caption_timer, neg_caption_timer
         nonlocal overlay_visible, overlay_visual, overlay_control, overlay_hover_container, overlay_current_rotate
         nonlocal monitor_thread
+        nonlocal video_is_playing
+        video_is_playing = True  # Reset to playing when switching videos
         _stop_monitor_if_any()
         path = items[index]
         title = os.path.basename(path)
@@ -680,11 +686,16 @@ def open_unified_popup_dialog(
             # Add play/pause control for video
             play_pause_btn = ft.IconButton(ft.Icons.PAUSE, tooltip='Play/Pause')
             def _toggle_play(e=None):
+                nonlocal video_is_playing
                 try:
                     if media_view.is_playing():
-                        media_view.pause(); play_pause_btn.icon = ft.Icons.PLAY_ARROW
+                        media_view.pause()
+                        play_pause_btn.icon = ft.Icons.PLAY_ARROW
+                        video_is_playing = False
                     else:
-                        media_view.play(); play_pause_btn.icon = ft.Icons.PAUSE
+                        media_view.play()
+                        play_pause_btn.icon = ft.Icons.PAUSE
+                        video_is_playing = True
                     if play_pause_btn.page: play_pause_btn.update()
                 except Exception:
                     pass
@@ -1126,13 +1137,33 @@ def open_unified_popup_dialog(
             if area_apply_crop(page, path, overlay_control, overlay_visible, viewer_w, viewer_h, overlay_angle):
                 refresh()
 
-        def apply_clean_from_overlay(e):
-            if not is_img and area_apply_clean(page, path, overlay_control, overlay_visible, viewer_w, viewer_h):
+        def create_mask_from_overlay(e):
+            if area_create_mask(page, path, overlay_control, overlay_visible, viewer_w, viewer_h):
                 refresh()
+
+        # Create padding field for minimax-remover
+        padding_field = create_textfield(
+            label="Padding",
+            value="80",
+            hint_text="px",
+            expand=0,
+            width=100,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
+        def apply_clean_from_overlay(e):
+            if not is_img:
+                try:
+                    padding_val = int(padding_field.value or 80)
+                except:
+                    padding_val = 80
+                if area_apply_clean(page, path, overlay_control, overlay_visible, viewer_w, viewer_h, padding_val):
+                    refresh()
 
         area_btn = ft.ElevatedButton("Area Editor", on_click=toggle_area_editor, style=BTN_STYLE2)
         apply_crop_btn = ft.ElevatedButton("Apply Crop", on_click=apply_crop_from_overlay, style=BTN_STYLE2)
-        apply_clean_btn = ft.ElevatedButton("Apply Clean", on_click=apply_clean_from_overlay, disabled=is_img, style=BTN_STYLE2, tooltip=("Disabled for images" if is_img else None))
+        mask_it_btn = ft.ElevatedButton("Mask it", on_click=create_mask_from_overlay, style=BTN_STYLE2)
+        apply_clean_btn = ft.ElevatedButton("Clear Area", on_click=apply_clean_from_overlay, disabled=is_img, style=BTN_STYLE2, tooltip=("Disabled for images" if is_img else None))
 
         # First row: fields stacked on the left, +/-/Closest stacked on right
         fields_stack_col = ft.Column([width_field, height_field], spacing=2, col=8)
@@ -1147,8 +1178,11 @@ def open_unified_popup_dialog(
                 ft.Container(closest_btn, col=4),
             ], spacing=1, expand=True),
             ft.Divider(thickness=1, height=4),
-            ft.ResponsiveRow([ft.Container(area_btn, col=6), ft.Container(apply_crop_btn, col=6)], spacing=3, expand=True),
-            ft.ResponsiveRow([ft.Container(apply_clean_btn, col=12)], spacing=3, expand=True),
+            ft.ResponsiveRow([ft.Container(area_btn, col=4), ft.Container(apply_crop_btn, col=4), ft.Container(mask_it_btn, col=4)], spacing=3, expand=True),
+            ft.ResponsiveRow([
+                ft.Container(padding_field, col=4),
+                ft.Container(apply_clean_btn, col=8),
+            ], spacing=3, expand=True),
         ], spacing=6, col={'md': 6, 'lg': 5, 'sm': 12})
 
                 # Video playback slider (Start/Total/End) occupies two columns on the right for videos
@@ -1196,7 +1230,9 @@ def open_unified_popup_dialog(
                     if local_video_player and fps > 0:
                         ms = int((s / fps) * 1000)
                         local_video_player.seek(ms)
-                        local_video_player.play()
+                        # Only play if video was playing before slider move
+                        if video_is_playing:
+                            local_video_player.play()
                         if local_video_player.page:
                             local_video_player.update()
                 except Exception:
@@ -1482,6 +1518,28 @@ def open_unified_popup_dialog(
                         ps_btn.update()
             except Exception:
                 pass
+
+            # Update crop buttons to use the currently displayed image path (control or original)
+            if is_img and crop_btn:
+                def _on_crop_click(e):
+                    image_editor.handle_crop_image_click(page, width_field, height_field, _current_image_to_edit(), items, None)
+                crop_btn.on_click = _on_crop_click
+                if crop_btn.page:
+                    crop_btn.update()
+
+            # Update apply_crop_from_overlay to use the currently displayed image path
+            if is_img:
+                original_apply_crop = apply_crop_from_overlay
+                def _apply_crop_with_current_image(e):
+                    # Update the media_path before calling the original function
+                    current_path = _current_image_to_edit()
+                    nonlocal overlay_saved
+                    # Temporarily update the path used by area_editor
+                    if area_apply_crop(page, current_path, overlay_control, overlay_visible, viewer_w, viewer_h, overlay_angle):
+                        refresh()
+                apply_crop_btn.on_click = _apply_crop_with_current_image
+                if apply_crop_btn.page:
+                    apply_crop_btn.update()
         editing_row = ft.ResponsiveRow([left_col, slider_col], spacing=10)
 
         # Do not attach on_click to content container to avoid pointer button effect

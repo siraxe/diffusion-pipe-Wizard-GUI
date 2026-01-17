@@ -73,7 +73,8 @@ def create_thumbnail_container(
     grid_control: ft.GridView,
     on_checkbox_change_callback,
     thumbnail_index: int,
-    is_selected_initially: bool
+    is_selected_initially: bool,
+    dataset_type: str = "video"  # Default to "video" for backward compatibility
 ):
     video_name = os.path.basename(video_path)
     info = video_info.get(video_name, {})
@@ -149,6 +150,27 @@ def create_thumbnail_container(
         )
     )
 
+    # Caption status Text element - store reference for updating
+    caption_status_text = ft.Text(
+        # For images: show caption status with color
+        # For videos: show frame count and caption status with color
+        spans=[
+            ft.TextSpan(
+                "[captioned: " if dataset_type == "image" else f"[{frames} frames - ",
+                style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)
+            ),
+            ft.TextSpan(
+                cap_val,
+                style=ft.TextStyle(color=cap_color, size=9)
+            ),
+            ft.TextSpan(
+                "]",
+                style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)
+            ),
+        ],
+        size=9,
+    )
+
     thumbnail_container = ft.Container(
         content=ft.Stack(
             [
@@ -162,14 +184,14 @@ def create_thumbnail_container(
                         weight=ft.FontWeight.BOLD,
                         text_align=ft.TextAlign.CENTER
                     ),
-                    # Caption row with frame count
-                    ft.Text(spans=[
-                        ft.TextSpan(f"[{frames} frames - ", style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)),
-                        ft.TextSpan(cap_val, style=ft.TextStyle(color=cap_color, size=9)),
-                        ft.TextSpan("]", style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)),
-                    ], size=9),
-                    # Size row
-                    ft.Text(f"{width}x{height} - {fps}fps", size=9, color=ft.Colors.BLUE_GREY_600),
+                    # Caption/Info row - different format for images vs videos
+                    caption_status_text,
+                    # Size row - for images just resolution, for videos resolution + fps
+                    ft.Text(
+                        f"{width}x{height}" if dataset_type == "image" else f"{width}x{height} - {fps}fps",
+                        size=9,
+                        color=ft.Colors.BLUE_GREY_600,
+                    ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 tight=True,
@@ -197,4 +219,86 @@ def create_thumbnail_container(
     # Assign on_change to checkbox
     checkbox.on_change = _on_checkbox_change
 
+    # Store reference to caption status text for later updates
+    thumbnail_container.caption_status_ref = caption_status_text
+    thumbnail_container.video_name = video_name
+
     return thumbnail_container
+
+
+def update_thumbnail_caption_status(thumbnails_grid: ft.GridView, dataset_folder_path: str, dataset_type: str = "video"):
+    """
+    Update only the caption status indicator on existing thumbnails without regenerating them.
+    This is much faster than a full thumbnail refresh.
+
+    Args:
+        thumbnails_grid: The GridView containing thumbnail containers
+        dataset_folder_path: Path to the dataset folder
+        dataset_type: "video" or "image"
+    """
+    if not thumbnails_grid or not thumbnails_grid.controls:
+        return
+
+    # Import here to avoid circular import
+    from flet_app.ui.dataset_manager.dataset_utils import get_videos_and_thumbnails
+
+    # Get updated caption status
+    video_files, thumbnails_dict, _ = get_videos_and_thumbnails(dataset_folder_path, dataset_type)
+
+    # Create a set of files that have captions for quick lookup
+    captioned_files = set()
+    for video_file in video_files:
+        video_name = os.path.basename(video_file)
+        # Check for caption file (.txt for individual captions)
+        base_name = os.path.splitext(video_name)[0]
+        caption_path = os.path.join(dataset_folder_path, f"{base_name}.txt")
+        if os.path.exists(caption_path):
+            captioned_files.add(video_name)
+
+    # Update only the caption status on existing thumbnails
+    for control in thumbnails_grid.controls:
+        if hasattr(control, 'caption_status_ref') and hasattr(control, 'video_name'):
+            video_name = control.video_name
+            caption_text = control.caption_status_ref
+
+            # Determine new caption status
+            has_caption = video_name in captioned_files
+            cap_val, cap_color = ("yes", ft.Colors.GREEN) if has_caption else ("no", ft.Colors.RED)
+
+            # Get video info for frame count (only for videos)
+            video_info = {}
+            if dataset_type == "video":
+                info_path = os.path.join(dataset_folder_path, "info.json")
+                if os.path.exists(info_path):
+                    try:
+                        import json
+                        with open(info_path, "r") as f:
+                            video_info = json.load(f)
+                    except Exception:
+                        pass
+                info = video_info.get(video_name, {})
+                frames = info.get("frames", "?")
+            else:
+                frames = None
+
+            # Update the caption status text
+            if dataset_type == "image":
+                prefix = "[captioned: "
+            else:
+                prefix = f"[{frames} frames - "
+
+            caption_text.spans = [
+                ft.TextSpan(
+                    prefix,
+                    style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)
+                ),
+                ft.TextSpan(
+                    cap_val,
+                    style=ft.TextStyle(color=cap_color, size=9)
+                ),
+                ft.TextSpan(
+                    "]",
+                    style=ft.TextStyle(color=ft.Colors.GREY_500, size=9)
+                ),
+            ]
+            caption_text.update()

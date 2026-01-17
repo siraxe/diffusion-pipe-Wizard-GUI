@@ -12,10 +12,6 @@ models/
 !flet_app/modules/qwen_plus_patch/models/
 dp_env/
 flet_app/settings.json
-LTX/
-longcat/
-ai-toolkit/
-vid_test/
 flet-video/
 
 # Python cache and compiled files
@@ -72,7 +68,8 @@ desktop.ini
 
 # assets and temporary files
 workspace/*
-!workspace/**/*_here.txt
+workspace/datasets/*
+!workspace/datasets/.gitkeep
 temp/
 tmp/
 *.tmp
@@ -93,4 +90,6 @@ logs/
 opencode.json
 /assets/output
 flet_app/ui/utils/recent_files.txt
-diffusion-pipe_new/
+1.png
+/diffusion-trainers
+*.png

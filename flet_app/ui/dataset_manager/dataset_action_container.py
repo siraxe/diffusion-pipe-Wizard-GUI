@@ -44,7 +44,7 @@ class DatasetActionContainer:
             right=20,  # 20px offset from the right
             padding=ft.padding.all(5),
             visible=False,  # Initially hidden
-            bgcolor=ft.Colors.with_opacity(0.9, ft.Colors.SURFACE),
+            bgcolor=ft.Colors.(ft.Colors.SURFACE),
             border_radius=8,
             border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE)),
         )
@@ -111,18 +111,17 @@ class DatasetActionContainer:
                     from . import dataset_layout_tab
                     dataset_layout_tab.last_clicked_thumbnail_index = -1
 
-                    # Refresh thumbnails
+                    # Hide the container after operation
+                    self.container.visible = False
+                    self.container.update()
+
+                    # Refresh thumbnails (do this AFTER hiding container to avoid UI conflicts)
                     if self.thumbnails_grid_ref and self.thumbnails_grid_ref.current:
                         from . import dataset_layout_tab
                         e.page.run_task(dataset_layout_tab.update_thumbnails,
                                        page_ctx=e.page,
                                        grid_control=self.thumbnails_grid_ref.current,
                                        force_refresh=True)
-
-                    # Hide the container after operation
-                    self.container.visible = False
-                    self.container.update()
-                    e.page.update()
         except Exception as ex:
             print(f"Error in duplicate click: {ex}")
             if e.page:
@@ -181,18 +180,17 @@ class DatasetActionContainer:
                     from . import dataset_layout_tab
                     dataset_layout_tab.last_clicked_thumbnail_index = -1
 
-                    # Refresh thumbnails
+                    # Hide the container after operation
+                    self.container.visible = False
+                    self.container.update()
+
+                    # Refresh thumbnails (do this AFTER hiding container to avoid UI conflicts)
                     if self.thumbnails_grid_ref and self.thumbnails_grid_ref.current:
                         from . import dataset_layout_tab
                         e.page.run_task(dataset_layout_tab.update_thumbnails,
                                        page_ctx=e.page,
                                        grid_control=self.thumbnails_grid_ref.current,
                                        force_refresh=True)
-
-                    # Hide the container after operation
-                    self.container.visible = False
-                    self.container.update()
-                    e.page.update()
         except Exception as ex:
             print(f"Error in delete click: {ex}")
             if e.page:

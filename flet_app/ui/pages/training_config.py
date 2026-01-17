@@ -2,9 +2,12 @@ import flet as ft
 from contextlib import contextmanager
 # import yaml # Removed as hardcoded config data is reduced
 from .._styles import create_textfield, create_dropdown, add_section_title # Import helper functions
-from .training_dataset_block import get_training_dataset_page_content
+from .training_dataset_block import get_compact_dataset_block
 from flet_app.ui.utils.utils_top_menu import TopBarUtils
 from flet_app.settings import settings
+from . import model_field_config as mfc
+from . import optimizer_field_config as ofc
+from .training_ltx2 import get_ltx2_training_settings
 
 # Global references to access from outside the function
 model_type_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -13,7 +16,6 @@ max_t_field_ref = ft.Ref[ft.TextField]()
 max_seq_len_field_ref = ft.Ref[ft.TextField]()
 flux_shift_checkbox_ref = ft.Ref[ft.Checkbox]()
 bypass_g_emb_checkbox_ref = ft.Ref[ft.Checkbox]()
-ffc_p_field_ref = ft.Ref[ft.TextField]()
 lumina_shift_checkbox_ref = ft.Ref[ft.Checkbox]()
 v_pred_checkbox_ref = ft.Ref[ft.Checkbox]()
 d_est_loss_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -21,7 +23,15 @@ min_snr_gamma_field_ref = ft.Ref[ft.TextField]()
 unet_lr_field_ref = ft.Ref[ft.TextField]()
 te1_lr_field_ref = ft.Ref[ft.TextField]()
 te2_lr_field_ref = ft.Ref[ft.TextField]()
-checkpoint_path_field_ref = ft.Ref[ft.TextField]()
+model_path_field_ref = ft.Ref[ft.TextField]()
+rank_field_ref = ft.Ref[ft.TextField]()
+alpha_field_ref = ft.Ref[ft.TextField]()
+dropout_field_ref = ft.Ref[ft.TextField]()
+first_frame_conditioning_p_ltx2_field_ref = ft.Ref[ft.TextField]()
+a_rank_field_ref = ft.Ref[ft.TextField]()
+a_dtype_field_ref = ft.Ref[ft.TextField]()
+blocks_swap_field_ref = ft.Ref[ft.TextField]()
+disable_bsfe_field_ref = ft.Ref[ft.TextField]()
 diffusers_path_field_ref = ft.Ref[ft.TextField]()
 transformer_path_field_ref = ft.Ref[ft.TextField]()
 transformer_path_full_ref = ft.Ref[ft.TextField]()
@@ -38,18 +48,46 @@ hidream_4bit_checkbox_ref = ft.Ref[ft.Checkbox]()
 hidream_tdtype_checkbox_ref = ft.Ref[ft.Checkbox]()
 byt5_path_field_ref = ft.Ref[ft.TextField]()
 single_file_path_field_ref = ft.Ref[ft.TextField]()
+first_frame_conditioning_p_field_ref = ft.Ref[ft.TextField]()
 t5_path_field_ref = ft.Ref[ft.TextField]()
+ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+separate_audio_buckets_checkbox_ref = ft.Ref[ft.Checkbox]()
+gradient_checkpointing_checkbox_ref = ft.Ref[ft.Checkbox]()
+slider_checkbox_ref = ft.Ref[ft.Checkbox]()
+use_mask_checkbox_ref = ft.Ref[ft.Checkbox]()
 checkpoint_row_ref = ft.Ref[ft.ResponsiveRow]()
 ckpt_path_row_ref = ft.Ref[ft.ResponsiveRow]()
 diffusers_row_ref = ft.Ref[ft.ResponsiveRow]()
 single_file_row_ref = ft.Ref[ft.ResponsiveRow]()
+first_frame_conditioning_p_row_ref = ft.Ref[ft.ResponsiveRow]()
 transformer_full_row_ref = ft.Ref[ft.ResponsiveRow]()
 byt5_row_ref = ft.Ref[ft.ResponsiveRow]()
 t5_row_ref = ft.Ref[ft.ResponsiveRow]()
 llama3_row_ref = ft.Ref[ft.ResponsiveRow]()
 clip_row_ref = ft.Ref[ft.ResponsiveRow]()
+text_encoder_row_ref = ft.Ref[ft.ResponsiveRow]()
+dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
 timestep_sm_dropdown_ref = ft.Ref[ft.Dropdown]()
 transformer_dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
+# LTX2-specific precision fields
+mixed_precision_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+fp8_base_checkbox_ref = ft.Ref[ft.Checkbox]()
+fp8_scaled_checkbox_ref = ft.Ref[ft.Checkbox]()
+load_text_encoder_in_8bit_checkbox_ref = ft.Ref[ft.Checkbox]()
+attn_chunking_checkbox_ref = ft.Ref[ft.Checkbox]()
+# Preservation & regularization fields
+blank_preservation_checkbox_ref = ft.Ref[ft.Checkbox]()
+blank_preservation_args_field_ref = ft.Ref[ft.TextField]()
+dop_checkbox_ref = ft.Ref[ft.Checkbox]()
+dop_args_field_ref = ft.Ref[ft.TextField]()
+prior_divergence_checkbox_ref = ft.Ref[ft.Checkbox]()
+prior_divergence_args_field_ref = ft.Ref[ft.TextField]()
+# CREPA fields
+crepa_checkbox_ref = ft.Ref[ft.Checkbox]()
+crepa_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+crepa_args_field_ref = ft.Ref[ft.TextField]()
+sample_slider_range_field_ref = ft.Ref[ft.TextField]()
+adapter_dropdown_ref = ft.Ref[ft.Dropdown]()
 # z_image specific fields
 z_image_diffusion_model_field_ref = ft.Ref[ft.TextField]()
 z_image_vae_field_ref = ft.Ref[ft.TextField]()
@@ -64,7 +102,79 @@ flux2_text_encoders_field_ref = ft.Ref[ft.TextField]()
 flux2_shift_field_ref = ft.Ref[ft.TextField]()
 flux2_row_ref = ft.Ref[ft.ResponsiveRow]()
 
+# Optimizer fields
+optimizer_type_dropdown_ref = ft.Ref[ft.Dropdown]()
+lr_field_ref = ft.Ref[ft.TextField]()
+betas_field_ref = ft.Ref[ft.TextField]()
+weight_decay_field_ref = ft.Ref[ft.TextField]()
+eps_field_ref = ft.Ref[ft.TextField]()
+beta3_field_ref = ft.Ref[ft.TextField]()
+d0_field_ref = ft.Ref[ft.TextField]()
+d_coef_field_ref = ft.Ref[ft.TextField]()
+schedulefree_c_field_ref = ft.Ref[ft.TextField]()
+prodigy_row_ref = ft.Ref[ft.ResponsiveRow]()
+# Automagic optimizer fields
+min_lr_field_ref = ft.Ref[ft.TextField]()
+max_lr_field_ref = ft.Ref[ft.TextField]()
+lr_bump_field_ref = ft.Ref[ft.TextField]()
+clip_threshold_field_ref = ft.Ref[ft.TextField]()
+do_paramiter_swapping_field_ref = ft.Ref[ft.Checkbox]()
+paramiter_swapping_factor_field_ref = ft.Ref[ft.TextField]()
+automagic_row_ref = ft.Ref[ft.ResponsiveRow]()
+
+# Section visibility refs for conditional UI
+standard_training_section_ref = ft.Ref[ft.ResponsiveRow]()
+standard_eval_optimizer_section_ref = ft.Ref[ft.ResponsiveRow]()
+ltx2_custom_section_ref = ft.Ref[ft.Container]()
+
 _suppress_model_defaults = False
+
+def _convert_bool_value(value):
+    """Convert various boolean representations to actual bool."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    sval = str(value).strip().lower()
+    return sval in ['1', 'true', 'yes', 'on']
+
+def _update_field_refs_visibility(field_ref_mapping, is_visible, field_values=None):
+    """
+    Generic helper to update multiple field refs' visibility and optionally their values.
+
+    Args:
+        field_ref_mapping: Dict mapping field names to Ref objects
+        is_visible: Boolean indicating if fields should be visible
+        field_values: Optional dict mapping field names to values to set
+    """
+    if field_values is None:
+        field_values = {}
+
+    page_obj = None
+    try:
+        for field_name, ref in field_ref_mapping.items():
+            if ref and ref.current:
+                ref.current.visible = is_visible
+                # Set value if provided and field supports it
+                if field_name in field_values and field_values[field_name] is not None:
+                    value = field_values[field_name]
+                    # Handle checkboxes (boolean values)
+                    if isinstance(ref.current, ft.Checkbox):
+                        ref.current.value = _convert_bool_value(value)
+                    else:
+                        ref.current.value = value
+                # Keep track of last valid page for batch update
+                if ref.current.page:
+                    page_obj = ref.current.page
+    except Exception:
+        pass
+
+    # Update page once at the end
+    if page_obj:
+        try:
+            page_obj.update()
+        except Exception:
+            pass
 
 @contextmanager
 def suppress_model_defaults():
@@ -77,682 +187,486 @@ def suppress_model_defaults():
     finally:
         _suppress_model_defaults = prev
 
+def _should_show_field(field_name, model_name=None):
+    """Determine if a field should be visible for a given model.
+
+    Uses model_field_config.py as the single source of truth.
+    Falls back to settings.train_def_model if model_name not provided.
+    """
+    if model_name is None:
+        model_name = settings.train_def_model
+    return mfc.get_field_visibility(model_name, field_name)
+
+
+def _on_slider_change(e):
+    """Handle slider checkbox change - show/hide sample_slider_range field."""
+    sync_dependent_field_visibility()
+
+
+def sync_dependent_field_visibility():
+    """
+    Centralized function to sync visibility of all dependent fields based on their checkbox states.
+    Called from: on_change handlers, model type changes, and after TOML loading.
+    """
+    # Handle sample_slider_range visibility (depends on slider checkbox + model type)
+    try:
+        slider_checked = slider_checkbox_ref.current.value if slider_checkbox_ref and slider_checkbox_ref.current else False
+        if sample_slider_range_field_ref and sample_slider_range_field_ref.current:
+            # Get the currently selected model from the dropdown
+            current_model = None
+            if model_type_dropdown_ref and model_type_dropdown_ref.current:
+                current_model = model_type_dropdown_ref.current.value
+            # Only show sample_slider_range if slider is checked AND it's visible for this model
+            is_visible_for_model = _should_show_field("sample_slider_range", current_model)
+            sample_slider_range_field_ref.current.visible = is_visible_for_model and slider_checked
+            if sample_slider_range_field_ref.current.page:
+                sample_slider_range_field_ref.current.update()
+    except Exception:
+        pass
+
+    # Handle preservation & regularization args field visibility
+    try:
+        # blank_preservation_args
+        blank_preservation_checked = blank_preservation_checkbox_ref.current.value if blank_preservation_checkbox_ref and blank_preservation_checkbox_ref.current else False
+        if blank_preservation_args_field_ref and blank_preservation_args_field_ref.current:
+            blank_preservation_args_field_ref.current.visible = blank_preservation_checked
+            if blank_preservation_args_field_ref.current.page:
+                blank_preservation_args_field_ref.current.update()
+
+        # dop_args
+        dop_checked = dop_checkbox_ref.current.value if dop_checkbox_ref and dop_checkbox_ref.current else False
+        if dop_args_field_ref and dop_args_field_ref.current:
+            dop_args_field_ref.current.visible = dop_checked
+            if dop_args_field_ref.current.page:
+                dop_args_field_ref.current.update()
+
+        # prior_divergence_args
+        prior_divergence_checked = prior_divergence_checkbox_ref.current.value if prior_divergence_checkbox_ref and prior_divergence_checkbox_ref.current else False
+        if prior_divergence_args_field_ref and prior_divergence_args_field_ref.current:
+            prior_divergence_args_field_ref.current.visible = prior_divergence_checked
+            if prior_divergence_args_field_ref.current.page:
+                prior_divergence_args_field_ref.current.update()
+
+        # CREPA mode and args
+        crepa_checked = crepa_checkbox_ref.current.value if crepa_checkbox_ref and crepa_checkbox_ref.current else False
+        if crepa_mode_dropdown_ref and crepa_mode_dropdown_ref.current:
+            crepa_mode_dropdown_ref.current.visible = crepa_checked
+            if crepa_mode_dropdown_ref.current.page:
+                crepa_mode_dropdown_ref.current.update()
+        if crepa_args_field_ref and crepa_args_field_ref.current:
+            crepa_args_field_ref.current.visible = crepa_checked
+            if crepa_args_field_ref.current.page:
+                crepa_args_field_ref.current.update()
+    except Exception:
+        pass
+
+
 def get_training_config_page_content():
     """Generates Flet controls with hardcoded configuration values, grouped by section."""
+
+    def _safe_set_value(ref, value):
+        """Helper to safely set a Ref's value with minimal try/except clutter."""
+        if ref and ref.current and value is not None:
+            try:
+                ref.current.value = value
+                if ref.current.page:
+                    ref.current.update()
+            except Exception:
+                pass
+
+    def _apply_field_visibility(sel_norm):
+        """Apply visibility rules from model config to all field refs based on selected model."""
+        # Get complete field visibility for this model (includes defaults for missing fields)
+        show_fields = mfc.get_complete_field_visibility(sel_norm)
+
+        # Map all field names to their field refs
+        field_mapping = {
+            # Path fields
+            "model_path": model_path_field_ref,
+            "diffusers_path": diffusers_path_field_ref,
+            "transformer_path": transformer_path_field_ref,
+            "transformer_path_full": transformer_path_full_ref,
+            "text_encoder_path": text_encoder_path_field_ref,
+            "vae_path": vae_path_field_ref,
+            "llm_path": llm_path_field_ref,
+            "ckpt_path_wan22": ckpt_path_wan22_field_ref,
+            "clip_path": clip_path_field_ref,
+            "llama3_path": llama3_path_field_ref,
+            "byt5_path": byt5_path_field_ref,
+            "t5_path": t5_path_field_ref,
+            "single_file_path": single_file_path_field_ref,
+            "first_frame_conditioning_p": first_frame_conditioning_p_field_ref,
+            # Special fields
+            "min_t": min_t_field_ref,
+            "max_t": max_t_field_ref,
+            "max_seq_len": max_seq_len_field_ref,
+            "flux_shift": flux_shift_checkbox_ref,
+            "bypass_g_emb": bypass_g_emb_checkbox_ref,
+            "lumina_shift": lumina_shift_checkbox_ref,
+            "float8_e5m2": float8_e5m2_checkbox_ref,
+            "longcat_float8": longcat_float8_checkbox_ref,
+            "max_llama3_seq_len": max_llama3_seq_len_field_ref,
+            "hidream_4bit": hidream_4bit_checkbox_ref,
+            "hidream_tdtype": hidream_tdtype_checkbox_ref,
+            # SDXL-specific fields
+            "v_pred": v_pred_checkbox_ref,
+            "d_est_loss": d_est_loss_checkbox_ref,
+            "min_snr_gamma": min_snr_gamma_field_ref,
+            "unet_lr": unet_lr_field_ref,
+            "te1_lr": te1_lr_field_ref,
+            "te2_lr": te2_lr_field_ref,
+            # LTX2-specific mode dropdown
+            "ltx_mode": ltx_mode_dropdown_ref,
+            "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
+            "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
+            "slider": slider_checkbox_ref,
+            "use_mask": use_mask_checkbox_ref,
+            "sample_slider_range": sample_slider_range_field_ref,
+            # LTX2-specific adapter fields
+            "rank": rank_field_ref,
+            "alpha": alpha_field_ref,
+            "dropout": dropout_field_ref,
+            "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
+            # dtype, transformer_dtype, timestep_sm
+            "dtype": dtype_dropdown_ref,
+            "transformer_dtype": transformer_dtype_dropdown_ref,
+            "timestep_sm": timestep_sm_dropdown_ref,
+            # LTX2-specific precision fields
+            "mixed_precision_mode": mixed_precision_mode_dropdown_ref,
+            "fp8_base": fp8_base_checkbox_ref,
+            "fp8_scaled": fp8_scaled_checkbox_ref,
+            "load_text_encoder_in_8bit": load_text_encoder_in_8bit_checkbox_ref,
+            "attn_chunking": attn_chunking_checkbox_ref,
+            # Preservation & regularization
+            "blank_preservation": blank_preservation_checkbox_ref,
+            "dop": dop_checkbox_ref,
+            "prior_divergence": prior_divergence_checkbox_ref,
+            # CREPA
+            "crepa": crepa_checkbox_ref,
+            "crepa_mode": crepa_mode_dropdown_ref,
+            "crepa_args": crepa_args_field_ref,
+            # Flux2-specific fields
+            "flux2_vae": flux2_vae_field_ref,
+            "flux2_text_encoders": flux2_text_encoders_field_ref,
+            "flux2_shift": flux2_shift_field_ref,
+        }
+
+        try:
+            for field_name, is_visible in show_fields.items():
+                ref = field_mapping.get(field_name)
+                if ref and ref.current:
+                    ref.current.visible = is_visible
+        except Exception:
+            pass
+
+        return show_fields
+
+    def _apply_model_defaults(model_config):
+        """Apply default values from model config to field refs."""
+        defaults = model_config.get("defaults", {})
+
+        # Comprehensive mapping of all available field refs
+        field_mapping = {
+            # Path fields
+            "model_path": model_path_field_ref,
+            "diffusers_path": diffusers_path_field_ref,
+            "transformer_path": transformer_path_field_ref,
+            "transformer_path_full": transformer_path_full_ref,
+            "text_encoder_path": text_encoder_path_field_ref,
+            "vae_path": vae_path_field_ref,
+            "llm_path": llm_path_field_ref,
+            "ckpt_path_wan22": ckpt_path_wan22_field_ref,
+            "clip_path": clip_path_field_ref,
+            "llama3_path": llama3_path_field_ref,
+            "byt5_path": byt5_path_field_ref,
+            "t5_path": t5_path_field_ref,
+            "single_file_path": single_file_path_field_ref,
+            "first_frame_conditioning_p": first_frame_conditioning_p_field_ref,
+            # Text fields
+            "min_t": min_t_field_ref,
+            "max_t": max_t_field_ref,
+            "max_seq_len": max_seq_len_field_ref,
+            "min_snr_gamma": min_snr_gamma_field_ref,
+            "unet_lr": unet_lr_field_ref,
+            "te1_lr": te1_lr_field_ref,
+            "te2_lr": te2_lr_field_ref,
+            "max_llama3_seq_len": max_llama3_seq_len_field_ref,
+            # LTX2-specific fields
+            "sample_slider_range": sample_slider_range_field_ref,
+            # LTX2-specific adapter fields
+            "rank": rank_field_ref,
+            "alpha": alpha_field_ref,
+            "dropout": dropout_field_ref,
+            "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
+            # Model-specific fields
+            "z_image_diffusion_model": z_image_diffusion_model_field_ref,
+            "z_image_vae": z_image_vae_field_ref,
+            "z_image_text_encoders": z_image_text_encoders_field_ref,
+            "z_image_merge_adapters": z_image_merge_adapters_field_ref,
+            "flux2_diffusion_model": flux2_diffusion_model_field_ref,
+            "flux2_vae": flux2_vae_field_ref,
+            "flux2_text_encoders": flux2_text_encoders_field_ref,
+            "flux2_shift": flux2_shift_field_ref,
+        }
+
+        # Boolean field mapping
+        bool_field_mapping = {
+            "flux_shift": flux_shift_checkbox_ref,
+            "lumina_shift": lumina_shift_checkbox_ref,
+            "bypass_g_emb": bypass_g_emb_checkbox_ref,
+            "v_pred": v_pred_checkbox_ref,
+            "d_est_loss": d_est_loss_checkbox_ref,
+            "float8_e5m2": float8_e5m2_checkbox_ref,
+            "longcat_float8": longcat_float8_checkbox_ref,
+            "hidream_4bit": hidream_4bit_checkbox_ref,
+            "hidream_tdtype": hidream_tdtype_checkbox_ref,
+            # Z-image specific
+            "z_image_diffusion_model_dtype_fp8": z_image_diffusion_model_dtype_checkbox_ref,
+            "attn_chunking": attn_chunking_checkbox_ref,
+            # LTX2 specific
+            "slider": slider_checkbox_ref,
+            "use_mask": use_mask_checkbox_ref,
+            # Preservation & regularization args
+            "blank_preservation_args": blank_preservation_args_field_ref,
+            "dop_args": dop_args_field_ref,
+            "prior_divergence_args": prior_divergence_args_field_ref,
+            # CREPA
+            "crepa_mode": crepa_mode_dropdown_ref,
+            "crepa_args": crepa_args_field_ref,
+        }
+
+        try:
+            for field_name, value in defaults.items():
+                if field_name in field_mapping:
+                    ref = field_mapping[field_name]
+                    if ref and ref.current:
+                        # Only set default if field is empty
+                        current_val = ref.current.value
+                        is_empty = not current_val or (isinstance(current_val, str) and current_val.strip() == '')
+                        if is_empty:
+                            ref.current.value = str(value) if value is not None else ""
+                elif field_name in bool_field_mapping:
+                    ref = bool_field_mapping[field_name]
+                    if ref and ref.current:
+                        ref.current.value = _convert_bool_value(value)
+        except Exception:
+            pass
 
     def on_model_type_change(e):
         """Handle model type dropdown change to show/hide model-specific fields"""
         sel = model_type_dropdown_ref.current.value if model_type_dropdown_ref.current else None
-        is_wan22 = (str(sel).strip().lower() == "wan22")
-        is_wan = (str(sel).strip().lower() == "wan")
-        is_auraflow = (str(sel).strip().lower() == "auraflow")
-        is_chroma = (str(sel).strip().lower() == "chroma")
-        is_flux = (str(sel).strip().lower() == "flux")
-        is_flux2 = (str(sel).strip().lower() in ("flux2", "flux2_klein_4b", "flux2_klein_9b"))
-        is_sd3 = (str(sel).strip().lower() == "sd3")
-        is_ltx = (str(sel).strip().lower() in ("ltx-video", "ltx"))
-        is_lumina = (str(sel).strip().lower() in ("lumina", "lumina_2"))
-        is_z_image = (str(sel).strip().lower() == "z_image")
-        is_sdxl = (str(sel).strip().lower() == "sdxl")
-        sel_norm = str(sel).strip().lower() if sel is not None else ""
-        is_qwen_plus = (sel_norm == "qwen_image_plus")
-        is_qwen_image = (sel_norm == "qwen_image")
-        is_qwen_any = is_qwen_plus or is_qwen_image
-        is_cosmos = (sel_norm == "cosmos")
-        is_cosmos_p2 = (sel_norm == "cosmos_predict2")
-        is_omnigen2 = (sel_norm == "omnigen2")
-        is_hunyuan_video = (sel_norm == "hunyuan-video")
-        is_hunyuan_image = (sel_norm == "hunyuan_image")
-        is_hidream = (sel_norm == "hidream")
-        is_longcat = (sel_norm == "longcat")
+        if not sel:
+            return
+
+        # 1. Normalize and Prep
+        sel_norm = mfc.normalize_model_name(sel)
+        model_key = mfc.get_model_key(sel_norm)
         skip_defaults = _suppress_model_defaults
 
-        # Reset a core list of model-dependent path fields on any model switch.
-        # Presets for specific models (below) will then repopulate as needed.
-        if not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    diffusers_path_field_ref.current.value = ""
-                if transformer_path_field_ref.current:
-                    transformer_path_field_ref.current.value = ""
-                if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
-                    if transformer_path_full_ref.current:
-                        transformer_path_full_ref.current.value = ""
-                if llm_path_field_ref.current:
-                    llm_path_field_ref.current.value = ""
-                if text_encoder_path_field_ref.current:
-                    text_encoder_path_field_ref.current.value = ""
-                if vae_path_field_ref.current:
-                    vae_path_field_ref.current.value = ""
-                if ckpt_path_wan22_field_ref.current:
-                    ckpt_path_wan22_field_ref.current.value = ""
-                if clip_path_field_ref.current:
-                    clip_path_field_ref.current.value = ""
-                if llama3_path_field_ref.current:
-                    llama3_path_field_ref.current.value = ""
-                if max_llama3_seq_len_field_ref.current:
-                    max_llama3_seq_len_field_ref.current.value = ""
-                if hidream_4bit_checkbox_ref.current:
-                    hidream_4bit_checkbox_ref.current.value = True
-                if hidream_tdtype_checkbox_ref.current:
-                    hidream_tdtype_checkbox_ref.current.value = False
-                if byt5_path_field_ref.current:
-                    byt5_path_field_ref.current.value = ""
-                if single_file_path_field_ref.current:
-                    single_file_path_field_ref.current.value = ""
-                if t5_path_field_ref.current:
-                    t5_path_field_ref.current.value = ""
-                if flux2_diffusion_model_field_ref.current:
-                    flux2_diffusion_model_field_ref.current.value = ""
-                if flux2_vae_field_ref.current:
-                    flux2_vae_field_ref.current.value = ""
-                if flux2_text_encoders_field_ref.current:
-                    flux2_text_encoders_field_ref.current.value = ""
-                if flux2_shift_field_ref.current:
-                    flux2_shift_field_ref.current.value = ""
-            except Exception:
-                # Be resilient to any missing/hidden controls
-                pass
-        if min_t_field_ref.current:
-            min_t_field_ref.current.visible = is_wan22
-        if max_t_field_ref.current:
-            max_t_field_ref.current.visible = is_wan22
-        if max_seq_len_field_ref.current:
-            max_seq_len_field_ref.current.visible = is_auraflow
-        if flux_shift_checkbox_ref.current:
-            flux_shift_checkbox_ref.current.visible = (is_chroma or is_flux or is_sd3 or is_omnigen2 or is_hidream)
+        # 2. Apply Field Visibility
+        # We capture the visibility dict to determine if Rows should be hidden
+        vis_config = _apply_field_visibility(sel_norm)
 
-        # Set default timestep_sm per model selection
-        if not skip_defaults:
-            try:
-                if timestep_sm_dropdown_ref.current:
-                    models_logit = {"ltx-video", "ltx", "hunyuan-video", "wan", "wan22", "longcat", "qwen_image", "qwen_image_plus", "auraflow", "flux2", "flux2_klein_4b", "flux2_klein_9b"}
-                    if sel_norm in models_logit:
-                        timestep_sm_dropdown_ref.current.value = "logit_normal"
-                    else:
-                        timestep_sm_dropdown_ref.current.value = "None"
-                    if timestep_sm_dropdown_ref.current.page:
-                        timestep_sm_dropdown_ref.current.update()
-            except Exception:
-                pass
+        # Ensure model_path is visible for both SDXL and LTX2
+        is_ltx2 = sel_norm in ("ltx-video-2", "ltx2")
+        if sel_norm == "sdxl" or is_ltx2:
+            vis_config["model_path"] = True
+            if model_path_field_ref and model_path_field_ref.current:
+                model_path_field_ref.current.visible = True
 
-        # Set default transformer_dtype per model selection
-        if not skip_defaults:
-            try:
-                if transformer_dtype_dropdown_ref.current:
-                    models_none = {"sdxl", "lumina_2", "omnigen2", "z_image"}
-                    if sel_norm in models_none:
-                        transformer_dtype_dropdown_ref.current.value = "None"
-                    else:
-                        transformer_dtype_dropdown_ref.current.value = "float8"
-                    if transformer_dtype_dropdown_ref.current.page:
-                        transformer_dtype_dropdown_ref.current.update()
-            except Exception:
-                pass
-        if bypass_g_emb_checkbox_ref.current:
-            bypass_g_emb_checkbox_ref.current.visible = is_flux
-        if ffc_p_field_ref.current:
-            ffc_p_field_ref.current.visible = is_ltx
-        if single_file_path_field_ref.current:
-            single_file_path_field_ref.current.visible = is_ltx
-        if lumina_shift_checkbox_ref.current:
-            lumina_shift_checkbox_ref.current.visible = is_lumina
-        if float8_e5m2_checkbox_ref.current:
-            float8_e5m2_checkbox_ref.current.visible = is_cosmos_p2
-        if longcat_float8_checkbox_ref.current:
-            longcat_float8_checkbox_ref.current.visible = is_longcat
-        if llama3_path_field_ref.current:
-            llama3_path_field_ref.current.visible = is_hidream
-        if max_llama3_seq_len_field_ref.current:
-            max_llama3_seq_len_field_ref.current.visible = is_hidream
-        if hidream_4bit_checkbox_ref.current:
-            hidream_4bit_checkbox_ref.current.visible = is_hidream
-        if hidream_tdtype_checkbox_ref.current:
-            hidream_tdtype_checkbox_ref.current.visible = is_hidream
-        if byt5_path_field_ref.current:
-            byt5_path_field_ref.current.visible = (sel_norm == 'hunyuan_image')
-        if t5_path_field_ref.current:
-            t5_path_field_ref.current.visible = is_cosmos_p2
-        # SDXL-specific controls
-        if v_pred_checkbox_ref.current:
-            v_pred_checkbox_ref.current.visible = is_sdxl
-        if d_est_loss_checkbox_ref.current:
-            d_est_loss_checkbox_ref.current.visible = is_sdxl
-        if min_snr_gamma_field_ref.current:
-            min_snr_gamma_field_ref.current.visible = is_sdxl
-        if unet_lr_field_ref.current:
-            unet_lr_field_ref.current.visible = is_sdxl
-        if te1_lr_field_ref.current:
-            te1_lr_field_ref.current.visible = is_sdxl
-        if te2_lr_field_ref.current:
-            te2_lr_field_ref.current.visible = is_sdxl
-        if checkpoint_path_field_ref.current:
-            checkpoint_path_field_ref.current.visible = is_sdxl
-            if is_sdxl and not skip_defaults:
-                try:
-                    if not checkpoint_path_field_ref.current.value or checkpoint_path_field_ref.current.value.strip() == '':
-                        checkpoint_path_field_ref.current.value = 'models/sdxl/sd_xl_base_1.0_0.9vae.safetensors'
-                except Exception:
-                    pass
-        # Keep rows collapsed by updating their containers as well
+        # 3. Dynamic Row Visibility
+        # Map Rows to the "Main Field" they contain. If the field is visible, the row is visible.
+        row_triggers = {
+            checkpoint_row_ref: "model_path",
+            ckpt_path_row_ref: "ckpt_path_wan22",
+            diffusers_row_ref: "diffusers_path",
+            single_file_row_ref: "single_file_path",
+            first_frame_conditioning_p_row_ref: "first_frame_conditioning_p",
+            transformer_full_row_ref: "transformer_path_full",
+            byt5_row_ref: "byt5_path",
+            t5_row_ref: "t5_path",
+            llama3_row_ref: "llama3_path",
+            clip_row_ref: "clip_path",
+            text_encoder_row_ref: "text_encoder_path",
+            flux2_row_ref: "flux2_diffusion_model",
+            z_image_row_ref: "z_image_diffusion_model",
+        }
+
         try:
-            if checkpoint_row_ref.current:
-                checkpoint_row_ref.current.visible = is_sdxl
-            if ckpt_path_row_ref.current:
-                ckpt_path_row_ref.current.visible = (is_wan22 or is_hunyuan_video or is_wan or is_longcat)
-            if diffusers_row_ref.current:
-                diffusers_row_ref.current.visible = (
-                    (not is_sdxl)
-                    and (not is_wan22)
-                    and (not is_wan)
-                    and (not is_longcat)
-                    and (not is_auraflow)
-                    and (not is_cosmos)
-                    and (not is_cosmos_p2)
-                    and (not is_hunyuan_video)
-                    and (not is_lumina)
-                    and (not is_z_image)
-                    and (not is_flux2)
-                )
-            if single_file_row_ref.current:
-                single_file_row_ref.current.visible = is_ltx
-            if transformer_full_row_ref.current:
-                transformer_full_row_ref.current.visible = is_chroma
-            if byt5_row_ref.current:
-                byt5_row_ref.current.visible = (sel_norm == 'hunyuan_image')
-            if t5_row_ref.current:
-                t5_row_ref.current.visible = is_cosmos_p2
-            if llama3_row_ref.current:
-                llama3_row_ref.current.visible = is_hidream
-            if clip_row_ref.current:
-                clip_row_ref.current.visible = is_hunyuan_video
-            if z_image_row_ref.current:
-                z_image_row_ref.current.visible = is_z_image
-            if flux2_row_ref.current:
-                flux2_row_ref.current.visible = is_flux2
+            for row_ref, trigger_field in row_triggers.items():
+                if row_ref and row_ref.current:
+                    # Default to False if the field isn't in config
+                    should_show = vis_config.get(trigger_field, False)
+                    row_ref.current.visible = should_show
+                    if row_ref.current.page:
+                        row_ref.current.update()
         except Exception:
             pass
-        # Ensure all model-specific toggles are hidden for Cosmos
-        if sel_norm == "cosmos":
-            try:
-                if flux_shift_checkbox_ref.current:
-                    flux_shift_checkbox_ref.current.visible = False
-                if bypass_g_emb_checkbox_ref.current:
-                    bypass_g_emb_checkbox_ref.current.visible = False
-                if ffc_p_field_ref.current:
-                    ffc_p_field_ref.current.visible = False
-                if lumina_shift_checkbox_ref.current:
-                    lumina_shift_checkbox_ref.current.visible = False
-                if v_pred_checkbox_ref.current:
-                    v_pred_checkbox_ref.current.visible = False
-                if d_est_loss_checkbox_ref.current:
-                    d_est_loss_checkbox_ref.current.visible = False
-                if min_snr_gamma_field_ref.current:
-                    min_snr_gamma_field_ref.current.visible = False
-                if unet_lr_field_ref.current:
-                    unet_lr_field_ref.current.visible = False
-                if te1_lr_field_ref.current:
-                    te1_lr_field_ref.current.visible = False
-                if te2_lr_field_ref.current:
-                    te2_lr_field_ref.current.visible = False
-                if checkpoint_path_field_ref.current:
-                    checkpoint_path_field_ref.current.visible = False
-                if max_seq_len_field_ref.current:
-                    max_seq_len_field_ref.current.visible = False
-            except Exception:
-                pass
-        # wan22-specific ckpt_path
-        if ckpt_path_wan22_field_ref.current:
-            ckpt_path_wan22_field_ref.current.visible = is_wan22 or is_hunyuan_video or is_wan or is_longcat
-        if clip_path_field_ref.current:
-            clip_path_field_ref.current.visible = is_hunyuan_video
-        # Hide base path fields for SDXL
-        if diffusers_path_field_ref.current:
-            diffusers_path_field_ref.current.visible = (
-                (not is_sdxl)
-                and (not is_wan22)
-                and (not is_wan)
-                and (not is_longcat)
-                and (not is_auraflow)
-                and (not is_cosmos)
-                and (not is_cosmos_p2)
-                and (not is_hunyuan_video)
-                and (not is_hunyuan_image)
-                and (not is_lumina)
-                and (not is_z_image)
-                and (not is_flux2)
-            )
-        if transformer_path_field_ref.current:
-            # Show standard transformer path for most models (Qwen included), hide for Chroma/SDXL/z_image/flux2
-            transformer_path_field_ref.current.visible = (not is_sdxl) and (not is_chroma) and (not is_omnigen2) and (not is_hidream) and (not is_ltx) and (not is_sd3) and (not is_z_image) and (not is_flux2)
-        if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
-            try:
-                if transformer_path_full_ref.current:
-                    # Only Chroma uses the full transformer single-file path UI
-                    transformer_path_full_ref.current.visible = is_chroma
-            except Exception:
-                pass
-        if llm_path_field_ref.current:
-            llm_path_field_ref.current.visible = (
-                (not is_sdxl)
-                and (not is_auraflow)
-                and (not is_chroma)
-                and (not is_qwen_any)
-                and (not is_cosmos)
-                and (not is_cosmos_p2)
-                and (not is_omnigen2)
-                and (not is_flux)
-                and (not is_flux2)
-                and (not is_hidream)
-                and (not is_hunyuan_image)
-                and (not is_ltx)
-                and (not is_sd3)
-                and (not is_z_image)
-            )
-        if text_encoder_path_field_ref.current:
-            text_encoder_path_field_ref.current.visible = (
-                (not is_sdxl)
-                and (not is_wan22)
-                and (not is_wan)
-                and (not is_longcat)
-                and (not is_chroma)
-                and (not is_qwen_plus)
-                and (not is_omnigen2)
-                and (not is_flux)
-                and (not is_flux2)
-                and (not is_hunyuan_video)
-                and (not is_hidream)
-                and (not is_lumina)
-                and (not is_ltx)
-                and (not is_cosmos_p2)
-                and (not is_sd3)
-                and (not is_z_image)
-            )
-        if vae_path_field_ref.current:
-            vae_path_field_ref.current.visible = (
-                (not is_sdxl)
-                and (not is_wan22)
-                and (not is_wan)
-                and (not is_longcat)
-                and (not is_chroma)
-                and (not is_qwen_plus)
-                and (not is_omnigen2)
-                and (not is_flux)
-                and (not is_flux2)
-                and (not is_hidream)
-                and (not is_ltx)
-                and (not is_sd3)
-                and (not is_z_image)
-            )
-        if is_auraflow and not skip_defaults:
-            try:
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/auraflow/pony-v7-base.safetensors'
-                if text_encoder_path_field_ref.current:
-                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
-                        text_encoder_path_field_ref.current.value = 'models/auraflow/umt5_auraflow.fp16.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/auraflow/sdxl_vae.safetensors'
-            except Exception:
-                pass
 
-        # Set wan22 defaults when selected
-        if is_wan22 and not skip_defaults:
-            try:
-                if ckpt_path_wan22_field_ref.current:
-                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
-                        ckpt_path_wan22_field_ref.current.value = 'models/Wan2.2-I2V-A14B'
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/Wan2.2-I2V-A14B/high_noise_model'
-                if llm_path_field_ref.current:
-                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
-                        llm_path_field_ref.current.value = ''
-            except Exception:
-                pass
-        # Set wan (2.1) defaults when selected
-        if is_wan and not skip_defaults:
-            try:
-                if ckpt_path_wan22_field_ref.current:
-                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
-                        ckpt_path_wan22_field_ref.current.value = 'models/Wan2.1-T2V-1.3B'
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/wan/wan2.1_t2v_1.3B_bf16.safetensors'
-                if llm_path_field_ref.current:
-                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
-                        llm_path_field_ref.current.value = 'models/wan/wrapper/umt5-xxl-enc-bf16.safetensors'
-            except Exception:
-                pass
-        # Set chroma defaults when selected
-        if is_chroma and not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                        diffusers_path_field_ref.current.value = 'models/chroma/FLUX.1-dev'
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/chroma/Chroma1-HD.safetensors'
-                if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
-                    if transformer_path_full_ref.current:
-                        if not transformer_path_full_ref.current.value or transformer_path_full_ref.current.value.strip() == '':
-                            if not transformer_path_full_ref.current.value or transformer_path_full_ref.current.value.strip() == '':
-                                transformer_path_full_ref.current.value = 'models/chroma/Chroma1-HD.safetensors'
-            except Exception:
-                pass
-        # Set LTX-Video defaults when selected
-        if is_ltx and not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                        diffusers_path_field_ref.current.value = 'models/LTX-Video'
-                if single_file_path_field_ref.current:
-                    if not single_file_path_field_ref.current.value or single_file_path_field_ref.current.value.strip() == '':
-                        single_file_path_field_ref.current.value = 'models/LTX-Video/ltx-video-2b-v0.9.1.safetensors'
-            except Exception:
-                pass
-        # Set SD3 defaults when selected
-        if is_sd3 and not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                        diffusers_path_field_ref.current.value = 'models/stable-diffusion-3.5-medium'
-                if flux_shift_checkbox_ref.current:
-                    flux_shift_checkbox_ref.current.value = True
-            except Exception:
-                pass
-        # Set lumina_2 defaults when selected
-        if sel_norm == 'lumina_2' and not skip_defaults:
-            try:
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/lumina2/lumina_2_model_bf16.safetensors'
-                if llm_path_field_ref.current:
-                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
-                        llm_path_field_ref.current.value = 'models/lumina2/gemma_2_2b_fp16.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/lumina2/flux_vae.safetensors'
-                if lumina_shift_checkbox_ref.current:
-                    lumina_shift_checkbox_ref.current.value = True
-            except Exception:
-                pass
-        # Set z_image defaults when selected
-        if sel_norm == 'z_image' and not skip_defaults:
-            try:
-                if z_image_diffusion_model_field_ref.current:
-                    if not z_image_diffusion_model_field_ref.current.value or z_image_diffusion_model_field_ref.current.value.strip() == '':
-                        z_image_diffusion_model_field_ref.current.value = 'models/z_image_turbo/split_files/diffusion_models/z_image_turbo_bf16.safetensors'
-                if z_image_vae_field_ref.current:
-                    if not z_image_vae_field_ref.current.value or z_image_vae_field_ref.current.value.strip() == '':
-                        z_image_vae_field_ref.current.value = 'models/z_image_turbo/split_files/vae/ae.safetensors'
-                if z_image_text_encoders_field_ref.current:
-                    if not z_image_text_encoders_field_ref.current.value or z_image_text_encoders_field_ref.current.value.strip() == '':
-                        z_image_text_encoders_field_ref.current.value = 'models/z_image_turbo/split_files/text_encoders/qwen_3_4b.safetensors'
-                if z_image_merge_adapters_field_ref.current:
-                    if not z_image_merge_adapters_field_ref.current.value or z_image_merge_adapters_field_ref.current.value.strip() == '':
-                        z_image_merge_adapters_field_ref.current.value = 'models/z_image_turbo/zimage_turbo_training_adapter_v2.safetensors'
-                if z_image_diffusion_model_dtype_checkbox_ref.current:
-                    z_image_diffusion_model_dtype_checkbox_ref.current.value = False
-            except Exception:
-                pass
-        # Set Qwen Image defaults when selected
-        # qwen_image and qwen_image_plus share many fields but have different defaults for
-        # diffusers_path and transformer_path per request.
-        if is_qwen_any and not skip_defaults:
-            try:
-                if is_qwen_plus:
-                    if diffusers_path_field_ref.current:
-                        if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                            diffusers_path_field_ref.current.value = 'models/Qwen-Image-Edit-2509'
-                    if transformer_path_field_ref.current:
-                        if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                            transformer_path_field_ref.current.value = ''
+        # 4. Reset Paths and Fields (Clears incompatible fields) - MUST happen BEFORE applying defaults
+        if not skip_defaults:
+            field_refs_to_reset = {
+                "diffusers_path": diffusers_path_field_ref,
+                "transformer_path": transformer_path_field_ref,
+                "transformer_path_full": transformer_path_full_ref,
+                "llm_path": llm_path_field_ref,
+                "text_encoder_path": text_encoder_path_field_ref,
+                "vae_path": vae_path_field_ref,
+                "ckpt_path_wan22": ckpt_path_wan22_field_ref,
+                "clip_path": clip_path_field_ref,
+                "llama3_path": llama3_path_field_ref,
+                "max_llama3_seq_len": max_llama3_seq_len_field_ref,
+                "byt5_path": byt5_path_field_ref,
+                "single_file_path": single_file_path_field_ref,
+                "first_frame_conditioning_p": first_frame_conditioning_p_field_ref,
+                "t5_path": t5_path_field_ref,
+                "model_path": model_path_field_ref,
+                "hidream_4bit": hidream_4bit_checkbox_ref,
+                "hidream_tdtype": hidream_tdtype_checkbox_ref,
+                # LTX2-specific adapter fields
+                "rank": rank_field_ref,
+                "alpha": alpha_field_ref,
+                "dropout": dropout_field_ref,
+                "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
+                # Flux2-specific fields
+                "flux2_diffusion_model": flux2_diffusion_model_field_ref,
+                "flux2_vae": flux2_vae_field_ref,
+                "flux2_text_encoders": flux2_text_encoders_field_ref,
+                "flux2_shift": flux2_shift_field_ref,
+                # Z_image-specific fields
+                "z_image_diffusion_model": z_image_diffusion_model_field_ref,
+                "z_image_vae": z_image_vae_field_ref,
+                "z_image_text_encoders": z_image_text_encoders_field_ref,
+                "z_image_merge_adapters": z_image_merge_adapters_field_ref,
+            }
+            mfc.reset_all_model_fields(field_refs_to_reset)
+
+        # 5. Apply Defaults (Values)
+        if model_key and mfc.MODEL_CONFIG.get(model_key) and not skip_defaults:
+            _apply_model_defaults(mfc.MODEL_CONFIG[model_key])
+
+        # 6. Apply Dropdown Defaults (Timestep / Dtype)
+        if not skip_defaults:
+            _safe_set_value(timestep_sm_dropdown_ref, mfc.get_timestep_sm_default(sel_norm))
+            _safe_set_value(transformer_dtype_dropdown_ref, mfc.get_transformer_dtype_default(sel_norm))
+
+        # 7. Handle model-specific defaults not yet in config (model-specific field overrides)
+        # Note: Most defaults are now in model_field_config.py and applied in step 5
+
+        # 8. Dynamic Row Visibility (handled earlier)
+
+        # 9. Conditional UI Swap for LTX2
+        # Toggle standard training sections
+        if standard_training_section_ref.current:
+            standard_training_section_ref.current.visible = not is_ltx2
+            if standard_training_section_ref.current.page:
+                standard_training_section_ref.current.update()
+        if standard_eval_optimizer_section_ref.current:
+            standard_eval_optimizer_section_ref.current.visible = not is_ltx2
+            if standard_eval_optimizer_section_ref.current.page:
+                standard_eval_optimizer_section_ref.current.update()
+
+        # Toggle LTX2 custom section
+        if ltx2_custom_section_ref.current:
+            ltx2_custom_section_ref.current.visible = is_ltx2
+            # Force update the ltx2 section
+            if ltx2_custom_section_ref.current.page:
+                ltx2_custom_section_ref.current.update()
+
+        # 10. Update adapter field visibility (hide old ones for LTX2, show new ones only for LTX2)
+        ltx2_adapter_fields = {
+            "rank": rank_field_ref,
+            "alpha": alpha_field_ref,
+            "dropout": dropout_field_ref,
+            "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
+        }
+        old_adapter_fields = {
+            "a_rank": a_rank_field_ref,
+            "a_dtype": a_dtype_field_ref,
+            "blocks_swap": blocks_swap_field_ref,
+            "disable_bsfe": disable_bsfe_field_ref,
+        }
+        try:
+            # Show new LTX2 fields only for LTX2
+            for field_name, ref in ltx2_adapter_fields.items():
+                if ref and ref.current:
+                    ref.current.visible = is_ltx2
+                    if ref.current.page:
+                        ref.current.update()
+            # Hide old adapter fields for LTX2
+            for field_name, ref in old_adapter_fields.items():
+                if ref and ref.current:
+                    ref.current.visible = not is_ltx2
+                    if ref.current.page:
+                        ref.current.update()
+        except Exception:
+            pass
+
+        # 11. Show/hide frame_extraction dropdowns for dataset blocks (only for LTX2)
+        try:
+            for ds_block in [dataset_1_block, dataset_2_block, dataset_3_block]:
+                if hasattr(ds_block, 'set_frame_extraction_visible'):
+                    ds_block.set_frame_extraction_visible(is_ltx2)
+        except Exception:
+            pass
+
+        # 11.5. Update adapter dropdown options based on model type
+        # For LTX2: show both "lora" and "lokr"
+        # For other models: show only "lora"
+        try:
+            if adapter_dropdown_ref and adapter_dropdown_ref.current:
+                if is_ltx2:
+                    # LTX2 supports both lora and lokr
+                    adapter_dropdown_ref.current.options = [
+                        ft.dropdown_option("lora"),
+                        ft.dropdown_option("lokr"),
+                    ]
                 else:
-                    if diffusers_path_field_ref.current:
-                        if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                            diffusers_path_field_ref.current.value = 'models/Qwen-Image'
-                    if transformer_path_field_ref.current:
-                        if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                            transformer_path_field_ref.current.value = 'models/qwen/qwen_image_bf16.safetensors'
-                if 'transformer_path_full_ref' in globals() or 'transformer_path_full_ref' in locals():
-                    if transformer_path_full_ref.current:
-                        if not transformer_path_full_ref.current.value or transformer_path_full_ref.current.value.strip() == '':
-                            transformer_path_full_ref.current.value = ''
-                if text_encoder_path_field_ref.current:
-                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
-                        text_encoder_path_field_ref.current.value = 'models/qwen/qwen_2.5_vl_7b.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/qwen/diffusion_pytorch_model.safetensors'
-            except Exception:
-                pass
-        # Set Hunyuan-Video defaults when selected
-        if is_hunyuan_video and not skip_defaults:
-            try:
-                if ckpt_path_wan22_field_ref.current:
-                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
-                        ckpt_path_wan22_field_ref.current.value = 'models/HunyuanVideo/ckpts'
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/hunyuan/hunyuan_video_720_cfgdistill_fp8_e4m3fn.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/hunyuan/hunyuan_video_vae_bf16.safetensors'
-                if llm_path_field_ref.current:
-                    if not llm_path_field_ref.current.value or llm_path_field_ref.current.value.strip() == '':
-                        llm_path_field_ref.current.value = 'models/hunyuan/llava-llama-3-8b-text-encoder-tokenizer'
-                if clip_path_field_ref.current:
-                    if not clip_path_field_ref.current.value or clip_path_field_ref.current.value.strip() == '':
-                        clip_path_field_ref.current.value = 'models/hunyuan/clip-vit-large-patch14'
-            except Exception:
-                pass
-        # Set Hunyuan Image defaults when selected
-        if is_hunyuan_image and not skip_defaults:
-            try:
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/hunyuan/hunyuanimage2.1.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/hunyuan/hunyuan_image_2.1_vae_fp16.safetensors'
-                if text_encoder_path_field_ref.current:
-                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
-                        text_encoder_path_field_ref.current.value = 'models/qwen_2.5_vl_7b.safetensors'
-                if byt5_path_field_ref.current:
-                    if not byt5_path_field_ref.current.value or byt5_path_field_ref.current.value.strip() == '':
-                        byt5_path_field_ref.current.value = 'models/byt5_small_glyphxl_fp16.safetensors'
-            except Exception:
-                pass
-        # Set Flux defaults when selected
-        if is_flux and not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                        diffusers_path_field_ref.current.value = 'models/FLUX.1-dev'
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/flux-dev-single-files/flux1-kontext-dev.safetensors'
-                if flux_shift_checkbox_ref.current:
-                    flux_shift_checkbox_ref.current.value = True
-            except Exception:
-                pass
-        # Set Flux2/Klein defaults when selected
-        if is_flux2 and not skip_defaults:
-            try:
-                if flux2_diffusion_model_field_ref.current:
-                    if not flux2_diffusion_model_field_ref.current.value or flux2_diffusion_model_field_ref.current.value.strip() == '':
-                        if sel_norm == 'flux2_klein_4b':
-                            flux2_diffusion_model_field_ref.current.value = 'models/FLUX.2-klein-4B/flux-2-klein-base-4b.safetensors'
-                        elif sel_norm == 'flux2_klein_9b':
-                            flux2_diffusion_model_field_ref.current.value = 'models/FLUX.2-klein-9B/flux-2-klein-base-9b.safetensors'
-                        else:  # flux2
-                            flux2_diffusion_model_field_ref.current.value = 'models/FLUX.2-dev/flux2-dev.safetensors'
-                if flux2_vae_field_ref.current:
-                    if not flux2_vae_field_ref.current.value or flux2_vae_field_ref.current.value.strip() == '':
-                        flux2_vae_field_ref.current.value = 'models/vae/flux2-vae.safetensors'
-                if flux2_text_encoders_field_ref.current:
-                    if not flux2_text_encoders_field_ref.current.value or flux2_text_encoders_field_ref.current.value.strip() == '':
-                        if sel_norm == 'flux2_klein_4b':
-                            flux2_text_encoders_field_ref.current.value = "models/text_encoders/qwen_3_4b.safetensors"
-                        elif sel_norm == 'flux2_klein_9b':
-                            flux2_text_encoders_field_ref.current.value = "models/text_encoders/qwen_3_8b.safetensors"
-                        else:  # flux2
-                            flux2_text_encoders_field_ref.current.value = "models/text_encoders/mistral_3_small_flux2_fp8.safetensors"
-                if flux2_shift_field_ref.current:
-                    if not flux2_shift_field_ref.current.value or flux2_shift_field_ref.current.value.strip() == '':
-                        flux2_shift_field_ref.current.value = '3'
-            except Exception:
-                pass
-        # Set HiDream defaults when selected
-        if is_hidream and not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                        diffusers_path_field_ref.current.value = 'models/HiDream-I1-Full'
-                if llama3_path_field_ref.current:
-                    if not llama3_path_field_ref.current.value or llama3_path_field_ref.current.value.strip() == '':
-                        llama3_path_field_ref.current.value = 'models/Meta-Llama-3.1-8B-Instruct'
-                if max_llama3_seq_len_field_ref.current:
-                    if not max_llama3_seq_len_field_ref.current.value or max_llama3_seq_len_field_ref.current.value.strip() == '':
-                        max_llama3_seq_len_field_ref.current.value = '128'
-                if flux_shift_checkbox_ref.current:
-                    flux_shift_checkbox_ref.current.value = True
-                if hidream_4bit_checkbox_ref.current:
-                    hidream_4bit_checkbox_ref.current.value = True
-                if hidream_tdtype_checkbox_ref.current:
-                    hidream_tdtype_checkbox_ref.current.value = False
-            except Exception:
-                pass
-        # Set OmniGen2 defaults when selected
-        if is_omnigen2 and not skip_defaults:
-            try:
-                if diffusers_path_field_ref.current:
-                    if not diffusers_path_field_ref.current.value or diffusers_path_field_ref.current.value.strip() == '':
-                        diffusers_path_field_ref.current.value = 'models/OmniGen2'
-                if flux_shift_checkbox_ref.current:
-                    flux_shift_checkbox_ref.current.value = True
-            except Exception:
-                pass
-        # Set Cosmos Predict2 defaults when selected
-        if is_cosmos_p2 and not skip_defaults:
-            try:
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/Cosmos-Predict2-2B-Text2Image.pt'
-                if t5_path_field_ref.current:
-                    if not t5_path_field_ref.current.value or t5_path_field_ref.current.value.strip() == '':
-                        t5_path_field_ref.current.value = 'models/oldt5_xxl_fp16.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/wan_2.1_vae.safetensors'
-                if float8_e5m2_checkbox_ref.current:
-                    float8_e5m2_checkbox_ref.current.value = False
-            except Exception:
-                pass
-        # Set Cosmos defaults when selected
-        if is_cosmos and not skip_defaults:
-            try:
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/cosmos/cosmos-1.0-diffusion-7b-text2world.pt'
-                if text_encoder_path_field_ref.current:
-                    if not text_encoder_path_field_ref.current.value or text_encoder_path_field_ref.current.value.strip() == '':
-                        text_encoder_path_field_ref.current.value = 'models/cosmos/oldt5_xxl_fp16.safetensors'
-                if vae_path_field_ref.current:
-                    if not vae_path_field_ref.current.value or vae_path_field_ref.current.value.strip() == '':
-                        vae_path_field_ref.current.value = 'models/cosmos/cosmos_cv8x8x8_1.0.safetensors'
-            except Exception:
-                pass
-        # Set LongCat defaults when selected
-        if is_longcat and not skip_defaults:
-            try:
-                if ckpt_path_wan22_field_ref.current:
-                    if not ckpt_path_wan22_field_ref.current.value or ckpt_path_wan22_field_ref.current.value.strip() == '':
-                        ckpt_path_wan22_field_ref.current.value = 'models/LongCat-Video'
-                if transformer_path_field_ref.current:
-                    if not transformer_path_field_ref.current.value or transformer_path_field_ref.current.value.strip() == '':
-                        transformer_path_field_ref.current.value = 'models/wan/LongCat_TI2V_comfy_bf16.safetensors'
-            except Exception:
-                pass
+                    # Other models only support lora
+                    adapter_dropdown_ref.current.options = [
+                        ft.dropdown_option("lora"),
+                    ]
+                    # Reset to lora if currently on lokr
+                    if adapter_dropdown_ref.current.value == "lokr":
+                        adapter_dropdown_ref.current.value = "lora"
+                if adapter_dropdown_ref.current.page:
+                    adapter_dropdown_ref.current.update()
+        except Exception:
+            pass
+
+        # 12. Sync dependent field visibility (sample_slider_range, preservation args)
+        sync_dependent_field_visibility()
+
+        # 13. Update page
         if e and getattr(e, 'page', None):
             e.page.update()
 
     page_controls = []
 
     # --- Model Configuration & Dataset Selection (Side by Side) ---
-    def _on_save_data_config_click(e: ft.ControlEvent):
-        try:
-            ds_block = dataset_block
-            selected = None
-            if ds_block and hasattr(ds_block, 'get_selected_dataset'):
-                selected = ds_block.get_selected_dataset()
-            if not selected:
-                if e and e.page:
-                    e.page.snack_bar = ft.SnackBar(content=ft.Text("Select a dataset before saving."), open=True)
-                    e.page.update()
-                return
 
-            from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
-            import os
-            import json
-            try:
-                import tomllib as _toml_reader  # Python 3.11+
-            except Exception:  # pragma: no cover
-                _toml_reader = None
+    # Create 3 independent dataset blocks for Dataset 1, Dataset 2, Dataset 3
+    dataset_1_block = get_compact_dataset_block("Dataset 1")
+    dataset_2_block = get_compact_dataset_block("Dataset 2")
+    dataset_3_block = get_compact_dataset_block("Dataset 3")
 
-            base_dir, dataset_type = _get_dataset_base_dir(selected)
-            clean_dataset_name = str(selected)
-            dataset_full_path = os.path.join(base_dir, clean_dataset_name)
-            parent_dir = os.path.dirname(dataset_full_path)
-            out_toml_path = os.path.join(parent_dir, f"{clean_dataset_name}.toml")
+    # Refresh button for all datasets
+    def refresh_all_datasets(e):
+        for ds_block in [dataset_1_block, dataset_2_block, dataset_3_block]:
+            if hasattr(ds_block, 'reload_datasets'):
+                try:
+                    ds_block.reload_datasets()
+                except Exception:
+                    pass
 
-            # Build TOML string with basic data config structure
-            toml_lines = []
-            toml_lines.append("resolutions = [512]")
-            toml_lines.append("")
-            toml_lines.append("enable_ar_bucket = true")
-            toml_lines.append("")
-            toml_lines.append("# Min and max aspect ratios, given as width/height ratio.")
-            toml_lines.append("min_ar = 0.5")
-            toml_lines.append("max_ar = 2.0")
-            toml_lines.append("ar_buckets = [[448, 576]]")
-            toml_lines.append("")
-            toml_lines.append("# Total number of aspect ratio buckets, evenly spaced (in log space) between min_ar and max_ar.")
-            toml_lines.append("num_ar_buckets = 9")
-            toml_lines.append("num_repeats = 1")
-            toml_lines.append("")
-            toml_lines.append("# Frame buckets (commented out by default)")
-            toml_lines.append("# frame_buckets = [1, 33]")
-            toml_lines.append("")
-            toml_lines.append("[[directory]]")
-            toml_lines.append("# The target images go in here. These are the images that the model will learn to produce.")
-            # Use the selected dataset path
-            dir_path_val = dataset_full_path
-            # Escape backslashes minimally
-            toml_lines.append(f"path = '{dir_path_val}'")
-
-            os.makedirs(parent_dir, exist_ok=True)
-            with open(out_toml_path, 'w', encoding='utf-8') as f:
-                f.write("\n".join(toml_lines) + "\n")
-
-            if e and e.page:
-                e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Saved: {out_toml_path}"), open=True)
-                e.page.update()
-        except Exception as ex:
-            if e and e.page:
-                e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Error saving: {ex}"), open=True)
-                e.page.update()
-
-    # Add Save Configuration button to the dataset row (styled like Monitor)
-    save_cfg_btn = ft.ElevatedButton(
-        "Save Data Config",
-        icon=ft.Icons.SAVE,
-        on_click=_on_save_data_config_click,
+    refresh_button = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        tooltip="Refresh dataset lists",
+        on_click=refresh_all_datasets,
+        style=ft.ButtonStyle(padding=ft.padding.symmetric(horizontal=0, vertical=0)),
+        icon_size=20
     )
-    dataset_block = get_training_dataset_page_content(extra_right_controls=[save_cfg_btn])
+
     page_controls.append(
         ft.ResponsiveRow([
             ft.Column([
@@ -768,36 +682,66 @@ def get_training_config_page_content():
                             fill_color=ft.Colors.with_opacity(0.18, ft.Colors.AMBER_900),
                             on_change=on_model_type_change, ref=model_type_dropdown_ref
                         ),
+                        # Non-LTX2 fields
                         create_dropdown(
                             "dtype",
                             "bfloat16",
                             {"bfloat16": "bfloat16", "float16": "float16", "float32": "float32"},
-                            col=3, expand=True, scale=0.8
+                            col=3, expand=True, scale=0.8, ref=dtype_dropdown_ref,
+                            visible=_should_show_field("dtype")
                         ),
                         create_dropdown(
                             "transformer_dtype",
                             "float8",
                             {"float8": "float8", "None": "None"},
-                            col=3, expand=True, scale=0.8, ref=transformer_dtype_dropdown_ref
+                            col=3, expand=True, scale=0.8, ref=transformer_dtype_dropdown_ref,
+                            visible=_should_show_field("transformer_dtype")
                         ),
                         create_dropdown(
                             "timestep_sm",
                             "logit_normal",
                             {"logit_normal": "logit_normal", "uniform": "uniform", "None": "None"},
-                            col=2, expand=True, scale=0.8, ref=timestep_sm_dropdown_ref
+                            col=2, expand=True, scale=0.8, ref=timestep_sm_dropdown_ref,
+                            visible=_should_show_field("timestep_sm")
+                        ),
+                        # LTX2-specific precision fields
+                        create_dropdown(
+                            "mixed_precision_mode",
+                            "bf16",
+                            {"no": "no", "fp16": "fp16", "bf16": "bf16"},
+                            col=4, expand=True, scale=0.8, ref=mixed_precision_mode_dropdown_ref,
+                            visible=_should_show_field("mixed_precision_mode")
+                        ),
+                        ft.Checkbox(
+                            label="fp8_base",
+                            value=True,
+                            scale=0.8,
+                            ref=fp8_base_checkbox_ref,
+                            visible=_should_show_field("fp8_base"),
+                            data="fp8_base",
+                            col=2,
+                        ),
+                        ft.Checkbox(
+                            label="fp8_scaled",
+                            value=True,
+                            scale=0.8,
+                            ref=fp8_scaled_checkbox_ref,
+                            visible=_should_show_field("fp8_scaled"),
+                            data="fp8_scaled",
+                            col=2,
                         ),
                     ], spacing=2),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield(
-                                "checkpoint_path",
-                                "models/sdxl/sd_xl_base_1.0_0.9vae.safetensors",
-                                col=12, expand=True, ref=checkpoint_path_field_ref,
-                                visible=(settings.train_def_model == "sdxl")
+                                "model_path",
+                                "",
+                                col=12, expand=True, ref=model_path_field_ref,
+                                visible=_should_show_field("model_path")
                             ),
                         ],
                         ref=checkpoint_row_ref,
-                        visible=(settings.train_def_model == "sdxl")
+                        visible=_should_show_field("model_path")
                     ),
                     ft.ResponsiveRow(
                         controls=[
@@ -805,104 +749,101 @@ def get_training_config_page_content():
                                 "ckpt_path",
                                 "models/Wan2.2-T2V-A14B",
                                 col=12, expand=True, ref=ckpt_path_wan22_field_ref,
-                                visible=(
-                                    settings.train_def_model == "wan22"
-                                    or settings.train_def_model == "wan"
-                                    or settings.train_def_model == "hunyuan-video"
-                                    or settings.train_def_model == "longcat"
-                                )
+                                visible=_should_show_field("ckpt_path_wan22")
                             ),
                         ],
                         ref=ckpt_path_row_ref,
-                        visible=(
-                            settings.train_def_model == "wan22"
-                            or settings.train_def_model == "wan"
-                            or settings.train_def_model == "hunyuan-video"
-                            or settings.train_def_model == "longcat"
-                        )
+                        visible=_should_show_field("ckpt_path_wan22")
+                    ),
+                    ft.ResponsiveRow(
+                        controls=[
+                            create_textfield("text_encoder_path", "", col=6, expand=True, ref=text_encoder_path_field_ref, visible=_should_show_field("text_encoder_path")),
+                            ft.Column([
+                                ft.Checkbox(
+                                    label="8_bit_text_encoder",
+                                    value=True,
+                                    scale=0.8,
+                                    ref=load_text_encoder_in_8bit_checkbox_ref,
+                                    visible=_should_show_field("load_text_encoder_in_8bit"),
+                                    data="8_bit_text_encoder",
+                                ),
+                            ], col=6, spacing=2),
+                        ], spacing=2,
+                        ref=text_encoder_row_ref,
+                        visible=_should_show_field("text_encoder_path") or _should_show_field("load_text_encoder_in_8bit")
                     ),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield(
                                 "diffusers_path", "models/Qwen-Image", col=12, expand=True,
-                                ref=diffusers_path_field_ref, visible=(
-                                    settings.train_def_model != "sdxl"
-                                    and settings.train_def_model != "wan22"
-                                    and settings.train_def_model != "wan"
-                                    and settings.train_def_model != "auraflow"
-                                    and settings.train_def_model != "cosmos"
-                                    and settings.train_def_model != "cosmos_predict2"
-                                    and settings.train_def_model != "hunyuan-video"
-                                    and settings.train_def_model != "lumina_2"
-                                    and settings.train_def_model != "z_image"
-                                )
+                                ref=diffusers_path_field_ref, visible=_should_show_field("diffusers_path")
                             ),
                         ], spacing=2,
                         ref=diffusers_row_ref,
-                        visible=(
-                            settings.train_def_model != "sdxl"
-                            and settings.train_def_model != "wan22"
-                            and settings.train_def_model != "wan"
-                            and settings.train_def_model != "auraflow"
-                            and settings.train_def_model != "cosmos"
-                            and settings.train_def_model != "cosmos_predict2"
-                            and settings.train_def_model != "hunyuan-video"
-                            and settings.train_def_model != "lumina_2"
-                            and settings.train_def_model != "z_image"
-                        )
+                        visible=_should_show_field("diffusers_path")
                     ),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield(
                                 "single_file_path", "", col=12, expand=True,
-                                ref=single_file_path_field_ref, visible=(settings.train_def_model == "ltx-video")
+                                ref=single_file_path_field_ref, visible=_should_show_field("single_file_path")
                             ),
                         ], spacing=2,
                         ref=single_file_row_ref,
-                        visible=(settings.train_def_model == "ltx-video")
+                        visible=_should_show_field("single_file_path")
+                    ),
+                    ft.ResponsiveRow(
+                        controls=[
+                            create_textfield(
+                                "first_frame_conditioning_p", "0.0", col=12, expand=True,
+                                ref=first_frame_conditioning_p_field_ref, visible=_should_show_field("first_frame_conditioning_p")
+                            ),
+                        ], spacing=2,
+                        ref=first_frame_conditioning_p_row_ref,
+                        visible=_should_show_field("first_frame_conditioning_p")
                     ),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield(
                                 "transformer_path", "", col=12, expand=True,
-                                ref=transformer_path_full_ref, visible=(settings.train_def_model == "chroma")
+                                ref=transformer_path_full_ref, visible=_should_show_field("transformer_path_full")
                             ),
                         ], spacing=2,
                         ref=transformer_full_row_ref,
-                        visible=(settings.train_def_model == "chroma")
+                        visible=_should_show_field("transformer_path_full")
                     ),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield(
                                 "byt5_path", "", col=12, expand=True,
-                                ref=byt5_path_field_ref, visible=(settings.train_def_model == "hunyuan_image")
+                                ref=byt5_path_field_ref, visible=_should_show_field("byt5_path")
                             ),
                         ], spacing=2,
                         ref=byt5_row_ref,
-                        visible=(settings.train_def_model == "hunyuan_image")
+                        visible=_should_show_field("byt5_path")
                     ),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield(
                                 "t5_path", "", col=12, expand=True,
-                                ref=t5_path_field_ref, visible=(settings.train_def_model == "cosmos_predict2")
+                                ref=t5_path_field_ref, visible=_should_show_field("t5_path")
                             ),
                         ], spacing=2,
                         ref=t5_row_ref,
-                        visible=(settings.train_def_model == "cosmos_predict2")
+                        visible=_should_show_field("t5_path")
                     ),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "llama3_path", "", col=12, expand=True,
-                            ref=llama3_path_field_ref, visible=(settings.train_def_model == "hidream")
+                            ref=llama3_path_field_ref, visible=_should_show_field("llama3_path")
                         ),
-                    ], spacing=2, ref=llama3_row_ref, visible=(settings.train_def_model == "hidream")),
+                    ], spacing=2, ref=llama3_row_ref, visible=_should_show_field("llama3_path")),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "clip_path", "", col=12, expand=True,
-                            ref=clip_path_field_ref, visible=(settings.train_def_model == "hunyuan-video")
+                            ref=clip_path_field_ref, visible=_should_show_field("clip_path")
                         ),
-                    ], spacing=2, ref=clip_row_ref, visible=(settings.train_def_model == "hunyuan-video")),
+                    ], spacing=2, ref=clip_row_ref, visible=_should_show_field("clip_path")),
                     # z_image specific fields
                     ft.ResponsiveRow(
                         controls=[
@@ -936,7 +877,7 @@ def get_training_config_page_content():
                         ],
                         spacing=2,
                         ref=z_image_row_ref,
-                        visible=(settings.train_def_model == "z_image")
+                        visible=_should_show_field("z_image_diffusion_model")
                     ),
                     # flux2 specific fields
                     ft.ResponsiveRow(
@@ -964,19 +905,19 @@ def get_training_config_page_content():
                         ],
                         spacing=2,
                         ref=flux2_row_ref,
-                        visible=(settings.train_def_model in ("flux2", "flux2_klein_4b", "flux2_klein_9b"))
+                        visible=_should_show_field("flux2_diffusion_model")
                     ),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "transformer_path", "", col=6, expand=True,
-                            ref=transformer_path_field_ref, visible=(settings.train_def_model != "sdxl" and settings.train_def_model != "chroma" and settings.train_def_model != "omnigen2" and settings.train_def_model != "z_image" and settings.train_def_model not in ("flux2", "flux2_klein_4b", "flux2_klein_9b"))
+                            ref=transformer_path_field_ref, visible=_should_show_field("transformer_path")
                         ),
                         ft.Checkbox(
                             label="float8_e5m2",
                             value=False,
                             scale=0.8,
                             ref=float8_e5m2_checkbox_ref,
-                            visible=(settings.train_def_model == "cosmos_predict2"),
+                            visible=_should_show_field("float8_e5m2"),
                             col=6,
                         ),
                         ft.Checkbox(
@@ -984,72 +925,28 @@ def get_training_config_page_content():
                             value=False,
                             scale=0.8,
                             ref=longcat_float8_checkbox_ref,
-                            visible=(settings.train_def_model == "longcat"),
+                            visible=_should_show_field("longcat_float8"),
                             col=6,
                         ),
                         create_textfield(
                             "llm_path", "", col=6, expand=True,
-                            ref=llm_path_field_ref, visible=(
-                                settings.train_def_model != "sdxl"
-                                and settings.train_def_model != "auraflow"
-                                and settings.train_def_model != "chroma"
-                                and settings.train_def_model != "qwen_image"
-                                and settings.train_def_model != "qwen_image_plus"
-                                and settings.train_def_model != "cosmos"
-                                and settings.train_def_model != "cosmos_predict2"
-                                and settings.train_def_model != "omnigen2"
-                                and settings.train_def_model != "flux"
-                                and settings.train_def_model != "flux2"
-                                and settings.train_def_model != "flux2_klein_4b"
-                                and settings.train_def_model != "flux2_klein_9b"
-                                and settings.train_def_model != "hidream"
-                                and settings.train_def_model != "z_image"
-                            )
+                            ref=llm_path_field_ref, visible=_should_show_field("llm_path")
                         ),
                     ], spacing=2),
                     ft.ResponsiveRow(controls=[
-                        create_textfield("text_encoder_path", "", col=6, expand=True, ref=text_encoder_path_field_ref, visible=(
-                            settings.train_def_model != "sdxl"
-                            and settings.train_def_model != "wan22"
-                            and settings.train_def_model != "wan"
-                            and settings.train_def_model != "chroma"
-                            and settings.train_def_model != "omnigen2"
-                            and settings.train_def_model != "flux"
-                            and settings.train_def_model != "flux2"
-                            and settings.train_def_model != "flux2_klein_4b"
-                            and settings.train_def_model != "flux2_klein_9b"
-                            and settings.train_def_model != "hunyuan-video"
-                            and settings.train_def_model != "hidream"
-                            and settings.train_def_model != "lumina_2"
-                            and settings.train_def_model != "cosmos_predict2"
-                            and settings.train_def_model != "longcat"
-                            and settings.train_def_model != "z_image"
-                        )),
-                        create_textfield("vae_path", "", col=6, expand=True, ref=vae_path_field_ref, visible=(
-                            settings.train_def_model != "sdxl"
-                            and settings.train_def_model != "wan22"
-                            and settings.train_def_model != "wan"
-                            and settings.train_def_model != "chroma"
-                            and settings.train_def_model != "omnigen2"
-                            and settings.train_def_model != "flux"
-                            and settings.train_def_model != "flux2"
-                            and settings.train_def_model != "flux2_klein_4b"
-                            and settings.train_def_model != "flux2_klein_9b"
-                            and settings.train_def_model != "longcat"
-                            and settings.train_def_model != "z_image"
-                        )),
+                        create_textfield("vae_path", "", col=6, expand=True, ref=vae_path_field_ref, visible=_should_show_field("vae_path")),
                 ], spacing=2),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "max_llama3_sequence_length", 128, col=6, expand=True,
-                            ref=max_llama3_seq_len_field_ref, visible=(settings.train_def_model == "hidream")
+                            ref=max_llama3_seq_len_field_ref, visible=_should_show_field("max_llama3_seq_len")
                         ),
                         ft.Checkbox(
                             label="llama3_4bit",
                             value=True,
                             scale=0.8,
                             ref=hidream_4bit_checkbox_ref,
-                            visible=(settings.train_def_model == "hidream"),
+                            visible=_should_show_field("hidream_4bit"),
                             col=3,
                         ),
                         ft.Checkbox(
@@ -1057,33 +954,85 @@ def get_training_config_page_content():
                             value=False,
                             scale=0.8,
                             ref=hidream_tdtype_checkbox_ref,
-                            visible=(settings.train_def_model == "hidream"),
+                            visible=_should_show_field("hidream_tdtype"),
                             col=3,
                         ),
                     ], spacing=2),
+                    # LTX2 mode dropdown
+                    ft.ResponsiveRow(controls=[
+                        create_dropdown(
+                            "ltx_mode",
+                            "video",
+                            {"video": "video", "av": "av", "audio": "audio"},
+                            col=2, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
+                            visible=_should_show_field("ltx_mode")
+                        ),
+                        ft.Checkbox(
+                            label="separate_audio_buckets",
+                            value=True,
+                            scale=0.8,
+                            ref=separate_audio_buckets_checkbox_ref,
+                            visible=_should_show_field("separate_audio_buckets"),
+                            data="separate_audio_buckets",
+                            col=3.5,
+                        ),
+                        ft.Checkbox(
+                            label="gradient_checkpointing",
+                            value=True,
+                            scale=0.8,
+                            ref=gradient_checkpointing_checkbox_ref,
+                            visible=_should_show_field("gradient_checkpointing"),
+                            data="gradient_checkpointing",
+                            col=3.5,
+                        ),
+                        ft.Checkbox(
+                            label="slider",
+                            value=False,
+                            scale=0.8,
+                            ref=slider_checkbox_ref,
+                            visible=_should_show_field("slider"),
+                            data="slider",
+                            col=1.5,
+                            on_change=lambda e: _on_slider_change(e),
+                        ),
+                        ft.Checkbox(
+                            label="use_mask",
+                            value=False,
+                            scale=0.8,
+                            ref=use_mask_checkbox_ref,
+                            visible=_should_show_field("use_mask"),
+                            data="use_mask",
+                            col=1.5,
+                        ),
+                    ], spacing=2),
+                    # Adapter row with sample_slider_range
                     ft.ResponsiveRow(controls=[
                         create_dropdown(
                             "adapter",
                             "lora",
                             {
-                                "lora": "lora"
-                            }, col=3, expand=False, scale=0.8,
+                                "lora": "lora",
+                                "lokr": "lokr"
+                            }, col=3, expand=False, scale=0.8, ref=adapter_dropdown_ref,
                         ),
+                        create_textfield(
+                            "sample_slider_range", "-2.0, -1.0, 0.0, 1.0, 2.0",
+                            hint_text="Slider sample range",
+                            expand=True, col=9, scale=0.8,
+                            ref=sample_slider_range_field_ref,
+                            visible=False  # Invisible by default (only visible when slider checkbox is checked)
+                        ),
+                    ], spacing=2),
+                    ft.ResponsiveRow(controls=[
                         ft.Column([
                             ft.ResponsiveRow(controls=[
-                                create_textfield("min_t", 0.9, hint_text="HIGH = 0.9 , LOW t2v = 0.0 ,i2v = 0.0", expand=True, col=6, scale=0.8, ref=min_t_field_ref, visible=(settings.train_def_model == "wan22")),
-                                create_textfield("max_t", 1.000, hint_text="HIGH = 1.0 , LOW t2v = 0.875 ,i2v = 0.900 ,", expand=True, col=6, scale=0.8, ref=max_t_field_ref, visible=(settings.train_def_model == "wan22")),
+                                create_textfield("min_t", 0.9, hint_text="HIGH = 0.9 , LOW t2v = 0.0 ,i2v = 0.0", expand=True, col=6, scale=0.8, ref=min_t_field_ref, visible=_should_show_field("min_t")),
+                                create_textfield("max_t", 1.000, hint_text="HIGH = 1.0 , LOW t2v = 0.875 ,i2v = 0.900 ,", expand=True, col=6, scale=0.8, ref=max_t_field_ref, visible=_should_show_field("max_t")),
                             ], spacing=2),
                             ft.ResponsiveRow(controls=[
                                 create_textfield(
                                     "max_sequence_length", 768, expand=True, col=12, scale=0.8,
-                                    ref=max_seq_len_field_ref, visible=(settings.train_def_model == "auraflow")
-                                ),
-                            ], spacing=2),
-                            ft.ResponsiveRow(controls=[
-                                create_textfield(
-                                    "first_frame_conditioning_p", 1.0, expand=True, col=12, scale=0.8,
-                                    ref=ffc_p_field_ref, visible=(settings.train_def_model == "ltx-video")
+                                    ref=max_seq_len_field_ref, visible=_should_show_field("max_seq_len")
                                 ),
                             ], spacing=2),
                             ft.ResponsiveRow(controls=[
@@ -1092,7 +1041,7 @@ def get_training_config_page_content():
                                     value=True,
                                     scale=0.8,
                                     ref=flux_shift_checkbox_ref,
-                                    visible=(settings.train_def_model == "chroma" or settings.train_def_model == "flux" or settings.train_def_model == "sd3" or settings.train_def_model == "omnigen2"),
+                                    visible=_should_show_field("flux_shift"),
                                     col=6,
                                 ),
                                 ft.Checkbox(
@@ -1100,7 +1049,7 @@ def get_training_config_page_content():
                                     value=True,
                                     scale=0.8,
                                     ref=bypass_g_emb_checkbox_ref,
-                                    visible=(settings.train_def_model == "flux"),
+                                    visible=_should_show_field("bypass_g_emb"),
                                     col=6,
                                 ),
                             ], spacing=2),
@@ -1110,7 +1059,7 @@ def get_training_config_page_content():
                                     value=True,
                                     scale=0.8,
                                     ref=lumina_shift_checkbox_ref,
-                                    visible=(settings.train_def_model == "lumina" or settings.train_def_model == "lumina_2"),
+                                    visible=_should_show_field("lumina_shift"),
                                     col=12,
                                 ),
                             ], spacing=2),
@@ -1121,7 +1070,7 @@ def get_training_config_page_content():
                                     value=True,
                                     scale=0.8,
                                     ref=v_pred_checkbox_ref,
-                                    visible=(settings.train_def_model == "sdxl"),
+                                    visible=_should_show_field("v_pred"),
                                     col=6,
                                 ),
                                 ft.Checkbox(
@@ -1129,38 +1078,45 @@ def get_training_config_page_content():
                                     value=True,
                                     scale=0.8,
                                     ref=d_est_loss_checkbox_ref,
-                                    visible=(settings.train_def_model == "sdxl"),
+                                    visible=_should_show_field("d_est_loss"),
                                     col=6,
                                 ),
                             ], spacing=2),
                             ft.ResponsiveRow(controls=[
                                 create_textfield(
                                     "min_snr_gamma", 5, expand=True, col=6, scale=0.8,
-                                    ref=min_snr_gamma_field_ref, visible=(settings.train_def_model == "sdxl")
+                                    ref=min_snr_gamma_field_ref, visible=_should_show_field("min_snr_gamma")
                                 ),
                                 create_textfield(
                                     "unet_lr", 4e-5, expand=True, col=6, scale=0.8,
-                                    ref=unet_lr_field_ref, visible=(settings.train_def_model == "sdxl")
+                                    ref=unet_lr_field_ref, visible=_should_show_field("unet_lr")
                                 ),
                             ], spacing=2),
                             ft.ResponsiveRow(controls=[
                                 create_textfield(
                                     "text_encoder_1_lr", 2e-5, expand=True, col=6, scale=0.8,
-                                    ref=te1_lr_field_ref, visible=(settings.train_def_model == "sdxl")
+                                    ref=te1_lr_field_ref, visible=_should_show_field("te1_lr")
                                 ),
                                 create_textfield(
                                     "text_encoder_2_lr", 2e-5, expand=True, col=6, scale=0.8,
-                                    ref=te2_lr_field_ref, visible=(settings.train_def_model == "sdxl")
+                                    ref=te2_lr_field_ref, visible=_should_show_field("te2_lr")
                                 ),
                             ], spacing=2),
                         ], col=9, spacing=2, alignment=ft.MainAxisAlignment.START),
                     ], spacing=2, vertical_alignment=ft.CrossAxisAlignment.START),
                     # Adapter details row
                     ft.ResponsiveRow(controls=[
-                        create_textfield("a_rank", 32, col=3, expand=True),
-                        create_textfield("a_dtype", "bfloat16", col=3, expand=True),
-                        create_textfield("blocks_swap", 10, col=3, expand=True),
-                        create_textfield("disable_bsfe", "true", col=3, expand=True),
+                        create_textfield("a_rank", 32, col=3, expand=True, ref=a_rank_field_ref, visible=not _should_show_field("rank")),
+                        create_textfield("a_dtype", "bfloat16", col=3, expand=True, ref=a_dtype_field_ref, visible=not _should_show_field("rank")),
+                        create_textfield("blocks_swap", 0, col=3, expand=True, ref=blocks_swap_field_ref, visible=not _should_show_field("rank")),
+                        create_textfield("disable_bsfe", "true", col=3, expand=True, ref=disable_bsfe_field_ref, visible=not _should_show_field("rank")),
+                    ], spacing=2),
+                    # LTX2 specific adapter row
+                    ft.ResponsiveRow(controls=[
+                        create_textfield("rank", 32, col=3, expand=True, ref=rank_field_ref, visible=_should_show_field("rank")),
+                        create_textfield("alpha", 32, col=3, expand=True, ref=alpha_field_ref, visible=_should_show_field("alpha")),
+                        create_textfield("dropout", 0.0, col=3, expand=True, ref=dropout_field_ref, visible=_should_show_field("dropout")),
+                        create_textfield("first_frame_conditioning_p", 0.5, col=3, expand=True, ref=first_frame_conditioning_p_ltx2_field_ref, visible=_should_show_field("first_frame_conditioning_p_ltx2")),
                     ], spacing=2),
                 ]),
                     padding=ft.padding.all(10),
@@ -1170,21 +1126,51 @@ def get_training_config_page_content():
                 )
             ], col=6), # Model Configuration column set to 6
             ft.Column([
-                *add_section_title("Dataset Selection"),
-                ft.Container(
-                    content=dataset_block,
-                    padding=ft.padding.only(left=0, right=10, top=10, bottom=10),
-                    border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.GREY_600)),
-                    border_radius=ft.border_radius.all(10),
+                # Dataset Selection title with refresh button
+                ft.Row(
+                    [
+                        ft.Text("Dataset Selection", size=16, weight=ft.FontWeight.BOLD),
+                        refresh_button,
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),
-            ], col=6), # Dataset Selection column set to 6
+                ft.Divider(height=5, thickness=1),
+                # 3 dataset columns side by side
+                ft.Row(
+                    [
+                        ft.Container(
+                            content=dataset_1_block,
+                            expand=True,
+                            padding=ft.padding.all(5),
+                            border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.GREY_600)),
+                            border_radius=ft.border_radius.all(10),
+                        ),
+                        ft.Container(
+                            content=dataset_2_block,
+                            expand=True,
+                            padding=ft.padding.all(5),
+                            border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.GREY_600)),
+                            border_radius=ft.border_radius.all(10),
+                        ),
+                        ft.Container(
+                            content=dataset_3_block,
+                            expand=True,
+                            padding=ft.padding.all(5),
+                            border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.GREY_600)),
+                            border_radius=ft.border_radius.all(10),
+                        ),
+                    ],
+                    spacing=10,
+                    expand=True,
+                    vertical_alignment=ft.CrossAxisAlignment.START,
+                ),
+            ], col=6),
         ], spacing=20, vertical_alignment=ft.CrossAxisAlignment.START)
     )
     page_controls.append(ft.Divider(height=5, color=ft.Colors.TRANSPARENT))
 
     # --- Training & Misc Settings (Two Columns) ---
-    page_controls.append(
-        ft.ResponsiveRow([
+    standard_training_section = ft.ResponsiveRow([
             ft.Column([
                 *add_section_title("Training settings"),
                 # Two sub-columns within Training settings
@@ -1260,12 +1246,15 @@ def get_training_config_page_content():
                     border_radius=ft.border_radius.all(10),
                 ),
             ], col=6),
-        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
-    )
+        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START, ref=standard_training_section_ref)
+
+    # Determine initial visibility based on default model
+    is_default_ltx2 = settings.train_def_model.lower() in ("ltx-video-2", "ltx2")
+    standard_training_section.visible = not is_default_ltx2
+    page_controls.append(standard_training_section)
 
     # --- Eval & Optimizer Settings (Two Columns) ---
-    page_controls.append(
-        ft.ResponsiveRow([
+    standard_eval_optimizer_section = ft.ResponsiveRow([
             # Eval settings column
             ft.Column([
                 *add_section_title("Eval settings"),
@@ -1274,7 +1263,7 @@ def get_training_config_page_content():
                         ft.Column([
                             create_textfield("eval_every_n_epochs", 1, expand=True),
                             ft.Checkbox(label="eval_before_first_step", value=True, scale=0.8),
-                            
+
                         ], col=6, spacing=6),
                         ft.Column([
                             create_textfield("eval_micro_batch_size_per_gpu", 1, expand=True, fill_color="#232A2C"),
@@ -1293,18 +1282,38 @@ def get_training_config_page_content():
                 ft.Container(
                     content=ft.Column([
                         ft.ResponsiveRow(controls=[
-                            create_textfield("optimizer_type", "adamw_optimi", col=12, expand=True),
+                            create_dropdown(
+                                "optimizer_type",
+                                "adamw_optimi",
+                                ofc.OPTIMIZER_OPTIONS,
+                                col=12,
+                                expand=True,
+                                ref=optimizer_type_dropdown_ref,
+                                on_change=lambda e: on_optimizer_type_change(e),
+                            ),
                         ], spacing=4),
                         ft.ResponsiveRow(controls=[
-                            ft.Column([
-                                create_textfield("lr", 2e-5, expand=True),
-                                create_textfield("betas", "[0.9, 0.99]", expand=True),
-                            ], col=6, spacing=6),
-                            ft.Column([
-                                create_textfield("weight_decay", 0.01, expand=True),
-                                create_textfield("eps", 1e-8, expand=True),
-                            ], col=6, spacing=6),
-                        ], spacing=6),
+                            create_textfield("lr", 2e-5, col=3, expand=True, ref=lr_field_ref),
+                            create_textfield("betas", "[0.9, 0.99]", col=3, expand=True, ref=betas_field_ref),
+                            create_textfield("weight_decay", 0.01, col=3, expand=True, ref=weight_decay_field_ref),
+                            create_textfield("eps", 1e-8, col=3, expand=True, ref=eps_field_ref),
+                        ], spacing=4),
+                        # Prodigy-specific row (hidden by default)
+                        ft.ResponsiveRow(controls=[
+                            create_textfield("beta3", "None", col=3, expand=True, ref=beta3_field_ref),
+                            create_textfield("d0", "1e-6", col=3, expand=True, ref=d0_field_ref),
+                            create_textfield("d_coef", "1.0", col=3, expand=True, ref=d_coef_field_ref),
+                            create_textfield("schedulefree_c", "0.0", col=3, expand=True, ref=schedulefree_c_field_ref),
+                        ], spacing=4, ref=prodigy_row_ref, visible=False),
+                        # Automagic-specific row (hidden by default)
+                        ft.ResponsiveRow(controls=[
+                            create_textfield("min_lr", "1e-7", col=2, expand=True, ref=min_lr_field_ref),
+                            create_textfield("max_lr", "1e-3", col=2, expand=True, ref=max_lr_field_ref),
+                            create_textfield("lr_bump", "1e-6", col=2, expand=True, ref=lr_bump_field_ref),
+                            create_textfield("clip_threshold", "1.0", col=2, expand=True, ref=clip_threshold_field_ref),
+                            ft.Checkbox(label="do_paramiter_swapping", value=False, col=2, ref=do_paramiter_swapping_field_ref),
+                            create_textfield("paramiter_swapping_factor", "0.1", col=2, expand=True, ref=paramiter_swapping_factor_field_ref),
+                        ], spacing=4, ref=automagic_row_ref, visible=False),
                     ], spacing=6),
                     padding=ft.padding.all(10),
                     border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.GREY_600)),
@@ -1332,8 +1341,28 @@ def get_training_config_page_content():
                     border_radius=ft.border_radius.all(10),
                 ),
             ], col=6),
-        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
+        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START, ref=standard_eval_optimizer_section_ref)
+
+    standard_eval_optimizer_section.visible = not is_default_ltx2
+    page_controls.append(standard_eval_optimizer_section)
+
+    # --- LTX2 Custom Training Settings ---
+    ltx2_custom_section = get_ltx2_training_settings(
+        ref=ltx2_custom_section_ref,
+        attn_chunking_ref=attn_chunking_checkbox_ref,
+        blank_preservation_ref=blank_preservation_checkbox_ref,
+        blank_preservation_args_ref=blank_preservation_args_field_ref,
+        dop_ref=dop_checkbox_ref,
+        dop_args_ref=dop_args_field_ref,
+        prior_divergence_ref=prior_divergence_checkbox_ref,
+        prior_divergence_args_ref=prior_divergence_args_field_ref,
+        crepa_ref=crepa_checkbox_ref,
+        crepa_mode_ref=crepa_mode_dropdown_ref,
+        crepa_args_ref=crepa_args_field_ref,
+        sync_visibility_func=sync_dependent_field_visibility,
     )
+    ltx2_custom_section.visible = is_default_ltx2
+    page_controls.append(ltx2_custom_section)
 
     container = ft.Container(
         content=ft.Column(
@@ -1344,106 +1373,68 @@ def get_training_config_page_content():
         expand=True, # Allow container to take full height
         padding=ft.padding.all(5)
     )
-    container.dataset_block = dataset_block
-    container.save_data_config_button = save_cfg_btn
+    # Expose the 3 independent dataset blocks (only Dataset 1 is checked for selected dataset)
+    container.dataset_1_block = dataset_1_block
+    container.dataset_2_block = dataset_2_block
+    container.dataset_3_block = dataset_3_block
+    # For backward compatibility, also expose as dataset_block (points to dataset_1)
+    container.dataset_block = dataset_1_block
     return container
 
 def update_wan_fields_visibility(is_wan22: bool, min_t_value=None, max_t_value=None):
     """Update visibility and values of min_t and max_t fields from external calls"""
-    try:
-        if min_t_field_ref.current:
-            min_t_field_ref.current.visible = is_wan22
-            if min_t_value is not None:
-                min_t_field_ref.current.value = str(min_t_value)
-        if max_t_field_ref.current:
-            max_t_field_ref.current.visible = is_wan22
-            if max_t_value is not None:
-                max_t_field_ref.current.value = str(max_t_value)
+    field_refs = {
+        "min_t": min_t_field_ref,
+        "max_t": max_t_field_ref,
+    }
+    field_values = {}
+    if min_t_value is not None:
+        field_values["min_t"] = str(min_t_value)
+    if max_t_value is not None:
+        field_values["max_t"] = str(max_t_value)
 
-        # Update the page if we can access it
-        if min_t_field_ref.current and min_t_field_ref.current.page:
-            min_t_field_ref.current.page.update()
-    except Exception:
-        pass
+    _update_field_refs_visibility(field_refs, is_wan22, field_values)
 
 def update_auraflow_fields_visibility(is_auraflow: bool, max_sequence_length_value=None):
     """Update visibility and value of max_sequence_length for auraflow from external calls"""
-    try:
-        if max_seq_len_field_ref.current:
-            max_seq_len_field_ref.current.visible = is_auraflow
-            if max_sequence_length_value is not None:
-                max_seq_len_field_ref.current.value = str(max_sequence_length_value)
-        if max_seq_len_field_ref.current and max_seq_len_field_ref.current.page:
-            max_seq_len_field_ref.current.page.update()
-    except Exception:
-        pass
+    field_refs = {"max_seq_len": max_seq_len_field_ref}
+    field_values = {}
+    if max_sequence_length_value is not None:
+        field_values["max_seq_len"] = str(max_sequence_length_value)
+
+    _update_field_refs_visibility(field_refs, is_auraflow, field_values)
 
 def update_chroma_fields_visibility(is_chroma: bool, flux_shift_value=None):
     """Update visibility and value of flux_shift for chroma from external calls"""
-    try:
-        if flux_shift_checkbox_ref.current:
-            flux_shift_checkbox_ref.current.visible = is_chroma
-            if flux_shift_value is not None:
-                # Accept bool-y strings and bools
-                sval = str(flux_shift_value).strip().lower()
-                flux_shift_checkbox_ref.current.value = (flux_shift_value is True) or (sval in ['1','true','yes','on'])
-        if flux_shift_checkbox_ref.current and flux_shift_checkbox_ref.current.page:
-            flux_shift_checkbox_ref.current.page.update()
-    except Exception:
-        pass
+    field_refs = {"flux_shift": flux_shift_checkbox_ref}
+    field_values = {}
+    if flux_shift_value is not None:
+        field_values["flux_shift"] = flux_shift_value
+
+    _update_field_refs_visibility(field_refs, is_chroma, field_values)
 
 def update_flux_fields_visibility(is_flux: bool, flux_shift_value=None, bypass_g_emb_value=None):
     """Update visibility and values of flux-specific fields (flux_shift, bypass_g_emb)."""
-    try:
-        if flux_shift_checkbox_ref.current:
-            flux_shift_checkbox_ref.current.visible = is_flux or flux_shift_checkbox_ref.current.visible
-            if flux_shift_value is not None:
-                sval = str(flux_shift_value).strip().lower()
-                flux_shift_checkbox_ref.current.value = (flux_shift_value is True) or (sval in ['1','true','yes','on'])
-        if bypass_g_emb_checkbox_ref.current:
-            bypass_g_emb_checkbox_ref.current.visible = is_flux
-            if bypass_g_emb_value is not None:
-                sval2 = str(bypass_g_emb_value).strip().lower()
-                bypass_g_emb_checkbox_ref.current.value = (bypass_g_emb_value is True) or (sval2 in ['1','true','yes','on'])
-        if (
-            (flux_shift_checkbox_ref.current and flux_shift_checkbox_ref.current.page)
-            or (bypass_g_emb_checkbox_ref.current and bypass_g_emb_checkbox_ref.current.page)
-        ):
-            # Update page once
-            page_obj = None
-            if flux_shift_checkbox_ref.current and flux_shift_checkbox_ref.current.page:
-                page_obj = flux_shift_checkbox_ref.current.page
-            if not page_obj and bypass_g_emb_checkbox_ref.current and bypass_g_emb_checkbox_ref.current.page:
-                page_obj = bypass_g_emb_checkbox_ref.current.page
-            if page_obj:
-                page_obj.update()
-    except Exception:
-        pass
+    field_refs = {
+        "flux_shift": flux_shift_checkbox_ref,
+        "bypass_g_emb": bypass_g_emb_checkbox_ref,
+    }
+    field_values = {}
+    if flux_shift_value is not None:
+        field_values["flux_shift"] = flux_shift_value
+    if bypass_g_emb_value is not None:
+        field_values["bypass_g_emb"] = bypass_g_emb_value
 
-def update_ltx_fields_visibility(is_ltx: bool, ffc_p_value=None):
-    """Update visibility and value for ltx-video specific fields."""
-    try:
-        if ffc_p_field_ref.current:
-            ffc_p_field_ref.current.visible = is_ltx
-            if ffc_p_value is not None:
-                ffc_p_field_ref.current.value = str(ffc_p_value)
-        if ffc_p_field_ref.current and ffc_p_field_ref.current.page:
-            ffc_p_field_ref.current.page.update()
-    except Exception:
-        pass
+    _update_field_refs_visibility(field_refs, is_flux, field_values)
 
 def update_lumina_fields_visibility(is_lumina: bool, lumina_shift_value=None):
     """Update visibility and value of lumina_shift for lumina/lumina_2 from external calls"""
-    try:
-        if lumina_shift_checkbox_ref.current:
-            lumina_shift_checkbox_ref.current.visible = is_lumina
-            if lumina_shift_value is not None:
-                sval = str(lumina_shift_value).strip().lower()
-                lumina_shift_checkbox_ref.current.value = (lumina_shift_value is True) or (sval in ['1','true','yes','on'])
-        if lumina_shift_checkbox_ref.current and lumina_shift_checkbox_ref.current.page:
-            lumina_shift_checkbox_ref.current.page.update()
-    except Exception:
-        pass
+    field_refs = {"lumina_shift": lumina_shift_checkbox_ref}
+    field_values = {}
+    if lumina_shift_value is not None:
+        field_values["lumina_shift"] = lumina_shift_value
+
+    _update_field_refs_visibility(field_refs, is_lumina, field_values)
 
 def update_sdxl_fields_visibility(
     is_sdxl: bool,
@@ -1453,121 +1444,243 @@ def update_sdxl_fields_visibility(
     unet_lr_value=None,
     te1_lr_value=None,
     te2_lr_value=None,
-    checkpoint_path_value=None,
+    model_path_value=None,
+    is_ltx2=False,  # Added parameter to handle LTX2 model as well
 ):
     """Update visibility and values for SDXL-specific fields."""
+    field_refs = {
+        "v_pred": v_pred_checkbox_ref,
+        "d_est_loss": d_est_loss_checkbox_ref,
+        "min_snr_gamma": min_snr_gamma_field_ref,
+        "unet_lr": unet_lr_field_ref,
+        "te1_lr": te1_lr_field_ref,
+        "te2_lr": te2_lr_field_ref,
+        "model_path": model_path_field_ref,
+    }
+    field_values = {}
+    if v_pred_value is not None:
+        field_values["v_pred"] = v_pred_value
+    if d_est_loss_value is not None:
+        field_values["d_est_loss"] = d_est_loss_value
+    if min_snr_gamma_value is not None:
+        field_values["min_snr_gamma"] = str(min_snr_gamma_value)
+    if unet_lr_value is not None:
+        field_values["unet_lr"] = str(unet_lr_value)
+    if te1_lr_value is not None:
+        field_values["te1_lr"] = str(te1_lr_value)
+    if te2_lr_value is not None:
+        field_values["te2_lr"] = str(te2_lr_value)
+    if model_path_value is not None:
+        field_values["model_path"] = str(model_path_value)
+
+    # model_path field is used by both SDXL and LTX2 models, so handle special case
+    page_obj = None
     try:
-        if v_pred_checkbox_ref.current:
-            v_pred_checkbox_ref.current.visible = is_sdxl
-            if v_pred_value is not None:
-                sval = str(v_pred_value).strip().lower()
-                v_pred_checkbox_ref.current.value = (v_pred_value is True) or (sval in ['1','true','yes','on'])
-        if d_est_loss_checkbox_ref.current:
-            d_est_loss_checkbox_ref.current.visible = is_sdxl
-            if d_est_loss_value is not None:
-                sval = str(d_est_loss_value).strip().lower()
-                d_est_loss_checkbox_ref.current.value = (d_est_loss_value is True) or (sval in ['1','true','yes','on'])
-        if min_snr_gamma_field_ref.current:
-            min_snr_gamma_field_ref.current.visible = is_sdxl
-            if min_snr_gamma_value is not None:
-                min_snr_gamma_field_ref.current.value = str(min_snr_gamma_value)
-        if unet_lr_field_ref.current:
-            unet_lr_field_ref.current.visible = is_sdxl
-            if unet_lr_value is not None:
-                unet_lr_field_ref.current.value = str(unet_lr_value)
-        if te1_lr_field_ref.current:
-            te1_lr_field_ref.current.visible = is_sdxl
-            if te1_lr_value is not None:
-                te1_lr_field_ref.current.value = str(te1_lr_value)
-        if te2_lr_field_ref.current:
-            te2_lr_field_ref.current.visible = is_sdxl
-            if te2_lr_value is not None:
-                te2_lr_field_ref.current.value = str(te2_lr_value)
-        if checkpoint_path_field_ref.current:
-            checkpoint_path_field_ref.current.visible = is_sdxl
-            if checkpoint_path_value is not None:
-                checkpoint_path_field_ref.current.value = str(checkpoint_path_value)
-        # Update page once if possible
-        page_obj = None
-        for r in [v_pred_checkbox_ref, d_est_loss_checkbox_ref, min_snr_gamma_field_ref, unet_lr_field_ref, te1_lr_field_ref, te2_lr_field_ref, checkpoint_path_field_ref]:
-            if r.current and r.current.page:
-                page_obj = r.current.page
-                break
-        if page_obj:
-            page_obj.update()
+        for field_name, ref in field_refs.items():
+            if ref and ref.current:
+                if field_name == "model_path":
+                    ref.current.visible = (is_sdxl or is_ltx2)
+                else:
+                    ref.current.visible = is_sdxl
+
+                # Set value if provided
+                if field_name in field_values and field_values[field_name] is not None:
+                    value = field_values[field_name]
+                    # Handle checkboxes
+                    if isinstance(ref.current, ft.Checkbox):
+                        ref.current.value = _convert_bool_value(value)
+                    else:
+                        ref.current.value = value
+                # Keep track of last valid page for batch update
+                if ref.current.page:
+                    page_obj = ref.current.page
     except Exception:
         pass
+
+    # Update page once at the end
+    if page_obj:
+        try:
+            page_obj.update()
+        except Exception:
+            pass
 
 def update_wan22_ckpt_visibility(is_wan22: bool, ckpt_value=None):
     """Update visibility and value for wan22 ckpt_path field."""
-    try:
-        if ckpt_path_wan22_field_ref.current:
-            ckpt_path_wan22_field_ref.current.visible = is_wan22
-            if ckpt_value is not None:
-                ckpt_path_wan22_field_ref.current.value = str(ckpt_value)
-        if ckpt_path_wan22_field_ref.current and ckpt_path_wan22_field_ref.current.page:
-            ckpt_path_wan22_field_ref.current.page.update()
-    except Exception:
-        pass
+    field_refs = {"ckpt_path_wan22": ckpt_path_wan22_field_ref}
+    field_values = {}
+    if ckpt_value is not None:
+        field_values["ckpt_path_wan22"] = str(ckpt_value)
+
+    _update_field_refs_visibility(field_refs, is_wan22, field_values)
 
 def update_longcat_ckpt_visibility(is_longcat: bool, ckpt_value=None):
     """Update visibility and value for longcat ckpt_path field."""
-    try:
-        if ckpt_path_wan22_field_ref.current:
-            ckpt_path_wan22_field_ref.current.visible = is_longcat
-            if ckpt_value is not None:
-                ckpt_path_wan22_field_ref.current.value = str(ckpt_value)
-        if ckpt_path_wan22_field_ref.current and ckpt_path_wan22_field_ref.current.page:
-            ckpt_path_wan22_field_ref.current.page.update()
-    except Exception:
-        pass
+    field_refs = {"ckpt_path_wan22": ckpt_path_wan22_field_ref}
+    field_values = {}
+    if ckpt_value is not None:
+        field_values["ckpt_path_wan22"] = str(ckpt_value)
+
+    _update_field_refs_visibility(field_refs, is_longcat, field_values)
 
 def update_z_image_fields_visibility(is_z_image: bool, diffusion_model_value=None, vae_value=None, text_encoders_value=None, merge_adapters_value=None):
     """Update visibility and values for z_image specific fields."""
-    try:
-        if z_image_diffusion_model_field_ref.current:
-            z_image_diffusion_model_field_ref.current.visible = is_z_image
-            if diffusion_model_value is not None:
-                z_image_diffusion_model_field_ref.current.value = str(diffusion_model_value)
-        if z_image_vae_field_ref.current:
-            z_image_vae_field_ref.current.visible = is_z_image
-            if vae_value is not None:
-                z_image_vae_field_ref.current.value = str(vae_value)
-        if z_image_text_encoders_field_ref.current:
-            z_image_text_encoders_field_ref.current.visible = is_z_image
-            if text_encoders_value is not None:
-                z_image_text_encoders_field_ref.current.value = str(text_encoders_value)
-        if z_image_merge_adapters_field_ref.current:
-            z_image_merge_adapters_field_ref.current.visible = is_z_image
-            if merge_adapters_value is not None:
-                z_image_merge_adapters_field_ref.current.value = str(merge_adapters_value)
-        # Update page once if possible
-        if z_image_row_ref.current and z_image_row_ref.current.page:
-            z_image_row_ref.current.page.update()
-    except Exception:
-        pass
+    field_refs = {
+        "z_image_diffusion_model": z_image_diffusion_model_field_ref,
+        "z_image_vae": z_image_vae_field_ref,
+        "z_image_text_encoders": z_image_text_encoders_field_ref,
+        "z_image_merge_adapters": z_image_merge_adapters_field_ref,
+    }
+    field_values = {}
+    if diffusion_model_value is not None:
+        field_values["z_image_diffusion_model"] = str(diffusion_model_value)
+    if vae_value is not None:
+        field_values["z_image_vae"] = str(vae_value)
+    if text_encoders_value is not None:
+        field_values["z_image_text_encoders"] = str(text_encoders_value)
+    if merge_adapters_value is not None:
+        field_values["z_image_merge_adapters"] = str(merge_adapters_value)
+
+    _update_field_refs_visibility(field_refs, is_z_image, field_values)
 
 def update_flux2_fields_visibility(is_flux2: bool, diffusion_model_value=None, vae_value=None, text_encoders_value=None, shift_value=None):
     """Update visibility and values for flux2 specific fields."""
+    field_refs = {
+        "flux2_diffusion_model": flux2_diffusion_model_field_ref,
+        "flux2_vae": flux2_vae_field_ref,
+        "flux2_text_encoders": flux2_text_encoders_field_ref,
+        "flux2_shift": flux2_shift_field_ref,
+    }
+    field_values = {}
+    if diffusion_model_value is not None:
+        field_values["flux2_diffusion_model"] = str(diffusion_model_value)
+    if vae_value is not None:
+        field_values["flux2_vae"] = str(vae_value)
+    if text_encoders_value is not None:
+        field_values["flux2_text_encoders"] = str(text_encoders_value)
+    if shift_value is not None:
+        field_values["flux2_shift"] = str(shift_value)
+
+    _update_field_refs_visibility(field_refs, is_flux2, field_values)
+
+def update_ltx2_fields_visibility(
+    is_ltx2: bool,
+    ltx_mode_value=None,
+    separate_audio_buckets_value=None,
+    gradient_checkpointing_value=None,
+    slider_value=None
+):
+    """Update visibility and values for LTX2-specific fields."""
+    field_refs = {
+        "ltx_mode": ltx_mode_dropdown_ref,
+        "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
+        "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
+        "slider": slider_checkbox_ref,
+        "use_mask": use_mask_checkbox_ref,
+    }
+    field_values = {}
+    if ltx_mode_value is not None:
+        field_values["ltx_mode"] = ltx_mode_value
+    if separate_audio_buckets_value is not None:
+        field_values["separate_audio_buckets"] = separate_audio_buckets_value
+    if gradient_checkpointing_value is not None:
+        field_values["gradient_checkpointing"] = gradient_checkpointing_value
+    if slider_value is not None:
+        field_values["slider"] = slider_value
+
+    _update_field_refs_visibility(field_refs, is_ltx2, field_values)
+
+    # separate_audio_buckets is always visible for ltx2 (ignored if ltx_mode is not 'av')
     try:
-        if flux2_diffusion_model_field_ref.current:
-            flux2_diffusion_model_field_ref.current.visible = is_flux2
-            if diffusion_model_value is not None:
-                flux2_diffusion_model_field_ref.current.value = str(diffusion_model_value)
-        if flux2_vae_field_ref.current:
-            flux2_vae_field_ref.current.visible = is_flux2
-            if vae_value is not None:
-                flux2_vae_field_ref.current.value = str(vae_value)
-        if flux2_text_encoders_field_ref.current:
-            flux2_text_encoders_field_ref.current.visible = is_flux2
-            if text_encoders_value is not None:
-                flux2_text_encoders_field_ref.current.value = str(text_encoders_value)
-        if flux2_shift_field_ref.current:
-            flux2_shift_field_ref.current.visible = is_flux2
-            if shift_value is not None:
-                flux2_shift_field_ref.current.value = str(shift_value)
-        # Update page once if possible
-        if flux2_row_ref.current and flux2_row_ref.current.page:
-            flux2_row_ref.current.page.update()
+        if separate_audio_buckets_checkbox_ref and separate_audio_buckets_checkbox_ref.current:
+            separate_audio_buckets_checkbox_ref.current.visible = is_ltx2
+            if separate_audio_buckets_checkbox_ref.current.page:
+                separate_audio_buckets_checkbox_ref.current.page.update()
     except Exception:
         pass
+
+
+def on_optimizer_type_change(e, from_toml_load=False):
+    """Handle optimizer type dropdown changes.
+
+    Args:
+        e: Event object
+        from_toml_load: If True, skip value updates (values already loaded from TOML)
+    """
+    if not e.control or not e.data:
+        return
+
+    optimizer_type = e.data
+
+    # Explicitly update the dropdown's value to ensure it's set correctly
+    if e.control and hasattr(e.control, 'value'):
+        e.control.value = optimizer_type
+
+    show_prodigy = ofc.get_field_visibility(optimizer_type)
+    prodigy_row = prodigy_row_ref.current
+
+    if prodigy_row:
+        prodigy_row.visible = show_prodigy
+        prodigy_row.update()
+
+    show_automagic = ofc.get_automagic_visibility(optimizer_type)
+    automagic_row = automagic_row_ref.current
+
+    if automagic_row:
+        automagic_row.visible = show_automagic
+        automagic_row.update()
+
+    # Only update field values when user manually changes dropdown,
+    # NOT when loading from TOML (values already set correctly)
+    if from_toml_load:
+        return
+
+    # Update field values based on optimizer config defaults
+    # Only update if field is still at initial UI default (not modified by user or TOML)
+    def _update_if_at_default(ref, default_val, initial_defaults):
+        if ref and ref.current:
+            current = ref.current.value
+            # Only update if current value is one of the initial UI defaults
+            if str(current) in initial_defaults:
+                ref.current.value = str(default_val)
+                ref.current.update()
+
+    # Initial UI defaults (what the UI shows before any changes)
+    initial_lr_defaults = {"2e-5", "1.0", "", "None"}
+    initial_betas_defaults = {"[0.9, 0.99]", "", "None"}
+    initial_wd_defaults = {"0.01", "0.0", "", "None"}
+    initial_eps_defaults = {"1e-8", "[1e-30, 0.001]", "", "None"}
+
+    initial_prodigy_defaults = {"None", "", "1e-6", "1.0", "0.0"}
+    initial_automagic_defaults = {"1e-7", "1e-3", "1e-6", "1.0", "False", "0.1", "", "None"}
+
+    # Update standard fields only if at initial default
+    _update_if_at_default(lr_field_ref, ofc.get_standard_field_default(optimizer_type, "lr"), initial_lr_defaults)
+    _update_if_at_default(betas_field_ref, ofc.get_standard_field_default(optimizer_type, "betas"), initial_betas_defaults)
+    _update_if_at_default(weight_decay_field_ref, ofc.get_standard_field_default(optimizer_type, "weight_decay"), initial_wd_defaults)
+    _update_if_at_default(eps_field_ref, ofc.get_standard_field_default(optimizer_type, "eps"), initial_eps_defaults)
+
+    # Update prodigy fields if prodigy is selected and at initial default
+    if show_prodigy:
+        _update_if_at_default(beta3_field_ref, ofc.get_prodigy_field_default(optimizer_type, "beta3"), initial_prodigy_defaults)
+        _update_if_at_default(d0_field_ref, ofc.get_prodigy_field_default(optimizer_type, "d0"), initial_prodigy_defaults)
+        _update_if_at_default(d_coef_field_ref, ofc.get_prodigy_field_default(optimizer_type, "d_coef"), initial_prodigy_defaults)
+        _update_if_at_default(schedulefree_c_field_ref, ofc.get_prodigy_field_default(optimizer_type, "schedulefree_c"), initial_prodigy_defaults)
+
+    # Update automagic fields if automagic is selected and at initial default
+    if show_automagic:
+        _update_if_at_default(min_lr_field_ref, ofc.get_automagic_field_default(optimizer_type, "min_lr"), initial_automagic_defaults)
+        _update_if_at_default(max_lr_field_ref, ofc.get_automagic_field_default(optimizer_type, "max_lr"), initial_automagic_defaults)
+        _update_if_at_default(lr_bump_field_ref, ofc.get_automagic_field_default(optimizer_type, "lr_bump"), initial_automagic_defaults)
+        _update_if_at_default(clip_threshold_field_ref, ofc.get_automagic_field_default(optimizer_type, "clip_threshold"), initial_automagic_defaults)
+        # Checkbox needs special handling
+        if do_paramiter_swapping_field_ref and do_paramiter_swapping_field_ref.current:
+            current = do_paramiter_swapping_field_ref.current.value
+            if current in [False, None] or str(current) in initial_automagic_defaults:
+                default_val = ofc.get_automagic_field_default(optimizer_type, "do_paramiter_swapping")
+                do_paramiter_swapping_field_ref.current.value = _convert_bool_value(default_val)
+                do_paramiter_swapping_field_ref.current.update()
+        _update_if_at_default(paramiter_swapping_factor_field_ref, ofc.get_automagic_field_default(optimizer_type, "paramiter_swapping_factor"), initial_automagic_defaults)
+
+    page = e.control.page if hasattr(e.control, 'page') else None
+    if page:
+        page.update()

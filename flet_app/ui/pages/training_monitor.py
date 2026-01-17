@@ -91,6 +91,8 @@ def get_training_monitor_page_content():
                 for child in parent.iterdir():
                     if not child.is_dir():
                         continue
+                    if child.name.lower() == "sample":
+                        continue
                     disp = f"{parent.name}\\{child.name}"
                     try:
                         ts = child.stat().st_mtime

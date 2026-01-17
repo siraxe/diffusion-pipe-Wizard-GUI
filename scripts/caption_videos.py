@@ -107,7 +107,7 @@ except Exception:
     Qwen3VLForConditionalGeneration = None  # type: ignore
 
 DEFAULT_VLM_CAPTION_INSTRUCTION = (
-    "Shortly describe the content of this video in one or two sentences."
+    "Shortly describe the content of this video  events and actions as they occur over time."
 )
 
 

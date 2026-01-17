@@ -2,17 +2,24 @@ name: dp_env
 channels:
   - conda-forge
   - defaults
+variables:
+  PYTHONPATH: diffusion-trainers/musubi-tuner/src
 dependencies:
   - pip=25.1
   - python=3.12.11
   - wheel=0.45.1
-  - setuptools
+  - setuptools>=80.9.0
+  - ffmpeg=7.1
+  - ffmpeg-python=0.2.0
+  - pkg-config
   - pip:
     - deepspeed==0.18.4
     - toml==0.10.2
+    - decord==0.6
     - transformers==4.57.1
     - diffusers==0.35.1
     - datasets==3.6.0
+    - voluptuous==0.15.2
     - pillow==11.0.0
     - sentencepiece==0.2.0
     - protobuf==6.31.1
@@ -126,3 +133,14 @@ dependencies:
     - typing-inspection==0.4.1
     - watchfiles==1.1.1
     - yarl==1.20.1
+
+    # Added from requirements_ltx.txt
+    - numpy
+    - pillow-heif>=0.21.0
+    - torchcodec>=0.8.1
+    - scenedetect>=0.6.5.2
+    - scipy>=1.14
+    - pandas>=2.2.3
+    - scikit-image>=0.25.2
+    - huggingface-hub[hf-xet]>=0.31.4
+    - rich>=13.9.4

@@ -1,10 +1,17 @@
 import flet as ft
 from flet_app.ui._styles import create_textfield
 from flet_app.ui.pages.training_config import get_training_config_page_content
-from flet_app.ui.pages.training_data_config import get_training_data_config_page_content
 from flet_app.ui.pages.training_monitor import get_training_monitor_page_content
-from flet_app.ui.utils.console_cleanup import cleanup_training_console
 from flet_app.ui_popups import dataset_not_selected
+# Import from new training module
+from flet_app.ui.training import (
+    cleanup_training_console,
+    set_button_state,
+    reset_to_start_button,
+    terminate_process,
+    handle_cancel_click,
+    run_ltx2_training_flow,
+)
 import os
 import subprocess
 import signal
@@ -49,28 +56,9 @@ async def save_training_config_to_toml(training_tab_container):
     from concurrent.futures import ThreadPoolExecutor
 
     def _build_last_data_config_text():
-        # Extract Data Config UI values
-        try:
-            from .utils.config_utils import extract_config_from_controls
-        except Exception:
-            extract_config_from_controls = None  # type: ignore
-
-        data_cfg_ctrl = getattr(training_tab_container, 'data_config_page_content', None)
-        ds_block = getattr(training_tab_container, 'dataset_page_content', None)
-
-        cfg_map = {}
-        if extract_config_from_controls and data_cfg_ctrl is not None:
-            try:
-                cfg_map = extract_config_from_controls(data_cfg_ctrl) or {}
-            except Exception:
-                cfg_map = {}
-
-        def _get(name, default=None):
-            try:
-                val = cfg_map.get(name)
-                return default if val is None else val
-            except Exception:
-                return default
+        # Data config is now stored in per-dataset TOML files managed by data_config_panel.py
+        # This function builds a consolidated last_data_config.toml for training
+        # by reading from the individual dataset TOML files
 
         def _parse_json_list(val, default):
             import json as _json
@@ -80,112 +68,181 @@ async def save_training_config_to_toml(training_tab_container):
             except Exception:
                 return default
 
-        def _raw_field_text(val):
-            if isinstance(val, str):
-                return val.strip()
-            if val is None:
-                return ""
-            try:
-                return json.dumps(val)
-            except Exception:
-                return str(val).strip()
-
-        # Collect dataset directory path
-        dir_path_val = ""
-        selected_name = None
-        try:
-            if ds_block and hasattr(ds_block, 'get_selected_dataset'):
-                selected_name = ds_block.get_selected_dataset()
-            if selected_name:
-                from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
-                base_dir, _dtype = _get_dataset_base_dir(selected_name)
-                dir_path_val = os.path.join(base_dir, selected_name).replace('\\', '/')
-        except Exception:
-            pass
-
-        # Pull fields from UI
-        resolutions_raw = _raw_field_text(_get('resolutions', ""))
-        ar_buckets_raw = _raw_field_text(_get('ar_buckets', "[]"))
-        resolutions_val = _parse_json_list(resolutions_raw or "[]", [])
-        ar_buckets_val = _parse_json_list(ar_buckets_raw or "[]", [])
-        resolutions_commented = not resolutions_raw
-        ar_buckets_commented = not ar_buckets_raw
-        enable_ar_bucket_val = bool(_get('enable_ar_bucket', True))
-        min_ar_val = float(_get('min_ar', 0.5) or 0.0)
-        max_ar_val = float(_get('max_ar', 2.0) or 0.0)
-        # The UI label for num_ar_buckets is "num_ar"; we map it to TOML key num_ar_buckets
-        try:
-            num_ar_buckets_val = int(_get('num_ar', 9))
-        except Exception:
-            num_ar_buckets_val = 9
-        # num_repeats from dataset block if available
-        try:
-            if ds_block and hasattr(ds_block, 'get_num_repeats'):
-                num_repeats_val = int(ds_block.get_num_repeats())
-            elif ds_block and hasattr(ds_block, 'get_num_workers'):
-                num_repeats_val = int(ds_block.get_num_workers())
-            else:
-                num_repeats_val = 1
-        except Exception:
-            num_repeats_val = 1
-
-        # Frame buckets
-        frame_buckets_list = _parse_json_list(_get('frame_buckets', "[]"), [])
-        enable_frame_buckets = bool(_get('enable_frame_buckets', False))
-
-        # Has control
-        has_control = bool(_get('Has control', False))
-
         def _fmt_list(lst):
             return "[" + ", ".join(str(x) for x in lst) + "]"
 
         def _fmt_list_of_lists(lst):
             def fmt_pair(p):
-                return "[" + ", ".join(str(x) for x in p) + "]"
+                # Handle both lists and single values
+                if isinstance(p, (list, tuple)):
+                    return "[" + ", ".join(str(x) for x in p) + "]"
+                else:
+                    return str(p)
+            if not lst:
+                return "[]"
             return "[" + ", ".join(fmt_pair(p) for p in lst) + "]"
 
+        # Collect dataset directory path(s) from training config page (Dataset 1, 2, 3)
+        datasets_to_save = []
+
+        # Try to get datasets from training config page (Dataset 1, 2, 3)
+        config_page = getattr(training_tab_container, 'config_page_content', None)
+        if config_page and hasattr(config_page, 'dataset_1_block'):
+            for ds_num in [1, 2, 3]:
+                ds_block = getattr(config_page, f'dataset_{ds_num}_block', None)
+                if ds_block and hasattr(ds_block, 'get_selected_dataset'):
+                    selected_name = ds_block.get_selected_dataset()
+                    if selected_name:
+                        try:
+                            from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+                            base_dir, _dtype = _get_dataset_base_dir(selected_name)
+                            dir_path_val = os.path.join(base_dir, selected_name).replace('\\', '/')
+                            # Get frame_extraction value from dataset block
+                            frame_extraction_val = None
+                            if hasattr(ds_block, 'get_frame_extraction'):
+                                frame_extraction_val = ds_block.get_frame_extraction()
+                            datasets_to_save.append({
+                                'name': selected_name,
+                                'path': dir_path_val,
+                                'dtype': _dtype,
+                                'frame_extraction': frame_extraction_val
+                            })
+                        except Exception:
+                            pass
+
+        # If no datasets from training config, try the single dataset block
+        if not datasets_to_save:
+            ds_block = getattr(training_tab_container, 'dataset_page_content', None)
+            selected_name = None
+            try:
+                if ds_block and hasattr(ds_block, 'get_selected_dataset'):
+                    selected_name = ds_block.get_selected_dataset()
+                if selected_name:
+                    from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+                    base_dir, _dtype = _get_dataset_base_dir(selected_name)
+                    dir_path_val = os.path.join(base_dir, selected_name).replace('\\', '/')
+                    datasets_to_save.append({
+                        'name': selected_name,
+                        'path': dir_path_val,
+                        'dtype': _dtype,
+                        'frame_extraction': None
+                    })
+            except Exception:
+                pass
+
+        # Helper function to read config from a dataset's TOML file
+        def _read_dataset_toml_config(dataset_name):
+            """Read config values from a dataset's TOML file."""
+            config = {}
+            try:
+                try:
+                    import tomllib as _toml_reader
+                except Exception:
+                    _toml_reader = None
+
+                if _toml_reader and dataset_name:
+                    from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+                    base_dir, _dtype = _get_dataset_base_dir(dataset_name)
+                    clean_dataset_name = str(dataset_name)
+                    dataset_full_path = os.path.join(base_dir, clean_dataset_name)
+                    parent_dir = os.path.dirname(dataset_full_path)
+                    toml_path = os.path.join(parent_dir, f"{clean_dataset_name}.toml")
+
+                    if os.path.exists(toml_path):
+                        with open(toml_path, 'rb') as f:
+                            config = _toml_reader.load(f)
+            except Exception:
+                pass
+            return config
+
         lines = []
-        if resolutions_commented:
-            lines.append("# resolutions = []")
-        else:
-            lines.append(f"resolutions = {_fmt_list(resolutions_val)}")
-        lines.append("")
-        lines.append(f"enable_ar_bucket = {'true' if enable_ar_bucket_val else 'false'}")
-        lines.append("")
-        lines.append("# Min and max aspect ratios, given as width/height ratio.")
-        lines.append(f"min_ar = {min_ar_val}")
-        lines.append(f"max_ar = {max_ar_val}")
-        if ar_buckets_commented:
-            lines.append("# ar_buckets = []")
-        else:
-            lines.append(f"ar_buckets = {_fmt_list_of_lists(ar_buckets_val)}")
-        lines.append("")
-        lines.append("# Total number of aspect ratio buckets, evenly spaced (in log space) between min_ar and max_ar.")
-        lines.append(f"num_ar_buckets = {num_ar_buckets_val}")
-        lines.append(f"num_repeats = {num_repeats_val}")
+
+        # Top-level fallback defaults (required by training code)
+        lines.append("# Top-level fallback defaults")
+        lines.append("resolutions = [512, 512]")
+        lines.append("min_ar = 0.5")
+        lines.append("max_ar = 2.0")
+        lines.append("num_ar_buckets = 2")
         lines.append("")
 
-        # Frame buckets: always output; comment out line if disabled
-        try:
-            fb_line = f"frame_buckets = {_fmt_list(frame_buckets_list)}"
-            if not enable_frame_buckets:
-                fb_line = "# " + fb_line
-            lines.append(fb_line)
-            lines.append("")
-        except Exception:
-            pass
+        # Generate [[directory]] entries for each selected dataset
+        for i, ds_info in enumerate(datasets_to_save):
+            # Read config from the dataset's TOML file
+            ds_config = _read_dataset_toml_config(ds_info['name'])
 
-        lines.append("[[directory]]")
-        lines.append("# The target images go in here. These are the images that the model will learn to produce.")
-        lines.append(f"path = '{dir_path_val}'")
-        if has_control and dir_path_val:
-            control_path_val = os.path.join(dir_path_val, "control").replace('\\', '/')
-            lines.append(f"control_path = '{control_path_val}'")
+            # Get values from TOML config, with defaults
+            resolutions_raw = ds_config.get('resolutions', [])
+            ar_buckets_raw = ds_config.get('ar_buckets', [])
+            enable_ar_bucket_val = ds_config.get('enable_ar_bucket', True)
+            min_ar_val = ds_config.get('min_ar', 0.5)
+            max_ar_val = ds_config.get('max_ar', 2.0)
+            num_ar_buckets_val = ds_config.get('num_ar_buckets', 7)
+
+            # Handle frame_buckets - check if commented/disabled
+            frame_buckets_list = ds_config.get('frame_buckets', [])
+            # Check if frame_buckets is disabled (commented in TOML or enable_frame_buckets is False)
+            # Note: In the new format, if frame_buckets is at top level without enable_ flag,
+            # we assume it's enabled if present
+            enable_frame_buckets = bool(frame_buckets_list)
+
+            # Get num_repeats from dataset block if available
+            num_repeats_val = 1
+            config_page = getattr(training_tab_container, 'config_page_content', None)
+            if config_page:
+                ds_block = getattr(config_page, f'dataset_{datasets_to_save.index(ds_info) + 1}_block', None)
+                if ds_block and hasattr(ds_block, 'get_num_repeats'):
+                    try:
+                        num_repeats_val = int(ds_block.get_num_repeats())
+                    except Exception:
+                        num_repeats_val = 1
+
+            lines.append("[[directory]]")
+            lines.append("# The target images go in here. These are the images that the model will learn to produce.")
+            lines.append(f"path = '{ds_info['path']}'")
+
+            # Per-dataset settings
+            lines.append(f"num_repeats = {num_repeats_val}")
+
+            # Resolutions (per-dataset)
+            if not resolutions_raw:
+                lines.append("# resolutions = []")
+            else:
+                lines.append(f"resolutions = {_fmt_list(resolutions_raw)}")
+
+            # AR bucket settings (per-dataset)
+            lines.append(f"enable_ar_bucket = {'true' if enable_ar_bucket_val else 'false'}")
+            lines.append("# Min and max aspect ratios, given as width/height ratio.")
+            lines.append(f"min_ar = {min_ar_val}")
+            lines.append(f"max_ar = {max_ar_val}")
+            if not ar_buckets_raw:
+                lines.append("# ar_buckets = []")
+            else:
+                lines.append(f"ar_buckets = {_fmt_list_of_lists(ar_buckets_raw)}")
+            lines.append("# Total number of aspect ratio buckets, evenly spaced (in log space) between min_ar and max_ar.")
+            lines.append(f"num_ar_buckets = {num_ar_buckets_val}")
+
+            # Frame buckets (per-dataset)
+            try:
+                fb_line = f"frame_buckets = {_fmt_list(frame_buckets_list)}"
+                if not enable_frame_buckets:
+                    fb_line = "# " + fb_line
+                lines.append(fb_line)
+            except Exception:
+                pass
+
+            # Frame extraction (per-dataset, only if set)
+            frame_extraction_val = ds_info.get('frame_extraction')
+            if frame_extraction_val:
+                lines.append(f"frame_extraction = \"{frame_extraction_val}\"")
+
+            # Blank line between datasets
+            if i < len(datasets_to_save) - 1:
+                lines.append("")
 
         return "\n".join(lines) + "\n"
 
     def _save_both():
-        from .utils.config_utils import build_toml_config_from_ui
+        from .utils.config_utils import build_toml_config_from_ui, extract_config_from_controls
 
         ws_dir, last_config_path, last_data_config_path = _get_workspace_last_config_paths()
 
@@ -213,17 +270,43 @@ async def save_training_config_to_toml(training_tab_container):
         data_toml_path = last_data_config_path
         _write_atomic(data_toml_path, data_toml_text)
 
-        # 2) Build training TOML and rewrite dataset pointer to last_data_config.toml
-        train_toml_text = build_toml_config_from_ui(training_tab_container)
+        # 2) Detect model type and build training TOML
+        # Check if this is an LTX2 model
+        config_page = getattr(training_tab_container, 'config_page_content', None)
+        cfg = {}
+        if config_page:
+            try:
+                cfg = extract_config_from_controls(config_page) or {}
+            except Exception:
+                pass
+
+        model_type = cfg.get('Model Type', '').strip().lower() if cfg else ''
+
+        # Use appropriate builder based on model type
+        if model_type == 'ltx-video-2':
+            from .utils.ltx2_config_utils import build_ltx2_toml_from_ui
+            train_toml_text = build_ltx2_toml_from_ui(training_tab_container)
+        else:
+            train_toml_text = build_toml_config_from_ui(training_tab_container)
         data_toml_path_abs = os.path.abspath(data_toml_path).replace('\\', '/')
 
-        # Replace the dataset = '...' line to point to our last_data_config.toml
+        # Replace the dataset pointer to point to our last_data_config.toml
         def _replace_dataset_line(content: str, new_path: str) -> str:
+            # For standard models: dataset = '...'
             pattern = r"^(\s*dataset\s*=\s*)['\"]([^'\"]*)['\"]\s*$"
             repl = r"\1'" + new_path + r"'"
             return re.sub(pattern, repl, content, flags=re.MULTILINE)
 
-        train_toml_text = _replace_dataset_line(train_toml_text, data_toml_path_abs)
+        def _replace_preprocessed_data_root(content: str, new_path: str) -> str:
+            # For LTX2 models: preprocessed_data_root = '...' in [data] section
+            pattern = r"^(\s*preprocessed_data_root\s*=\s*)['\"]([^'\"]*)['\"]\s*$"
+            repl = r"\1'" + new_path + r"'"
+            return re.sub(pattern, repl, content, flags=re.MULTILINE)
+
+        if model_type == 'ltx-video-2':
+            train_toml_text = _replace_preprocessed_data_root(train_toml_text, data_toml_path_abs)
+        else:
+            train_toml_text = _replace_dataset_line(train_toml_text, data_toml_path_abs)
 
         # Convert wan22 to wan for runtime backend compatibility
         def _convert_wan22_to_wan(content: str) -> str:
@@ -283,10 +366,15 @@ def _detect_gpu_count() -> int:
         pass
     return 1
 
-async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_cache: bool = False, resume_last: bool = False, cache_only: bool = False, resume_last_strength: float = 1.0):
+async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_cache: bool = False, resume_last: bool = False, cache_only: bool = False, resume_last_strength: float = 1.0, reset_optimizer_params: bool = False, reset_optimizer: bool = False):
     """Launch deepspeed training with env vars and computed GPU count.
     Returns (proc, cmd_string) where proc is a Popen object with stdout piped.
     """
+    from flet_app.ui.utils.process_cleanup import kill_existing_training_processes
+
+    # Kill any existing training processes before starting new one
+    kill_existing_training_processes()
+
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 
@@ -297,7 +385,7 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
         cmd = [
             "deepspeed",
             f"--num_gpus={num_gpus}",
-            "diffusion-pipe/train.py",
+            "diffusion-trainers/diffusion-pipe/train.py",
             "--deepspeed",
             "--config",
             os.path.abspath(config_path),
@@ -309,7 +397,7 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
             # Only add adapter scale flag if the training script supports it.
             if resume_last_strength < 1.0:
                 try:
-                    train_py = os.path.join(project_root, "diffusion-pipe", "train.py")
+                    train_py = os.path.join(project_root, "diffusion-trainers","diffusion-pipe", "train.py")
                     with open(train_py, "r", encoding="utf-8") as f:
                         train_src = f.read()
                     if "resume_adapter_scale" in train_src:
@@ -319,6 +407,10 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
                     pass
         if cache_only:
             cmd.append("--cache_only")
+        if reset_optimizer_params:
+            cmd.append("--reset_optimizer_params")
+        if reset_optimizer:
+            cmd.append("--reset_optimizer")
         env = os.environ.copy()
         env["NCCL_P2P_DISABLE"] = "1"
         env["NCCL_IB_DISABLE"] = "1"
@@ -516,12 +608,6 @@ def build_navigation_rail(on_nav_change):
         alignment=ft.alignment.center,
         expand=True
     )
-    data_config_dest_content = ft.Container(
-        content=ft.Text("Data Config", size=10),
-        padding=ft.padding.symmetric(vertical=0, horizontal=0),
-        alignment=ft.alignment.center,
-        expand=True
-    )
     monitor_dest_content = ft.Container(
         content=ft.Text("Monitor", size=10),
         padding=ft.padding.symmetric(vertical=0, horizontal=0),
@@ -537,7 +623,6 @@ def build_navigation_rail(on_nav_change):
         label_type=ft.NavigationRailLabelType.NONE,
         destinations=[
             ft.NavigationRailDestination(icon=config_dest_content),
-            ft.NavigationRailDestination(icon=data_config_dest_content),
             ft.NavigationRailDestination(icon=monitor_dest_content),
         ]
     )
@@ -557,7 +642,7 @@ def build_main_content_row(sub_navigation_rail, content_area):
         vertical_alignment=ft.CrossAxisAlignment.START
     )
 
-def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbox, resume_last_checkbox, cache_only_checkbox):
+def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbox, resume_last_checkbox, cache_only_checkbox, reset_opt_params_checkbox, reset_opt_checkbox, init_from_existing_field_ref, reset_opt_row_ref, init_from_existing_row_ref):
     """
     Builds the bottom app bar with the Start button and Multi-GPU checkbox.
     """
@@ -566,6 +651,14 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
         "output_dir",
         "workspace/output/dir",
         width=250,
+    )
+
+    # Init from existing field (for loading existing adapter weights)
+    init_from_existing_field = create_textfield(
+        "init_from_existing",
+        "",
+        width=250,
+        ref=init_from_existing_field_ref,
     )
 
     # Add Last Config checkbox
@@ -599,8 +692,23 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
                         multi_gpu_checkbox,
                         trust_cache_checkbox,
                         resume_last_checkbox,
+                        # Reset optimizer options (hidden by default)
+                        ft.Container(
+                            content=ft.Row([
+                                reset_opt_params_checkbox,
+                                reset_opt_checkbox,
+                            ], spacing=15),
+                            ref=reset_opt_row_ref,
+                            visible=False,
+                        ),
+                        # Init from existing field (shown by default)
+                        ft.Container(
+                            content=init_from_existing_field,
+                            ref=init_from_existing_row_ref,
+                            visible=True,
+                        ),
                         last_strength_field,
-                    ], spacing=20, alignment=ft.MainAxisAlignment.START),
+                    ], spacing=15, alignment=ft.MainAxisAlignment.START),
                     alignment=ft.alignment.center_left,
                     expand=True,
                     padding=ft.padding.only(left=20) # Add some padding
@@ -624,6 +732,8 @@ def build_bottom_app_bar(on_start_click, multi_gpu_checkbox, trust_cache_checkbo
     bottom.start_btn = start_btn
     # Expose the output_dir field for config read/write
     bottom.output_dir_field = output_dir_field
+    # Expose the init_from_existing field for config read/write
+    bottom.init_from_existing_field = init_from_existing_field
     # Expose the last_config_checkbox for external control
     bottom.last_config_checkbox = last_config_checkbox
     bottom.last_strength_field = last_strength_field
@@ -662,116 +772,9 @@ def get_training_tab_content(page: ft.Page):
     page.snack_bar = ft.SnackBar(content=ft.Text("Training tab loaded! (debug)"), open=True)
     page.update()
 
-    # Initialize config, data config, and monitor page content
+    # Initialize config and monitor page content
     config_page_content = get_training_config_page_content()
-    data_config_page_content = get_training_data_config_page_content()
     monitor_page_content = get_training_monitor_page_content()
-
-    # Prefer the Data Config tab's save handler so inputs stay intact
-    cfg_save_btn = getattr(config_page_content, 'save_data_config_button', None)
-    data_save_handler = getattr(data_config_page_content, 'save_data_config', None)
-    if cfg_save_btn and callable(data_save_handler):
-        cfg_save_btn.on_click = lambda e: data_save_handler(e)
-
-    # Wire dataset selection sync between pages (two-way)
-    try:
-        cfg_ds = getattr(config_page_content, 'dataset_block', None)
-        data_ds = getattr(data_config_page_content, 'dataset_block', None)
-        if cfg_ds and data_ds and \
-           hasattr(cfg_ds, 'add_on_selection_change') and hasattr(cfg_ds, 'set_selected_dataset') and \
-           hasattr(data_ds, 'add_on_selection_change') and hasattr(data_ds, 'set_selected_dataset'):
-
-            # Mirror Config -> Data Config
-            def sync_config_to_data(dataset_name):
-                data_ds.set_selected_dataset(dataset_name, page_ctx=page)
-
-                # Load num_repeats from Data Config TOML file first
-                try:
-                    import os
-                    try:
-                        import tomllib as _toml_reader
-                    except Exception:
-                        _toml_reader = None
-
-                    if _toml_reader and dataset_name:
-                        # Get dataset paths similar to how Data Config does it
-                        from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
-                        base_dir, dataset_type = _get_dataset_base_dir(dataset_name)
-                        clean_dataset_name = str(dataset_name)
-                        dataset_full_path = os.path.join(base_dir, clean_dataset_name)
-                        parent_dir = os.path.dirname(dataset_full_path)
-                        toml_path = os.path.join(parent_dir, f"{clean_dataset_name}.toml")
-
-                        if os.path.exists(toml_path):
-                            with open(toml_path, 'rb') as f:
-                                data = _toml_reader.load(f)
-                                if data.get('num_repeats') is not None:
-                                    toml_num_repeats = int(data['num_repeats'])
-                                    # Set this value in BOTH tabs
-                                    if hasattr(cfg_ds, 'set_num_repeats'):
-                                        cfg_ds.set_num_repeats(toml_num_repeats, page_ctx=page)
-                                    if hasattr(data_ds, 'set_num_repeats'):
-                                        data_ds.set_num_repeats(toml_num_repeats, page_ctx=page)
-                except Exception:
-                    pass
-
-                # Fallback: sync current num_repeats if TOML loading failed
-                if hasattr(cfg_ds, 'get_num_repeats') and hasattr(data_ds, 'set_num_repeats'):
-                    try:
-                        num_repeats = cfg_ds.get_num_repeats()
-                        data_ds.set_num_repeats(num_repeats, page_ctx=page)
-                    except Exception:
-                        pass
-            cfg_ds.add_on_selection_change(sync_config_to_data)
-
-            # Mirror Data Config -> Config
-            def sync_data_to_config(dataset_name):
-                cfg_ds.set_selected_dataset(dataset_name, page_ctx=page)
-                # Also sync num_repeats
-                if hasattr(data_ds, 'get_num_repeats') and hasattr(cfg_ds, 'set_num_repeats'):
-                    try:
-                        num_repeats = data_ds.get_num_repeats()
-                        cfg_ds.set_num_repeats(num_repeats, page_ctx=page)
-                    except Exception:
-                        pass
-            data_ds.add_on_selection_change(sync_data_to_config)
-
-            # Sync num_repeats changes from Data Config -> Config
-            if data_ds and hasattr(data_ds, 'add_on_num_repeats_change'):
-                def sync_num_repeats_to_config(new_val):
-                    if hasattr(cfg_ds, 'set_num_repeats'):
-                        try:
-                            cfg_ds.set_num_repeats(new_val, page_ctx=page)
-                        except Exception:
-                            pass
-                data_ds.add_on_num_repeats_change(sync_num_repeats_to_config)
-
-            # Sync num_repeats changes from Config -> Data Config
-            if cfg_ds and hasattr(cfg_ds, 'add_on_num_repeats_change'):
-                def sync_num_repeats_to_data(new_val):
-                    if hasattr(data_ds, 'set_num_repeats'):
-                        try:
-                            data_ds.set_num_repeats(new_val, page_ctx=page)
-                        except Exception:
-                            pass
-                cfg_ds.add_on_num_repeats_change(sync_num_repeats_to_data)
-
-            # Initialize Data Config selection and num_repeats from Config selection
-            try:
-                initial = cfg_ds.get_selected_dataset() if hasattr(cfg_ds, 'get_selected_dataset') else None
-                if initial is not None:
-                    data_ds.set_selected_dataset(initial, page_ctx=page)
-                    # Also sync initial num_repeats value
-                    if hasattr(cfg_ds, 'get_num_repeats') and hasattr(data_ds, 'set_num_repeats'):
-                        try:
-                            num_repeats = cfg_ds.get_num_repeats()
-                            data_ds.set_num_repeats(num_repeats, page_ctx=page)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-    except Exception:
-        pass
 
     # Content area container
     content_area = ft.Container(
@@ -796,24 +799,6 @@ def get_training_tab_content(page: ft.Page):
                 except Exception:
                     pass
             elif selected_idx == 1:
-                content_area.content = data_config_page_content
-                # Ensure Data Config reflects current selection from Config
-                try:
-                    cfg_ds = getattr(config_page_content, 'dataset_block', None)
-                    data_ds = getattr(data_config_page_content, 'dataset_block', None)
-                    current = cfg_ds.get_selected_dataset() if (cfg_ds and hasattr(cfg_ds, 'get_selected_dataset')) else None
-                    if data_ds and hasattr(data_ds, 'set_selected_dataset'):
-                        data_ds.set_selected_dataset(current, page_ctx=page)
-                    # Refresh Data Config num_repeats UI to match internal value
-                    if data_ds and hasattr(data_ds, 'get_num_repeats') and hasattr(data_ds, 'set_num_repeats'):
-                        current_repeats = data_ds.get_num_repeats()
-                        data_ds.set_num_repeats(current_repeats, page_ctx=page)
-                    # Refresh Data Config indicator if exposed
-                    if hasattr(data_config_page_content, 'refresh_indicator') and callable(getattr(data_config_page_content, 'refresh_indicator')):
-                        data_config_page_content.refresh_indicator(current)
-                except Exception:
-                    pass
-            elif selected_idx == 2:
                 content_area.content = monitor_page_content
             page.update()
         except Exception as ex:
@@ -828,6 +813,17 @@ def get_training_tab_content(page: ft.Page):
     trust_cache_checkbox = ft.Checkbox(label="Trust Cache", value=False)
     resume_last_checkbox = ft.Checkbox(label="Resume Last", value=False)
     cache_only_checkbox = ft.Checkbox(label="Cache Only", value=False)
+
+    # Reset optimizer options (compact with tooltips, mutually exclusive)
+    reset_opt_params_checkbox = ft.Checkbox(label="", value=False, tooltip="Reset Optimizer Params")
+    reset_opt_checkbox = ft.Checkbox(label="", value=False, tooltip="Reset Optimizer")
+
+    # Refs for visibility control
+    reset_opt_row_ref = ft.Ref[ft.Container]()
+    init_from_existing_row_ref = ft.Ref[ft.Container]()
+
+    # Init from existing field reference
+    init_from_existing_field_ref = ft.Ref[ft.TextField]()
 
     # Mutual exclusion logic for checkboxes
     def on_cache_only_change(e):
@@ -849,11 +845,36 @@ def get_training_tab_content(page: ft.Page):
             if e.page:
                 cache_only_checkbox.update()
 
+        # Toggle visibility based on resume_last_checkbox state
+        resume_last_on = resume_last_checkbox.value
+        if reset_opt_row_ref.current:
+            reset_opt_row_ref.current.visible = resume_last_on
+            reset_opt_row_ref.current.update()
+        if init_from_existing_row_ref.current:
+            init_from_existing_row_ref.current.visible = not resume_last_on
+            init_from_existing_row_ref.current.update()
+
     # Attach event handlers
     cache_only_checkbox.on_change = on_cache_only_change
     multi_gpu_checkbox.on_change = on_other_checkbox_change
     trust_cache_checkbox.on_change = on_other_checkbox_change
     resume_last_checkbox.on_change = on_other_checkbox_change
+
+    # Mutual exclusion for reset optimizer checkboxes
+    def on_reset_opt_params_change(e):
+        if reset_opt_params_checkbox.value:
+            reset_opt_checkbox.value = False
+            if e.page:
+                reset_opt_checkbox.update()
+
+    def on_reset_opt_change(e):
+        if reset_opt_checkbox.value:
+            reset_opt_params_checkbox.value = False
+            if e.page:
+                reset_opt_params_checkbox.update()
+
+    reset_opt_params_checkbox.on_change = on_reset_opt_params_change
+    reset_opt_checkbox.on_change = on_reset_opt_change
 
     async def handle_training_output(page=None, training_tab_container=None):
         """
@@ -902,6 +923,22 @@ def get_training_tab_content(page: ft.Page):
             else:
                 out_path, _ = await save_training_config_to_toml(training_tab_container)
 
+            # Check if model type is ltx-video-2
+            from musubi_ltx2 import handle_musubi_model as handle_ltx_model
+            if handle_ltx_model(out_path):
+                # Use the new centralized LTX2 training flow
+                await run_ltx2_training_flow(
+                    out_path=out_path,
+                    trust_cache=trust_cache_checkbox.value,
+                    cache_only=cache_only_checkbox.value,
+                    resume_last=resume_last_checkbox.value,
+                    use_last_config=use_last_config,
+                    main_container=main_container,
+                    training_tab_container=training_tab_container,
+                    page=page,
+                    trust_cache_checkbox=trust_cache_checkbox,
+                )
+                return
             # Determine launch parameters
             use_multi_gpu = multi_gpu_checkbox.value
             trust_cache = trust_cache_checkbox.value
@@ -926,7 +963,7 @@ def get_training_tab_content(page: ft.Page):
             except Exception:
                 pass
 
-            proc, cmd_str = await run_training_deepspeed(out_path, use_multi_gpu, trust_cache, resume_last, cache_only, last_strength_value)
+            proc, cmd_str = await run_training_deepspeed(out_path, use_multi_gpu, trust_cache, resume_last, cache_only, last_strength_value, reset_opt_params_checkbox.value, reset_opt_checkbox.value)
 
             # Store process handle and toggle Start->Cancel
             try:
@@ -1004,9 +1041,9 @@ def get_training_tab_content(page: ft.Page):
                                         drained = []
                                         while _buffer:
                                             drained.extend(_buffer.pop(0))
-                                        # Apply once: prepend drained to existing spans
+                                        # Apply once: append drained to existing spans (normal order)
                                         spans_current = list((training_console_text.spans or [])) if training_console_text is not None else []
-                                        new_total = drained + spans_current
+                                        new_total = spans_current + drained
                                         if training_console_text is not None:
                                             training_console_text.spans = new_total
 
@@ -1075,9 +1112,10 @@ def get_training_tab_content(page: ft.Page):
                             pass
                         # Reset Start button and clear proc handle
                         try:
-                            if hasattr(training_tab_container, 'start_btn') and training_tab_container.start_btn is not None:
-                                training_tab_container.start_btn.text = "Start"
+                            if hasattr(main_container, 'start_btn') and main_container.start_btn is not None:
+                                main_container.start_btn.text = "Start"
                             training_tab_container.training_proc = None
+                            main_container.training_proc = None
                         except Exception:
                             pass
                         try:
@@ -1163,80 +1201,62 @@ def get_training_tab_content(page: ft.Page):
             # Switch to Monitor tab immediately to show console
             try:
                 if sub_navigation_rail is not None:
-                    sub_navigation_rail.selected_index = 2
+                    sub_navigation_rail.selected_index = 1
                 if content_area is not None:
                     content_area.content = monitor_page_content
                 if e and e.page:
                     e.page.update()
             except Exception:
                 pass
-            # If a training process is running, treat as Cancel
-            proc = getattr(main_container, 'training_proc', None)
-            if proc is not None:
+            # Check if this is LTX2 model by checking the training container
+            from musubi_ltx2 import handle_musubi_model as handle_ltx_model
+            training_proc = None
+
+            # Try to get training_proc from LTX2 specific container
+            try:
+                if hasattr(e.page, 'training_tab_container'):
+                    training_tab = e.page.training_tab_container
+                    # Check if this is LTX2 by checking the config
+                    last_config_path = getattr(training_tab, 'last_config_path', None)
+                    if last_config_path and os.path.exists(last_config_path):
+                        if handle_ltx_model(last_config_path):
+                            training_proc = getattr(training_tab, 'training_proc', None)
+                            # Also check main_container as backup
+                            if training_proc is None:
+                                training_proc = getattr(main_container, 'training_proc', None)
+            except Exception:
+                pass
+
+            # Fallback to main_container if not found
+            if training_proc is None:
+                training_proc = getattr(main_container, 'training_proc', None)
+
+            if training_proc is not None:
                 try:
-                    alive = (proc.poll() is None)
+                    alive = (training_proc.poll() is None)
                 except Exception:
                     alive = False
                 if alive:
-                    # Append a cancel notice to console
-                    try:
-                        monitor_content = getattr(main_container, 'monitor_page_content', None)
-                        training_console_text = getattr(monitor_content, 'training_console_text', None)
-                        spans = list((training_console_text.spans or [])) if training_console_text is not None else []
-                        spans.append(ft.TextSpan("\n[Action] Cancel requested. Terminating...\n", style=ft.TextStyle(color=ft.Colors.WHITE)))
-                        if training_console_text is not None:
-                            training_console_text.spans = spans
-                            try:
-                                training_console_text.update()
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                    # Request termination (robustly)
-                    try:
-                        if os.name == 'posix':
-                            try:
-                                os.killpg(proc.pid, signal.SIGTERM)
-                            except Exception:
-                                proc.terminate()
-                        else:
-                            try:
-                                proc.send_signal(getattr(signal, 'CTRL_BREAK_EVENT', signal.SIGTERM))
-                            except Exception:
-                                proc.terminate()
-                        # brief wait and force kill if still alive
-                        try:
-                            for _ in range(30):
-                                if proc.poll() is not None:
-                                    break
-                                import time as _t
-                                _t.sleep(0.1)
-                            if proc.poll() is None:
-                                if os.name == 'posix':
-                                    try:
-                                        os.killpg(proc.pid, signal.SIGKILL)
-                                    except Exception:
-                                        proc.kill()
-                                else:
-                                    proc.kill()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                    # Do not flip button text here; _reader will reset on exit
+                    # Use the new centralized cancel handler
+                    if handle_cancel_click(e, main_container):
+                        return
+
+            # Safety check: if button shows "Cancel" but no process is running, reset it
+            if hasattr(main_container, 'start_btn') and main_container.start_btn is not None:
+                if main_container.start_btn.text == "Cancel" and training_proc is None:
+                    # Button state is out of sync, reset to Start
+                    main_container.start_btn.text = "Start"
                     if e and e.page:
-                        try:
-                            e.page.update()
-                        except Exception:
-                            pass
-                    return
+                        e.page.update()
+                    return  # Don't start training after resetting button
+
             # Otherwise, start training
             e.page.run_task(handle_start_click, e, main_container)
         except Exception as ex:
             print(f"ERROR in start_button_click: {ex}")
 
     # Build the bottom app bar with the wrapper function
-    bottom_bar = build_bottom_app_bar(start_button_click, multi_gpu_checkbox, trust_cache_checkbox, resume_last_checkbox, cache_only_checkbox)
+    bottom_bar = build_bottom_app_bar(start_button_click, multi_gpu_checkbox, trust_cache_checkbox, resume_last_checkbox, cache_only_checkbox, reset_opt_params_checkbox, reset_opt_checkbox, init_from_existing_field_ref, reset_opt_row_ref, init_from_existing_row_ref)
     main_container = build_main_container(main_content_row, bottom_bar)
 
     # Attach Start button reference to main container for state toggling
@@ -1249,6 +1269,11 @@ def get_training_tab_content(page: ft.Page):
         main_container.output_dir_field = getattr(bottom_bar, 'output_dir_field', None)
     except Exception:
         main_container.output_dir_field = None
+    # Also expose init_from_existing field for config handling
+    try:
+        main_container.init_from_existing_field = getattr(bottom_bar, 'init_from_existing_field', None)
+    except Exception:
+        main_container.init_from_existing_field = None
     try:
         main_container.last_config_checkbox = getattr(bottom_bar, 'last_config_checkbox', None)
     except Exception:
@@ -1262,30 +1287,17 @@ def get_training_tab_content(page: ft.Page):
     main_container.sub_navigation_rail = sub_navigation_rail
     main_container.content_area = content_area
 
-    # Provide a helper to emulate a quick tab switch to refresh UI state
+    # Provide a helper to refresh Config panel UI state
     def refresh_config_panel():
         try:
-            # Always use the latest references stored on the container
-            rail = getattr(main_container, 'sub_navigation_rail', None)
-            area = getattr(main_container, 'content_area', None)
             cfg = getattr(main_container, 'config_page_content', None)
-            data_cfg = getattr(main_container, 'data_config_page_content', None)
-            if area is None:
+            if cfg is None:
                 return
-            # Switch to Data Config (1) and back to Config (0)
-            try:
-                if rail is not None:
-                    rail.selected_index = 1
-            except Exception:
-                pass
-            area.content = data_cfg if data_cfg is not None else area.content
-            if page: page.update()
-            try:
-                if rail is not None:
-                    rail.selected_index = 0
-            except Exception:
-                pass
-            area.content = cfg if cfg is not None else area.content
+            # Refresh Config tab UI fields
+            cfg_ds = getattr(cfg, 'dataset_block', None)
+            if cfg_ds and hasattr(cfg_ds, 'get_num_repeats') and hasattr(cfg_ds, 'set_num_repeats'):
+                current_repeats = cfg_ds.get_num_repeats()
+                cfg_ds.set_num_repeats(current_repeats, page_ctx=page)
             if page: page.update()
         except Exception:
             # Best effort; ignore if anything goes wrong
@@ -1294,8 +1306,6 @@ def get_training_tab_content(page: ft.Page):
 
     # Attach references for later extraction
     main_container.config_page_content = config_page_content
-
-    main_container.data_config_page_content = data_config_page_content
     main_container.monitor_page_content = monitor_page_content
     if hasattr(config_page_content, 'dataset_block'):
         main_container.dataset_page_content = config_page_content.dataset_block

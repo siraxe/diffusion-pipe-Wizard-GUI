@@ -76,11 +76,39 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         if _has(msl):
             lines.append(f"max_sequence_length = {msl}")
 
-    # ltx-video
+    # ltx-video (but not ltx-video-2 which uses the new format)
     if mt in ('ltx-video', 'ltx'):
         ffc = get_value('first_frame_conditioning_p', None)
         if _has(ffc):
             lines.append(f"first_frame_conditioning_p = {ffc}")
+
+    # Also add checkpoint_path, diffusers_path, and single_file_path for LTX models
+    if mt in ('ltx-video', 'ltx', 'ltx-video-2'):
+        checkpoint_path = get_value('checkpoint_path', None)
+        if checkpoint_path and str(checkpoint_path).strip():
+            expanded_checkpoint_path = expand_model_path(str(checkpoint_path))
+            lines.append(f"checkpoint_path = '{expanded_checkpoint_path}'")
+
+        diffusers_path = get_value('diffusers_path', None)
+        if diffusers_path and str(diffusers_path).strip():
+            expanded_diffusers_path = expand_model_path(str(diffusers_path))
+            lines.append(f"diffusers_path = '{expanded_diffusers_path}'")
+
+        single_file_path = get_value('single_file_path', None)
+        if single_file_path and str(single_file_path).strip():
+            expanded_single_file_path = expand_model_path(str(single_file_path))
+            lines.append(f"single_file_path = '{expanded_single_file_path}'")
+
+        # Add LTX2-specific adapter targets for LoRA
+        def _to_bool(val):
+            if isinstance(val, bool):
+                return val
+            s = str(val).strip().lower()
+            return s in ('1', 'true', 'yes', 'on')
+
+        if mt == 'ltx-video-2':
+            # LTX2 uses ltx_mode instead of adapter.lora_targets checkboxes
+            pass
 
     # chroma
     if mt == 'chroma':
@@ -278,9 +306,25 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     elif mt_lower == 'sd3':
         if 'flux_shift' in model_dict:
             label_vals['flux_shift'] = model_dict.get('flux_shift')
-    elif mt_lower in ('ltx-video', 'ltx'):
-        if 'first_frame_conditioning_p' in model_dict:
+    elif mt_lower in ('ltx-video', 'ltx', 'ltx-video-2'):
+        # Skip old first_frame_conditioning_p for LTX2 (uses new format)
+        if mt_lower != 'ltx-video-2' and 'first_frame_conditioning_p' in model_dict:
             label_vals['first_frame_conditioning_p'] = model_dict.get('first_frame_conditioning_p')
+        if 'checkpoint_path' in model_dict:
+            label_vals['checkpoint_path'] = collapse_model_path(model_dict.get('checkpoint_path'))
+        if 'diffusers_path' in model_dict:
+            label_vals['diffusers_path'] = collapse_model_path(model_dict.get('diffusers_path'))
+        if 'single_file_path' in model_dict:
+            label_vals['single_file_path'] = collapse_model_path(model_dict.get('single_file_path'))
+
+        # Handle LTX2-specific ltx_mode and separate_audio_buckets from training_strategy
+        if mt_lower == 'ltx-video-2' and 'training_strategy' in model_dict:
+            training_strategy = model_dict['training_strategy']
+            if isinstance(training_strategy, dict):
+                if 'ltx_mode' in training_strategy:
+                    label_vals['ltx_mode'] = training_strategy['ltx_mode']
+                if 'separate_audio_buckets' in training_strategy:
+                    label_vals['separate_audio_buckets'] = training_strategy['separate_audio_buckets']
     elif mt_lower in ('lumina', 'lumina_2'):
         if 'lumina_shift' in model_dict:
             label_vals['lumina_shift'] = model_dict.get('lumina_shift')
@@ -315,7 +359,7 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
             elif isinstance(merge_adapters_val, str):
                 # Fallback if it's a string (for backwards compatibility)
                 label_vals['merge_adapters'] = collapse_model_path(merge_adapters_val)
-    elif mt_lower == 'sdxl':
+    elif mt_lower in ('sdxl', 'ltx-video-2'):
         if 'v_pred' in model_dict:
             label_vals['v_pred'] = model_dict.get('v_pred')
         if 'debiased_estimation_loss' in model_dict:
@@ -342,7 +386,6 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             update_auraflow_fields_visibility,
             update_chroma_fields_visibility,
             update_flux_fields_visibility,
-            update_ltx_fields_visibility,
         )
     except Exception:
         return
@@ -352,7 +395,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -361,7 +404,8 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_flux = (mt == 'flux')
         is_flux2 = (mt in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'))
         is_sd3 = (mt == 'sd3')
-        is_ltx = (mt in ('ltx-video', 'ltx'))
+        is_ltx = (mt in ('ltx-video', 'ltx', 'ltx-video-2'))
+        is_ltx2 = (mt == 'ltx-video-2')
         is_lumina = (mt in ('lumina', 'lumina_2'))
         is_z_image = (mt == 'z_image')
         is_sdxl = (mt == 'sdxl')
@@ -380,7 +424,8 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_flux = is_flux or (curv == 'flux')
             is_flux2 = is_flux2 or (curv in ('flux2', 'flux2_klein_4b', 'flux2_klein_9b'))
             is_sd3 = is_sd3 or (curv == 'sd3')
-            is_ltx = is_ltx or (curv in ('ltx-video', 'ltx'))
+            is_ltx = is_ltx or (curv in ('ltx-video', 'ltx', 'ltx-video-2'))
+            is_ltx2 = is_ltx2 or (curv == 'ltx-video-2')
             is_lumina = is_lumina or (curv in ('lumina', 'lumina_2'))
             is_z_image = is_z_image or (curv == 'z_image')
             is_sdxl = is_sdxl or (curv == 'sdxl')
@@ -412,7 +457,16 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     update_auraflow_fields_visibility(is_auraflow, label_vals.get('max_sequence_length'))
     update_chroma_fields_visibility(is_chroma or is_sd3, label_vals.get('flux_shift'))
     update_flux_fields_visibility(is_flux, label_vals.get('flux_shift'), label_vals.get('bypass_g_emb'))
-    update_ltx_fields_visibility(is_ltx, label_vals.get('first_frame_conditioning_p'))
+    try:
+        from flet_app.ui.pages.training_config import update_ltx2_fields_visibility
+        update_ltx2_fields_visibility(
+            is_ltx2,
+            label_vals.get('ltx_mode'),
+            label_vals.get('separate_audio_buckets'),
+            label_vals.get('gradient_checkpointing')
+        )
+    except Exception:
+        pass
     try:
         from flet_app.ui.pages.training_config import update_lumina_fields_visibility
         update_lumina_fields_visibility(is_lumina, label_vals.get('lumina_shift'))
@@ -429,9 +483,11 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             label_vals.get('text_encoder_1_lr'),
             label_vals.get('text_encoder_2_lr'),
             label_vals.get('checkpoint_path'),
+            is_ltx2=is_ltx2,  # Pass the LTX2 flag to handle checkpoint_path visibility
         )
     except Exception:
         pass
+
     try:
         from flet_app.ui.pages.training_config import update_z_image_fields_visibility
         update_z_image_fields_visibility(

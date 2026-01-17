@@ -2,30 +2,6 @@
 
 A Flet-based GUI application designed to run on WSL/Linux for constructing and managing configuration files for [diffusion-pipe](https://github.com/tdrussell/diffusion-pipe).
 
-Key Features:
-- Interactive user interface that automatically matches and displays default model configurations, making it easy to customize and fine-tune training parameters for supported models without manual editing of configuration files
-- Built-in video/image editing and captioning manager for dataset preparation
-- Model download manager using aria2c for efficient parallel downloading of large model files
-
-**Note:** This application was tested on WSL (Windows Subsystem for Linux) and may require additional testing on native Linux distributions.
-**Note:** Not all functions are implemented to properly work with dataset files on server yet.
-
-![GUI Preview](.git_assets/gui_02.png)
-
-## Quick Start
-📁 Navigate to project folder (optional)
-
-```
-cd Dpipe
-```
-🚀 Run flet_app
-
-```
-source ~/miniconda3/bin/activate && source $(conda info --base)/etc/profile.d/conda.sh && conda activate ./dp_env && python3 -m flet_app.flet_app
-```
-
-![GUI Preview](.git_assets/gui_01.png)
-
 # 1. Installation
 
 ### 1.1 🔧 Install FFMPEG ,aria2 and Miniconda
@@ -39,49 +15,63 @@ chmod +x Miniconda3-latest-Linux-x86_64.sh
 source ~/miniconda3/bin/activate
 ```
 
-### 1.2 📥 Clone GUI and diffusion-pipe
+### 1.2 📥 Clone and Setup venv
 
 ```
-git clone https://github.com/siraxe/Dpipe-Wizard-GUI.git Dpipe
+git clone --recurse-submodules -b mus https://github.com/siraxe/diffusion-pipe-Wizard-GUI.git Dpipe
 cd Dpipe
-git clone --recurse-submodules https://github.com/tdrussell/diffusion-pipe
-```
-
-### 1.3 🐍 Setup venv
-
-```
 conda env create -f dp_env.yml -p ./dp_env
 ```
 
-## Apply qwen_edit_plus patch (optional/wip)
+### 1.3 🗑️ Remove xformers (something adds it and creates issues wip)
 
 ```
-chmod +x apply_qwen_patch.sh
-./apply_qwen_patch.sh
+conda activate ./dp_env
+pip uninstall -y xformers
 ```
 
-## Apply LongCat-Video patch (optional)
-
-Thanks to https://github.com/tdrussell/diffusion-pipe/pull/453
-you can add LongCat-Video model support to diffusion-pipe by running :
-
-```
-chmod +x apply_longcat_patch.sh
-./apply_longcat_patch.sh
-```
-
-This script will:
-- Apply the LongCat-Video model patches to diffusion-pipe
-- Automatically download and initialize the LongCat-Video submodule
-- Update the necessary configuration files
-
-That's it , you can run it now.
+### 🚀 Run flet_app
 
 ```
 conda activate ./dp_env && python3 -m flet_app.flet_app
+
+or
+
+source ~/miniconda3/bin/activate && source $(conda info --base)/etc/profile.d/conda.sh && conda activate ./dp_env && python3 -m flet_app.flet_app
 ```
 
-# 2. 🖥️ Setup WSL to be able to trigger photoshop (optional)
+
+**Note:** This application was tested on WSL (Windows Subsystem for Linux) and may require additional testing on native Linux distributions.
+
+**Note:** Not all functions are implemented to properly work with dataset files on server yet.
+
+![GUI Preview](flet_app/git_assets/gui_02.png)
+
+
+
+![GUI Preview](flet_app/git_assets/gui_01.png)
+
+Key Features:
+- Interactive user interface that automatically matches and displays default model configurations, making it easy to customize and fine-tune training parameters for supported models without manual editing of configuration files
+- Built-in video/image editing and captioning manager for dataset preparation
+- Model download manager using aria2c for efficient parallel downloading of large model files
+
+## 🔧 Apply Optional Patch
+
+Apply patch to diffusion-pipe submodule:
+
+```bash
+# Make script executable
+chmod +x apply_patch.sh
+
+# Apply 
+./apply_patch.sh
+```
+
+**Patches are applied from `patch/` directory to `diffusion-trainers/diffusion-pipe`**
+
+
+# 🖥️ Setup WSL to be able to trigger photoshop (optional)
 Edit /etc/wsl.conf in wsl
 
 ```
@@ -102,7 +92,7 @@ In Windows PowerShell : wsl --shutdown
 
 Reopen WSL and re-test
 
-![GUI Preview](.git_assets/ui_01.png)
+![GUI Preview](flet_app/git_assets/ui_01.png)
 
 # ⚙️ Edit start_dpipe.bat
 

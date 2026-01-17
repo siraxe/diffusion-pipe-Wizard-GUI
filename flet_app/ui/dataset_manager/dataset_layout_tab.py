@@ -6,6 +6,9 @@ import time
 import shutil
 from pathlib import Path
 from flet_app.settings import settings
+from flet_app.ui.dataset_manager import gpu_frame_extract as gpu_extract
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flet_app.ui._styles import create_dropdown, create_styled_button, create_textfield, BTN_STYLE2
 import flet_app.ui.dataset_manager.dataset_utils as dataset_utils
@@ -19,9 +22,11 @@ from flet_app.ui.dataset_manager.dataset_actions import (
     on_change_fps_click, on_rename_files_click, on_bucket_or_model_change,
     on_add_captions_click_with_model, stop_captioning, on_delete_captions_click,
     perform_delete_captions,
-    apply_affix_from_textfield, find_and_replace_in_captions, on_caption_to_json_click, on_caption_to_txt_click
+    apply_affix_from_textfield, find_and_replace_in_captions, on_caption_to_json_click, on_caption_to_txt_click,
+    on_fill_empty_txt_click
 )
 from flet_app.ui.dataset_manager.dataset_controls import build_expansion_tile
+from flet_app.ui.dataset_manager.data_config_panel import create_data_config_panel
 from flet_app.ui.flet_hotkeys import is_d_key_pressed_global # Import global D key state
 
 # ======================================================================================
@@ -54,6 +59,9 @@ processed_output_field = ft.TextField(
 # ABC Action Container (A, Duplicate, Delete)
 abc_action_container = None
 
+# Dataset config change callback (called when dataset selection changes)
+_dataset_config_change_callback = None
+
 
 # Global controls (defined here but created in _create_global_controls)
 bucket_size_textfield: ft.TextField = None
@@ -74,6 +82,7 @@ caption_model_dropdown_ref = ft.Ref[ft.Dropdown]()
 captions_checkbox_ref = ft.Ref[ft.Checkbox]() # 8-bit for LLaVA
 hf_checkbox_ref = ft.Ref[ft.Checkbox]() # HF backend for Qwen
 cap_command_textfield_ref = ft.Ref[ft.TextField]()
+custom_model_path_textfield_ref = ft.Ref[ft.TextField]() # Custom model path
 max_tokens_textfield_ref = ft.Ref[ft.TextField]()
 change_fps_textfield_ref = ft.Ref[ft.TextField]() # Ref for the Change FPS textfield
 change_fps_checkbox_ref = ft.Ref[ft.Checkbox]() # Ref for the Change FPS "Don't care about time" checkbox
@@ -299,44 +308,87 @@ def handle_dataset_sort_change(e):
 # ABC Action Container Functions (A, Duplicate, Delete)
 # ======================================================================================
 
-def create_abc_action_container():
-    """Create the A/B/C action container with duplicate and delete functionality"""
+def create_abc_action_container(show_config_button=None):
+    """Create the A/B/C action container with duplicate and delete functionality
+    Args:
+        show_config_button: Optional button to show the hidden data config panel (placed outside the buttons column)
+    """
     global abc_action_container
+
+    def _find_available_name(base_path: str, name: str, ext: str) -> tuple[str, str]:
+        """Find an available filename by incrementing suffix if needed.
+        Returns tuple of (new_filename, new_basename_without_ext)
+        """
+        new_name = f"{name}{ext}"
+        new_path = os.path.join(base_path, new_name)
+
+        # If filename doesn't exist, use it as-is
+        if not os.path.exists(new_path):
+            return new_name, name
+
+        # File exists, try incremental suffixes
+        for i in range(1, 100):
+            new_name = f"{name}_{i:02d}{ext}"
+            new_path = os.path.join(base_path, new_name)
+            if not os.path.exists(new_path):
+                new_basename = f"{name}_{i:02d}"
+                return new_name, new_basename
+
+        # Fallback (should rarely happen)
+        return f"{name}_{time.time():.0f}{ext}", f"{name}_{time.time():.0f}"
 
     def on_duplicate_click(e):
         """Handle duplicate button click"""
         try:
-            if not selected_thumbnails_set or not selected_dataset:
+            # Use page-scoped state
+            page_selected_set = getattr(e.page, 'selected_thumbnails_set', set()) if e.page else set()
+            page_selected_dataset = getattr(e.page, 'selected_dataset', None) if e.page else None
+
+            if not page_selected_set or not page_selected_dataset:
                 return
 
             # Get selected items
-            selected_items = list(selected_thumbnails_set)
+            selected_items = list(page_selected_set)
             if selected_items:
-                current_dataset = selected_dataset.get("value")
+                current_dataset = page_selected_dataset
                 if current_dataset:
                     from .dataset_utils import _get_dataset_base_dir
                     base_dir, _ = _get_dataset_base_dir(current_dataset)
                     dataset_path = os.path.join(base_dir, current_dataset)
 
                     duplicated_count = 0
+                    duplicated_paths = []  # Track new duplicated paths
 
                     for item_path in selected_items:
                         try:
                             item_name = os.path.basename(item_path)
                             name, ext = os.path.splitext(item_name)
-                            new_name = f"{name}_copy{ext}"
+
+                            # Find available name for the main file
+                            new_name, new_basename = _find_available_name(dataset_path, name, ext)
                             new_path = os.path.join(dataset_path, new_name)
 
                             # Copy the file
                             shutil.copy2(item_path, new_path)
                             duplicated_count += 1
+                            # Normalize path to match how get_videos_and_thumbnails returns paths
+                            duplicated_paths.append(os.path.normpath(new_path))  # Add to selection
 
                             # Also copy .txt file if it exists
                             txt_path = os.path.splitext(item_path)[0] + '.txt'
                             if os.path.exists(txt_path):
-                                txt_new_name = f"{name}_copy.txt"
+                                txt_new_name = f"{new_basename}.txt"
                                 txt_new_path = os.path.join(dataset_path, txt_new_name)
                                 shutil.copy2(txt_path, txt_new_path)
+
+                            # Also copy the thumbnail if it exists (avoids regenerating)
+                            thumbnail_name = f"{name}.jpg"
+                            thumbnail_path = os.path.join(settings.THUMBNAILS_BASE_DIR, current_dataset, thumbnail_name)
+                            if os.path.exists(thumbnail_path):
+                                # Use the same suffix logic for thumbnails
+                                thumbnail_new_name = f"{new_basename}.jpg"
+                                thumbnail_new_path = os.path.join(settings.THUMBNAILS_BASE_DIR, current_dataset, thumbnail_new_name)
+                                shutil.copy2(thumbnail_path, thumbnail_new_path)
 
                         except Exception as copy_error:
                             print(f"Error duplicating {item_path}: {copy_error}")
@@ -353,25 +405,24 @@ def create_abc_action_container():
                             open=True
                         )
 
-                    # Clear selections and refresh thumbnails
-                    selected_thumbnails_set.clear()
-                    global last_clicked_thumbnail_index
-                    last_clicked_thumbnail_index = -1
+                    # Replace selection with duplicated items (keeps icons visible)
+                    page_selected_set.clear()
+                    if e.page:
+                        e.page.last_clicked_thumbnail_index = -1
+                    # Add duplicated paths to selection
+                    for dup_path in duplicated_paths:
+                        page_selected_set.add(dup_path)
 
-                    # Refresh thumbnails
+                    # Refresh thumbnails using run_task (same pattern as refresh button)
+                    # but with force_refresh=False to avoid regenerating all thumbnails
+                    # Use the global thumbnails_grid_ref (same as refresh button does)
                     if thumbnails_grid_ref and thumbnails_grid_ref.current:
-                        # Do not force full thumbnail regeneration; just refresh the grid state
                         e.page.run_task(
                             update_thumbnails,
-                            page_ctx=e.page,
-                            grid_control=thumbnails_grid_ref.current,
-                            force_refresh=False,
+                            e.page,
+                            thumbnails_grid_ref.current,
+                            False,  # force_refresh=False - don't regenerate existing thumbnails
                         )
-
-                    # Hide the container after operation
-                    abc_action_container.visible = False
-                    abc_action_container.update()
-                    e.page.update()
         except Exception as ex:
             print(f"Error in duplicate click: {ex}")
             if e.page:
@@ -384,13 +435,17 @@ def create_abc_action_container():
     def on_delete_click(e):
         """Handle delete button click"""
         try:
-            if not selected_thumbnails_set or not selected_dataset:
+            # Use page-scoped state
+            page_selected_set = getattr(e.page, 'selected_thumbnails_set', set()) if e.page else set()
+            page_selected_dataset = getattr(e.page, 'selected_dataset', None) if e.page else None
+
+            if not page_selected_set or not page_selected_dataset:
                 return
 
             # Get selected items
-            selected_items = list(selected_thumbnails_set)
+            selected_items = list(page_selected_set)
             if selected_items:
-                current_dataset = selected_dataset.get("value")
+                current_dataset = page_selected_dataset
                 if current_dataset:
                     from .dataset_utils import _get_dataset_base_dir
                     base_dir, _ = _get_dataset_base_dir(current_dataset)
@@ -411,7 +466,7 @@ def create_abc_action_container():
                                 os.remove(txt_path)
 
                             # Delete the associated thumbnail
-                            current_dataset = selected_dataset.get("value")
+                            # current_dataset already set above
                             if current_dataset:
                                 # Get thumbnail path using correct thumbnail directory
                                 item_name = os.path.basename(item_path)
@@ -438,21 +493,20 @@ def create_abc_action_container():
                         )
 
                     # Clear selections and refresh thumbnails
-                    selected_thumbnails_set.clear()
-                    global last_clicked_thumbnail_index
-                    last_clicked_thumbnail_index = -1
+                    page_selected_set.clear()
+                    if e.page:
+                        e.page.last_clicked_thumbnail_index = -1
 
-                    # Refresh thumbnails
+                    # Refresh thumbnails using run_task (same pattern as refresh button)
+                    # Use force_refresh=False since we're deleting, not adding new files
+                    # Use the global thumbnails_grid_ref (same as refresh button does)
                     if thumbnails_grid_ref and thumbnails_grid_ref.current:
-                        e.page.run_task(update_thumbnails,
-                                       page_ctx=e.page,
-                                       grid_control=thumbnails_grid_ref.current,
-                                       force_refresh=True)
-
-                    # Hide the container after operation
-                    abc_action_container.visible = False
-                    abc_action_container.update()
-                    e.page.update()
+                        e.page.run_task(
+                            update_thumbnails,
+                            e.page,
+                            thumbnails_grid_ref.current,
+                            False,  # force_refresh=False - no need to regenerate existing thumbnails
+                        )
         except Exception as ex:
             print(f"Error in delete click: {ex}")
             if e.page:
@@ -465,13 +519,17 @@ def create_abc_action_container():
     def on_download_click(e):
         """Handle download button click"""
         try:
-            if not selected_thumbnails_set or not selected_dataset:
+            # Use page-scoped state
+            page_selected_set = getattr(e.page, 'selected_thumbnails_set', set()) if e.page else set()
+            page_selected_dataset = getattr(e.page, 'selected_dataset', None) if e.page else None
+
+            if not page_selected_set or not page_selected_dataset:
                 return
 
             # Get selected items
-            selected_items = list(selected_thumbnails_set)
+            selected_items = list(page_selected_set)
             if selected_items:
-                current_dataset = selected_dataset.get("value")
+                current_dataset = page_selected_dataset
                 if current_dataset:
                     from .dataset_utils import _get_dataset_base_dir
                     import zipfile
@@ -576,49 +634,56 @@ def create_abc_action_container():
                 )
                 e.page.update()
 
-    abc_action_container = ft.Container(
-        content=ft.Row(
-            [
-                ft.Row([
-                    ft.IconButton(
-                        icon=ft.Icons.DOWNLOAD,
-                        on_click=on_download_click,
-                        icon_color=ft.Colors.GREEN_600,
-                        tooltip="Download selected items",
-                        icon_size=20
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.CONTENT_COPY,
-                        on_click=on_duplicate_click,
-                        icon_color=ft.Colors.BLUE_600,
-                        tooltip="Duplicate selected items",
-                        icon_size=20
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        on_click=on_delete_click,
-                        icon_color=ft.Colors.RED_600,
-                        tooltip="Delete selected items",
-                        icon_size=20
-                    ),
-                ], spacing=8),
-            ],
-            alignment=ft.MainAxisAlignment.START,
-            expand=False
+    # Create button icons column with visibility control
+    abc_buttons_column = ft.Column([
+        ft.IconButton(
+            icon=ft.Icons.DOWNLOAD,
+            on_click=on_download_click,
+            icon_color=ft.Colors.GREEN_600,
+            tooltip="Download selected items",
+            icon_size=20
         ),
-        top=0,
-        right=160,  # 30px offset from the right
-        padding=ft.padding.all(2),
-        visible=False,  # Initially hidden
+        ft.IconButton(
+            icon=ft.Icons.CONTENT_COPY,
+            on_click=on_duplicate_click,
+            icon_color=ft.Colors.BLUE_600,
+            tooltip="Duplicate selected items",
+            icon_size=20
+        ),
+        ft.IconButton(
+            icon=ft.Icons.DELETE,
+            on_click=on_delete_click,
+            icon_color=ft.Colors.RED_600,
+            tooltip="Delete selected items",
+            icon_size=20
+        ),
+    ], spacing=8, visible=False)  # Buttons hidden initially, panel always visible
+
+    # Create the content for the action container
+    # If show_config_button is provided, include it outside the buttons column
+    if show_config_button:
+        container_content = ft.Column([
+            abc_buttons_column,  # Hidden when nothing is selected
+            ft.Container(expand=True),  # Spacer to push cog icon to bottom
+            show_config_button,  # At bottom
+        ], spacing=5, expand=True)
+    else:
+        container_content = abc_buttons_column
+
+    abc_action_container = ft.Container(
+        content=container_content,
+        padding=ft.padding.all(5),
+        width=50,  # Fixed width to prevent layout jumping
+        bgcolor=ft.Colors.with_opacity(0.9, ft.Colors.SURFACE),
+        border_radius=8,
+        border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE)),
     )
 
     return abc_action_container
 
 def create_sort_controls_container():
     global dataset_sort_controls_container
-    if dataset_sort_controls_container is not None:
-        return dataset_sort_controls_container
-
+    # Always recreate to avoid page session conflicts
     sort_dropdown = create_dropdown(
         label=None,
         value=dataset_sort_mode["value"],
@@ -662,8 +727,15 @@ def update_abc_container_visibility(page=None):
         is_in_dataset_tab_flag = getattr(page, 'is_in_dataset_tab', False) if page else False
         selected_thumbnails_set = getattr(page, 'selected_thumbnails_set', set()) if page else set()
 
-        # Main container visible only if we are in dataset tab AND have selections
-        abc_action_container.visible = is_in_dataset_tab_flag and len(selected_thumbnails_set) > 0
+        # Buttons visible only if we are in dataset tab AND have selections
+        # Panel stays visible to prevent layout jumping
+        # Only control the buttons column (first child), not the entire content (which includes cog icon)
+        if isinstance(abc_action_container.content, ft.Column) and len(abc_action_container.content.controls) > 0:
+            # First control is the buttons column, second is the cog icon (always visible)
+            abc_action_container.content.controls[0].visible = is_in_dataset_tab_flag and len(selected_thumbnails_set) > 0
+        else:
+            # Fallback for old behavior when content was directly the buttons column
+            abc_action_container.content.visible = is_in_dataset_tab_flag and len(selected_thumbnails_set) > 0
 
         if abc_action_container.page:
             abc_action_container.update()
@@ -743,6 +815,10 @@ async def on_dataset_dropdown_change(
         base_dir, dataset_type = dataset_utils._get_dataset_base_dir(selected_dataset["value"])
         DATASETS_TYPE["value"] = dataset_type
         bucket_val, model_val, trigger_word_val = dataset_utils.load_dataset_config(selected_dataset["value"])
+
+    # Always update the global dictionary to keep it in sync
+    selected_dataset["value"] = ev.control.value
+    DATASETS_TYPE["value"] = dataset_type if 'dataset_type' in locals() else (ev.page.DATASETS_TYPE if ev.page else None)
     # Preprocess panel removed; these controls may not be mounted. Guard updates.
     if bucket_size_textfield_control is not None:
         try:
@@ -758,6 +834,14 @@ async def on_dataset_dropdown_change(
                 trigger_word_textfield_control.update()
         except Exception:
             pass
+
+    # Call dataset config change handler to load TOML values for the new dataset
+    global _dataset_config_change_callback
+    if _dataset_config_change_callback and ev.page:
+        try:
+            _dataset_config_change_callback(ev.page.selected_dataset)
+        except Exception as ex:
+            print(f"Error calling dataset config change callback: {ex}")
 
     await update_thumbnails(page_ctx=ev.page, grid_control=thumbnails_grid_control)
 
@@ -865,7 +949,8 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
                             grid_control=grid_control,
                             on_checkbox_change_callback=_on_thumbnail_checkbox_change,
                             thumbnail_index=i,
-                            is_selected_initially=(video_path in (page_ctx.selected_thumbnails_set if page_ctx else selected_thumbnails_set))
+                            is_selected_initially=(video_path in (page_ctx.selected_thumbnails_set if page_ctx else selected_thumbnails_set)),
+                            dataset_type=datasets_type
                         )
                     )
 
@@ -1017,9 +1102,7 @@ def reload_current_dataset(
 def _create_global_controls():
     global bucket_size_textfield, rename_textfield, model_name_dropdown, trigger_word_textfield
 
-    if bucket_size_textfield is not None:
-        return
-
+    # Always recreate controls to avoid page session conflicts
     bucket_size_textfield = create_textfield(
         label="Bucket Size (e.g., [W, H, F] or WxHxF)",
         value=settings.DEFAULT_BUCKET_SIZE_STR,
@@ -1032,7 +1115,6 @@ def _create_global_controls():
         hint_text="Name of videos + _num will be added",
         expand=True,
     )
-
 
     trigger_word_textfield = create_textfield(
         "Trigger WORD", "", col=9, expand=True, hint_text="e.g. 'CAKEIFY' , leave empty for none"
@@ -1067,6 +1149,7 @@ def _build_dataset_selection_section(dataset_dropdown_control: ft.Dropdown, upda
 def _build_captioning_section(
     caption_model_dropdown: ft.Dropdown,
     captions_checkbox_container: ft.Container,
+    custom_model_path_textfield: ft.TextField,
     cap_command_textfield: ft.TextField,
     max_tokens_textfield: ft.TextField,
     dataset_add_captions_button_control: ft.ElevatedButton,
@@ -1076,6 +1159,7 @@ def _build_captioning_section(
         title="1. Captions",
         controls=[
             ft.ResponsiveRow([captions_checkbox_container, caption_model_dropdown]),
+            ft.ResponsiveRow([custom_model_path_textfield]),
             ft.ResponsiveRow([max_tokens_textfield, joy_prompt_container]),
             ft.ResponsiveRow([cap_command_textfield]),
             ft.Row([
@@ -1126,7 +1210,7 @@ def _build_latent_test_section(update_thumbnails_func):
         ])
     ])
     return build_expansion_tile(
-        title="Batch captions",
+        title="2. Edit captions",
         controls=[
             find_replace,
             ft.Divider(thickness=1,height=3),
@@ -1136,7 +1220,8 @@ def _build_latent_test_section(update_thumbnails_func):
     )
 
 def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield: ft.TextField, rename_files_button: ft.ElevatedButton,
-                         caption_to_txt_button: ft.ElevatedButton,caption_to_json_button:  ft.ElevatedButton):
+                         caption_to_txt_button: ft.ElevatedButton, caption_to_json_button: ft.ElevatedButton,
+                         fill_empty_txt_button: ft.ElevatedButton):
     # Create slicing controls in same style as change FPS
     slice_seconds_textfield = create_textfield(
         "seconds",
@@ -1201,8 +1286,49 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
         ft.Container(content=s_frames_textfield, col=4,),
     ], spacing=5)
 
+    # Create frame count textfield, Cap button, and Get Frame button
+    frame_count_tf = create_textfield(
+        label="Frame count",
+        value="3",
+        hint_text="Number of frames to extract",
+        text_style=ft.TextStyle(size=11),
+        keyboard_type=ft.KeyboardType.NUMBER,
+    )
+
+    cap_button = create_styled_button(
+        "Cap",
+        tooltip="Copy video captions to matching frames in frames_export folder",
+        expand=True,
+        col=3,
+        on_click=lambda e: _on_cap_click(e),
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30
+    )
+
+    get_frame_button = create_styled_button(
+        "Get Frame",
+        tooltip="Extract frames from selected videos (saves as PNG to frames_export folder)",
+        expand=True,
+        col=5,
+        on_click=lambda e: _on_get_frame_click(e, frame_count_tf, get_frame_button),
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30
+    )
+
+    get_frame_section = ft.ResponsiveRow([
+        ft.Container(content=cap_button, col=3,),
+        ft.Container(content=get_frame_button, col=5,),
+        ft.Container(content=frame_count_tf, col=4,),
+    ], spacing=5)
+
     return build_expansion_tile(
-        title="Batch files",
+        title="3. Edit files",
         controls=[
             change_fps_section,
             ft.Divider(thickness=1),
@@ -1210,13 +1336,16 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
             ft.Divider(thickness=1),
             blend_section,
             ft.Divider(thickness=1),
+            get_frame_section,
+            ft.Divider(thickness=1),
             rename_textfield,
             rename_files_button,
             ft.Divider(thickness=1),
             ft.ResponsiveRow([
                 ft.Container(content=caption_to_txt_button, expand=True,col=6, alignment=ft.alignment.center),
                 ft.Container(content=caption_to_json_button, expand=True,col=6, alignment=ft.alignment.center)
-            ])
+            ]),
+            fill_empty_txt_button,
         ],
         initially_expanded=False,
     )
@@ -1569,6 +1698,253 @@ def _perform_blend_operation(page: ft.Page, image_path: str, video_path: str, s_
             except Exception as e:
                 print(f"Error cleaning up temp directory: {e}")
 
+def _on_get_frame_click(e: ft.ControlEvent, frame_count_tf: ft.TextField, button: ft.ElevatedButton):
+    """Handle Get Frame button click - extracts frames from videos based on count"""
+    import threading
+
+    # If extraction is running (button says "Stop"), cancel it
+    if button.text == "Stop":
+        print("Stopping frame extraction...")
+        gpu_extract.cancel_extraction()
+        button.text = "Get Frame"
+        button.tooltip = "Extract frames from selected videos (saves as PNG to frames_export folder)"
+        button.update()
+        e.page.snack_bar = ft.SnackBar(ft.Text("Frame extraction stopped"), open=True)
+        e.page.update()
+        return
+
+    print("Get Frame button clicked!")
+
+    def run_extraction():
+        try:
+            from pathlib import Path
+
+            # Reset cancellation flag for new extraction
+            gpu_extract.reset_cancel_flag()
+
+            # Get and validate frame count
+            try:
+                num_frames = int(frame_count_tf.value or "3")
+                if num_frames < 1:
+                    num_frames = 1
+            except ValueError:
+                num_frames = 3
+
+            # Initialize page state and get selected videos
+            _initialize_page_state(e.page)
+
+            # Get selected videos directly from page state
+            selected_set = e.page.selected_thumbnails_set if hasattr(e.page, 'selected_thumbnails_set') else set()
+            print(f"Selected set: {selected_set}")
+            print(f"Page video files list: {e.page.video_files_list if hasattr(e.page, 'video_files_list') else 'not found'}")
+
+            # If no videos selected, use all videos from page
+            if not selected_set:
+                selected_videos = e.page.video_files_list if hasattr(e.page, 'video_files_list') else []
+                print(f"No videos selected, processing all {len(selected_videos)} videos")
+            else:
+                # Use the selected paths directly
+                selected_videos = list(selected_set)
+                print(f"Processing {len(selected_videos)} selected videos")
+
+            if not selected_videos:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text("No videos found to process"),
+                    open=True
+                )
+                e.page.update()
+                return
+
+            # Create frames_export folder in the directory of the first video
+            video_dir = Path(selected_videos[0]).parent
+            frames_export_dir = video_dir / "frames_export"
+            frames_export_dir.mkdir(exist_ok=True)
+            print(f"Created frames export folder: {frames_export_dir}")
+
+            # Initialize counters
+            total_frames_extracted = 0
+            total_processed = 0
+
+            # Process videos using GPU-accelerated FFmpeg extraction
+            print(f"Starting GPU-accelerated frame extraction for {len(selected_videos)} videos")
+
+            results = gpu_extract.extract_frames_parallel(
+                selected_videos,
+                num_frames,
+                frames_export_dir,
+                frame_count_tf=frame_count_tf
+            )
+
+            # Count successful extractions
+            for video_path, (extracted, video_name, error) in results.items():
+                if not error:
+                    total_frames_extracted += extracted
+                    total_processed += 1
+                elif error == "Cancelled":
+                    print(f"Cancelled: {video_name}")
+                else:
+                    print(f"Error processing {video_name}: {error}")
+
+            # Final status
+            was_cancelled = gpu_extract.is_cancelled()
+            if was_cancelled:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Extraction stopped - {total_frames_extracted} frames extracted"),
+                    open=True
+                )
+            elif total_processed > 0:
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Extracted {total_frames_extracted} frames from {total_processed} video(s) to frames_export/"),
+                    open=True
+                )
+            e.page.update()
+
+        except Exception as ex:
+            print(f"Error in get frame: {ex}")
+            import traceback
+            traceback.print_exc()
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text(f"Error: {str(ex)}"),
+                open=True
+            )
+            e.page.update()
+        finally:
+            # Reset button state
+            button.text = "Get Frame"
+            button.tooltip = "Extract frames from selected videos (saves as PNG to frames_export folder)"
+            button.update()
+
+    # Start extraction in background thread
+    button.text = "Stop"
+    button.tooltip = "Click to stop frame extraction"
+    button.update()
+
+    thread = threading.Thread(target=run_extraction, daemon=True)
+    thread.start()
+
+def _on_cap_click(e: ft.ControlEvent):
+    """Handle Cap button click - copies video captions to matching frames in frames_export folder"""
+    print("Cap button clicked!")
+
+    try:
+        import shutil
+        from pathlib import Path
+        import re
+
+        # Initialize page state and get selected videos
+        _initialize_page_state(e.page)
+
+        # Get selected videos directly from page state
+        selected_set = e.page.selected_thumbnails_set if hasattr(e.page, 'selected_thumbnails_set') else set()
+
+        # If no videos selected, use all videos from page
+        if not selected_set:
+            selected_videos = e.page.video_files_list if hasattr(e.page, 'video_files_list') else []
+            print(f"No videos selected, processing all {len(selected_videos)} videos")
+        else:
+            # Use the selected paths directly
+            selected_videos = list(selected_set)
+            print(f"Processing {len(selected_videos)} selected videos")
+
+        if not selected_videos:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("No videos found to process"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        # Get frames_export folder
+        video_dir = Path(selected_videos[0]).parent
+        frames_export_dir = video_dir / "frames_export"
+
+        if not frames_export_dir.exists():
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("frames_export folder not found. Run 'Get Frame' first."),
+                open=True
+            )
+            e.page.update()
+            return
+
+        # Get all frame files in frames_export
+        frame_files = list(frames_export_dir.glob("*.png"))
+        if not frame_files:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("No frames found in frames_export folder"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        # Pattern to match frame suffixes: _start, _end, _mid, _mid_1, _mid_2, etc.
+        frame_pattern = re.compile(r"(.+)(_start|_end|_mid|_mid_\d+)\.png$")
+
+        # Process each video
+        total_copied = 0
+        videos_processed = 0
+
+        for video_path in selected_videos:
+            try:
+                video_name = Path(video_path).stem
+                caption_path = Path(video_path).with_suffix(".txt")
+
+                # Check if caption file exists for this video
+                if not caption_path.exists():
+                    print(f"No caption file found for: {video_name}")
+                    continue
+
+                # Read caption content
+                with open(caption_path, "r", encoding="utf-8") as f:
+                    caption_content = f.read()
+
+                # Find matching frames for this video
+                matched_frames = []
+                for frame_file in frame_files:
+                    frame_name = frame_file.stem
+                    match = frame_pattern.match(frame_file.name)
+                    if match:
+                        base_name = match.group(1)
+                        if base_name == video_name:
+                            matched_frames.append(frame_file)
+
+                # Copy caption for each matching frame
+                for frame_file in matched_frames:
+                    caption_copy_path = frame_file.with_suffix(".txt")
+                    with open(caption_copy_path, "w", encoding="utf-8") as f:
+                        f.write(caption_content)
+                    print(f"Created caption: {caption_copy_path}")
+                    total_copied += 1
+
+                if matched_frames:
+                    videos_processed += 1
+
+            except Exception as ex:
+                print(f"Error processing {Path(video_path).name}: {ex}")
+
+        # Final status
+        if total_copied > 0:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text(f"Copied captions for {total_copied} frame(s) from {videos_processed} video(s)"),
+                open=True
+            )
+            e.page.update()
+        else:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("No matching frames found or no captions to copy"),
+                open=True
+            )
+            e.page.update()
+
+    except Exception as ex:
+        print(f"Error in cap: {ex}")
+        import traceback
+        traceback.print_exc()
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text(f"Error: {str(ex)}"),
+            open=True
+        )
+        e.page.update()
+
 # ======================================================================================
 # Main GUI Layout Builder (Assembles the sections)
 # ======================================================================================
@@ -1579,8 +1955,8 @@ def dataset_tab_layout(page=None):
     if bucket_size_textfield is None:
         _create_global_controls()
 
-    # Create ABC action container and return it for the main page to use
-    abc_container_ref = create_abc_action_container()
+    # Create ABC action container (placeholder, will be recreated with show button later)
+    abc_container_ref = None
 
     sort_controls_container_ref = create_sort_controls_container()
 
@@ -1698,13 +2074,15 @@ def dataset_tab_layout(page=None):
             ev.page.run_task(on_bucket_or_model_change, ev, selected_dataset, bucket_size_textfield, caption_model_dropdown_ref.current, trigger_word_textfield)
         except Exception:
             pass
-        # Toggle visibility of 8-bit vs HF checkbox depending on model
+        # Toggle visibility of 8-bit vs HF checkbox and custom model path depending on model
         try:
             val = (caption_model_dropdown_ref.current.value or "").lower()
             is_llava = (val == "llava_next_7b")
             is_qwen = val.startswith("qwen3_vl")
+            is_custom = (val == "custom")
             show_8bit = is_llava
-            show_hf = is_qwen
+            # Show HF for qwen3_vl models OR custom models
+            show_hf = is_qwen or is_custom
             if captions_checkbox_ref.current:
                 captions_checkbox_ref.current.visible = show_8bit
                 if captions_checkbox_ref.current.page:
@@ -1713,6 +2091,10 @@ def dataset_tab_layout(page=None):
                 hf_checkbox_ref.current.visible = show_hf
                 if hf_checkbox_ref.current.page:
                     hf_checkbox_ref.current.update()
+            if custom_model_path_textfield_ref.current:
+                custom_model_path_textfield_ref.current.visible = is_custom
+                if custom_model_path_textfield_ref.current.page:
+                    custom_model_path_textfield_ref.current.update()
         except Exception:
             pass
     caption_model_dropdown.on_change = _on_model_change
@@ -1746,16 +2128,28 @@ def dataset_tab_layout(page=None):
         _val0 = (caption_model_dropdown_ref.current.value or "").lower()
         _is_llava0 = (_val0 == "llava_next_7b")
         _is_qwen0 = _val0.startswith("qwen3_vl")
+        _is_custom0 = (_val0 == "custom")
         if captions_checkbox_ref.current:
             captions_checkbox_ref.current.visible = _is_llava0
         if hf_checkbox_ref.current:
-            hf_checkbox_ref.current.visible = _is_qwen0
+            hf_checkbox_ref.current.visible = _is_qwen0 or _is_custom0
     except Exception:
-        pass
+        _is_custom0 = False
+
+    # Custom model path textfield (shown only when "custom" model is selected)
+    custom_model_path_textfield = create_textfield(
+        "Custom Model Path",
+        "models/Qwen",
+        expand=True,
+        hint_text="Path relative to project root",
+        col=12,
+    )
+    custom_model_path_textfield.visible = _is_custom0
+    custom_model_path_textfield_ref.current = custom_model_path_textfield
 
     cap_command_textfield = create_textfield(
         "Command",
-        "Shortly describe the content of this video in one or two sentences.",
+        "Shortly describe the content of this video  events and actions as they occur over time.",
         expand=True,
         hint_text="command for captioning",
         col=12,
@@ -1926,6 +2320,20 @@ def dataset_tab_layout(page=None):
         height=30  # Smaller height
     )
 
+    fill_empty_txt_button = create_styled_button(
+        "fill empty .txt",
+        tooltip="Create empty .txt files for media without captions",
+        expand=True,
+        on_click=lambda e: e.page.run_task(on_fill_empty_txt_click,
+            e, selected_dataset, DATASETS_TYPE, update_thumbnails, thumbnails_grid_ref
+        ),
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),  # Smaller font
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30  # Smaller height
+    )
+
     update_button_control.on_click = lambda e: reload_current_dataset(
         e.page,
         dataset_dropdown_control_ref.current,
@@ -1939,6 +2347,7 @@ def dataset_tab_layout(page=None):
         caption_model_dropdown_ref.current,
         captions_checkbox_ref.current,
         hf_checkbox_ref.current,
+        custom_model_path_textfield_ref.current,
         cap_command_textfield_ref.current,
         max_tokens_textfield_ref.current,
         dataset_add_captions_button_ref.current,
@@ -1975,6 +2384,7 @@ def dataset_tab_layout(page=None):
     captioning_section = _build_captioning_section(
         caption_model_dropdown_ref.current,
         captions_checkbox_container,
+        custom_model_path_textfield_ref.current,
         cap_command_textfield_ref.current,
         max_tokens_textfield_ref.current,
         dataset_add_captions_button_ref.current,
@@ -1987,7 +2397,7 @@ def dataset_tab_layout(page=None):
     latent_test_section = _build_latent_test_section(update_thumbnails)
 
     batch_section = _build_batch_section(change_fps_section, rename_textfield, rename_files_button,caption_to_txt_button,
-        caption_to_json_button)
+        caption_to_json_button, fill_empty_txt_button)
 
     # Build dataset creation section
     dataset_creation_section = _build_dataset_creation_section(dataset_name_textfield, add_dataset_button)
@@ -2101,25 +2511,53 @@ def dataset_tab_layout(page=None):
         tooltip="Upload files to current dataset",
         button_style=ft.ButtonStyle(
             text_style=ft.TextStyle(size=10),
-            shape=ft.RoundedRectangleBorder(radius=3)
+            shape=ft.RoundedRectangleBorder(radius=3),
+            bgcolor=ft.Colors.with_opacity(0.3, ft.Colors.BLUE_200),  # Subtle lighter tint
+            color=ft.Colors.WHITE,
         ),
-        
+
         on_click=lambda e: e.page.run_task(open_file_picker_async, file_picker)
     )
-    
-    # Create a simple container for the thumbnails area with upload button
-    # Since true OS-level drag and drop isn't supported in Flet web, we'll use a clickable area approach
+
+    # Create the Data Configuration panel with upload button integrated
+    data_config_panel, show_data_config_button, data_config_controls, on_dataset_config_change = create_data_config_panel(upload_button=upload_button)
+
+    # Store the dataset config change callback globally for access in dropdown change handler
+    global _dataset_config_change_callback
+    _dataset_config_change_callback = on_dataset_config_change
+
+    # Update abc_container_ref to include the show button (recreate with show button)
+    # We need to recreate it to properly include the show button outside the buttons column
+    abc_container_ref = create_abc_action_container(show_config_button=show_data_config_button)
+
+    # Create a container for the thumbnails area with data config panel overlay
+    # Using Stack to overlay the panel on top of the thumbnails grid
     rc_content = ft.Column([
-        ft.Container(
-            content=ft.Column([
-                thumbnails_grid_control,
-                ft.Row([upload_button], alignment=ft.MainAxisAlignment.CENTER, spacing=10)  # Add upload button below thumbnails
-            ]),
-            expand=True,
-            border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY_400)),
-            border_radius=5,
-            margin=ft.margin.only(top=10),
-        ),
+        # Row with thumbnails grid on left and action buttons on right
+        ft.Row([
+            # Left column: thumbnails grid with data config panel overlay
+            ft.Container(
+                content=ft.Stack([
+                    # Thumbnails grid (bottom layer)
+                    thumbnails_grid_control,
+                    # Data Configuration panel (overlay, positioned at bottom)
+                    ft.Container(
+                        content=data_config_panel,
+                        left=0,
+                        right=0,
+                        bottom=0,
+                        # Use alignment to center the panel horizontally at bottom
+                        alignment=ft.alignment.center,
+                    ),
+                ], expand=True),
+                expand=True,
+                border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY_400)),
+                border_radius=5,
+                margin=ft.margin.only(top=10),
+            ),
+            # Right column: action buttons (Download, Duplicate, Delete) + settings cog icon
+            abc_container_ref,
+        ], alignment=ft.MainAxisAlignment.START, spacing=10, expand=True),
         bottom_app_bar,
     ], alignment=ft.CrossAxisAlignment.STRETCH, expand=True, spacing=10)
 
@@ -2140,6 +2578,15 @@ def dataset_tab_layout(page=None):
         dataset_add_captions_button_ref.current,
         dataset_delete_captions_button_ref.current
     )
+
+    # Load TOML values for the initially selected dataset
+    if on_dataset_config_change and dataset_dropdown_control_ref.current:
+        try:
+            initial_dataset = dataset_dropdown_control_ref.current.value
+            if initial_dataset:
+                on_dataset_config_change(initial_dataset)
+        except Exception as ex:
+            print(f"Error loading initial dataset config: {ex}")
 
     main_container = ft.Row(
         controls=[

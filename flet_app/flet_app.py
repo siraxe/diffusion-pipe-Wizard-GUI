@@ -9,6 +9,7 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(repo_root))
 
 # Standard library imports
+import argparse
 import json
 
 # Flet imports
@@ -96,12 +97,12 @@ def build_main_tabs(page):
         expand=True,
     )
     
-    # Create a container with the tabs and the ABC container positioned to the right
+    # Create a container with the tabs and sort controls
+    # Note: abc_container is now part of the dataset tab layout, not in the Stack
     tab_with_abc_container = ft.Stack(
         [
             main_tabs,
             sort_controls_container,
-            abc_container
         ],
         expand=True
     )
@@ -195,9 +196,18 @@ def main(page: ft.Page):
     page.update()
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8550"))
-    open_browser = os.getenv("OPEN_BROWSER", "0") == "1"
+    parser = argparse.ArgumentParser(description="DPipe GUI Wizard - Flet Application")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8550")),
+                        help="Port to run the server on (default: 8550, or PORT env var)")
+    parser.add_argument("--host", type=str, default=os.getenv("HOST", "0.0.0.0"),
+                        help="Host to bind to (default: 0.0.0.0, or HOST env var)")
+    parser.add_argument("--open-browser", action="store_true",
+                        help="Open in web browser instead of desktop app")
+    args = parser.parse_args()
+
+    host = args.host
+    port = args.port
+    open_browser = args.open_browser or os.getenv("OPEN_BROWSER", "0") == "1"
 
     view = ft.AppView.WEB_BROWSER if open_browser else None
 

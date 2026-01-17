@@ -133,3 +133,17 @@ def create_styled_button(text, on_click=None, col=None, width=BUTTON_WIDTH, heig
         **kwargs
     )
 
+def create_checkbox(label, value, data, col=None, expand=None, scale=None):
+    """Helper function to create a Checkbox with common styling."""
+    return ft.Container(
+        content=ft.Checkbox(
+            label=label,
+            value=value,
+            data=data,
+            scale=scale,
+        ),
+        col=col,
+        expand=expand,
+        alignment=ft.alignment.center
+    )
+

@@ -37,7 +37,7 @@ class Qwen3VLCaptioner:
         model_id_or_path: str,
         *,
         device: str = "cuda",
-        instruction: str = "Shortly describe the content of this video in one or two sentences.",
+        instruction: str = "Shortly describe the content of this video  events and actions as they occur over time.",
         max_tokens_default: int = 100,
     ) -> None:
         _ensure_deps()

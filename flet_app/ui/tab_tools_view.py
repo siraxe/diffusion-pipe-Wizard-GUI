@@ -676,14 +676,7 @@ def get_models_tab_content(page: ft.Page):
             elif model_name == "joycaption-llava":
                 src = "fancyfeast/llama-joycaption-beta-one-hf-llava"
             elif model_name == "minimax-remover":
-                # Not downloadable via HF here; show a message and return
-                try:
-                    page.snack_bar = ft.SnackBar(ft.Text("No direct download configured for minimax-remover."))
-                    page.snack_bar.open = True
-                    page.update()
-                except Exception:
-                    pass
-                return
+                src = "zibojia/minimax-remover"
 
             if not src:
                 return
@@ -702,6 +695,8 @@ def get_models_tab_content(page: ft.Page):
                 subfolder = "_misc/Qwen3-VL-4B-Instruct"
             elif model_name == "joycaption-llava":
                 subfolder = "_misc/joycaption-llava"
+            elif model_name == "minimax-remover":
+                subfolder = "_misc/minimax-remover"
             cmd = [str(py), str(script_path), src]
             if subfolder:
                 # Pass both max connections and target subfolder

@@ -1,0 +1,13 @@
+[submodule "diffusion-trainers/diffusion-pipe"]
+	path = diffusion-trainers/diffusion-pipe
+	url = https://github.com/tdrussell/diffusion-pipe.git
+	ignore = dirty
+[submodule "diffusion-trainers/musubi-tuner"]
+	path = diffusion-trainers/musubi-tuner
+	url = https://github.com/siraxe/musubi-tuner.git
+	branch = ltx-2-dev-extra
+	ignore = dirty
+[submodule "diffusion-trainers/LTX-2"]
+	path = diffusion-trainers/LTX-2
+	url = https://github.com/Lightricks/LTX-2.git
+	ignore = dirty

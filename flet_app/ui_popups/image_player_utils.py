@@ -5,6 +5,130 @@ import cv2
 import numpy as np
 from typing import Tuple, List, Dict, Any, Optional, Union
 
+# Control Image Helper Functions
+def get_original_image_path(image_path: str) -> str:
+    """
+    If the image is in a control folder, return the path to the original image.
+    Otherwise, return the path as-is.
+    """
+    if "/control/" in image_path:
+        # Extract the original path from control image path
+        return image_path.replace("/control/", "/").replace("//", "/")
+    return image_path
+
+def get_control_image_path(image_path: str) -> Optional[str]:
+    """
+    Get the path to the control image for a given original image.
+    Returns None if the image is already a control image or if no control exists.
+    """
+    if "/control/" in image_path:
+        return None  # Already a control image
+
+    image_dir = os.path.dirname(image_path)
+    image_filename = os.path.basename(image_path)
+    control_folder = os.path.join(image_dir, "control")
+    control_image_path = os.path.join(control_folder, image_filename)
+
+    if os.path.exists(control_image_path):
+        return control_image_path
+    return None
+
+def images_have_same_dimensions(image_path1: str, image_path2: str) -> bool:
+    """
+    Check if two images have the same dimensions.
+    Returns False if either image doesn't exist or metadata cannot be retrieved.
+    """
+    if not os.path.exists(image_path1) or not os.path.exists(image_path2):
+        return False
+
+    md1 = get_image_metadata(image_path1)
+    md2 = get_image_metadata(image_path2)
+
+    if not md1 or not md2:
+        return False
+
+    return md1['width'] == md2['width'] and md1['height'] == md2['height']
+
+def get_related_image_info_for_crop(image_path: str) -> Optional[dict]:
+    """
+    Get information about a related image that should also be cropped.
+    Returns a dict with:
+        - 'path': the related image path
+        - 'needs_scaling': True if dimensions are close but not exact (within 10px)
+        - 'target_width': width to scale to (if needs_scaling)
+        - 'target_height': height to scale to (if needs_scaling)
+    Returns None if no related image exists or dimensions are too different.
+    """
+    is_control = "/control/" in image_path
+    DIM_THRESHOLD = 10  # pixels
+
+    if is_control:
+        # Get the original image path
+        original_path = get_original_image_path(image_path)
+        if not os.path.exists(original_path):
+            return None
+
+        md_current = get_image_metadata(image_path)
+        md_related = get_image_metadata(original_path)
+        if not md_current or not md_related:
+            return None
+
+        # Check if dimensions match exactly
+        if (md_current['width'] == md_related['width'] and
+            md_current['height'] == md_related['height']):
+            return {
+                'path': original_path,
+                'needs_scaling': False
+            }
+
+        # Check if dimensions are close (within threshold)
+        width_diff = abs(md_current['width'] - md_related['width'])
+        height_diff = abs(md_current['height'] - md_related['height'])
+        if width_diff <= DIM_THRESHOLD and height_diff <= DIM_THRESHOLD:
+            return {
+                'path': original_path,
+                'needs_scaling': True,
+                'target_width': md_current['width'],
+                'target_height': md_current['height']
+            }
+    else:
+        # Get the control image path
+        control_path = get_control_image_path(image_path)
+        if not control_path:
+            return None
+
+        md_current = get_image_metadata(image_path)
+        md_related = get_image_metadata(control_path)
+        if not md_current or not md_related:
+            return None
+
+        # Check if dimensions match exactly
+        if (md_current['width'] == md_related['width'] and
+            md_current['height'] == md_related['height']):
+            return {
+                'path': control_path,
+                'needs_scaling': False
+            }
+
+        # Check if dimensions are close (within threshold)
+        width_diff = abs(md_current['width'] - md_related['width'])
+        height_diff = abs(md_current['height'] - md_related['height'])
+        if width_diff <= DIM_THRESHOLD and height_diff <= DIM_THRESHOLD:
+            return {
+                'path': control_path,
+                'needs_scaling': True,
+                'target_width': md_current['width'],
+                'target_height': md_current['height']
+            }
+
+    return None
+
+# Backwards compatibility - old function name still works
+def get_related_image_path_for_crop(image_path: str) -> Optional[str]:
+    """Legacy function - use get_related_image_info_for_crop instead."""
+    info = get_related_image_info_for_crop(image_path)
+    return info['path'] if info else None
+
 # Caption and Data Handling
 def load_caption_for_image(image_path: str) -> Tuple[str, str, Optional[str]]:
     """
@@ -281,6 +405,7 @@ def crop_image_from_overlay(
     """
     Crops an image based on overlay coordinates from the UI.
     Converts normalized overlay coordinates to original image pixel coordinates.
+    Also crops the related control image (if exists and same dimensions).
     """
     if not os.path.exists(current_image_path):
         return False, "Image file not found.", None
@@ -289,12 +414,12 @@ def crop_image_from_overlay(
     # This assumes the image is scaled to fit within displayed_image_w/h while maintaining aspect ratio
     scale_w = displayed_image_w / image_orig_w
     scale_h = displayed_image_h / image_orig_h
-    
+
     # Use the smaller scale factor to determine the actual displayed size of the image
     # This is crucial because the image might not fill the entire player_content_w/h
     # if its aspect ratio is different.
     actual_scale = min(scale_w, scale_h)
-    
+
     # Calculate the actual width and height of the image as displayed in the UI
     actual_displayed_image_w = int(image_orig_w * actual_scale)
     actual_displayed_image_h = int(image_orig_h * actual_scale)
@@ -323,16 +448,43 @@ def crop_image_from_overlay(
     # Ensure crop coordinates are within original image bounds
     crop_x_orig = max(0, crop_x_orig)
     crop_y_orig = max(0, crop_y_orig)
-    
+
     # Adjust width/height if they extend beyond image boundaries
     crop_w_orig = min(crop_w_orig, image_orig_w - crop_x_orig)
     crop_h_orig = min(crop_h_orig, image_orig_h - crop_y_orig)
 
     # Handle rotation if angle is significant
     if abs(overlay_angle_rad) > 0.01:  # Only apply rotation if angle is more than ~0.5 degrees
-        return crop_image_with_rotation(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig, overlay_angle_rad)
+        result = crop_image_with_rotation(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig, overlay_angle_rad)
     else:
-        return crop_image(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig)
+        result = crop_image(current_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig)
+
+    # If the main image crop succeeded, also crop the related control image
+    if result[0]:  # success is True
+        related_info = get_related_image_info_for_crop(current_image_path)
+        if related_info:
+            related_image_path = related_info['path']
+            # First, scale the related image if needed (dimensions are close but not exact)
+            if related_info.get('needs_scaling'):
+                # Scale the related image to match the current image dimensions
+                scale_result = load_image(related_image_path)
+                if scale_result is not None:
+                    related_img, _ = scale_result
+                    target_w = related_info['target_width']
+                    target_h = related_info['target_height']
+                    # Resize using INTER_AREA for shrinking, INTER_LINEAR for growing
+                    interpolation = cv2.INTER_AREA if (related_img.shape[1] > target_w or related_img.shape[0] > target_h) else cv2.INTER_LINEAR
+                    resized = cv2.resize(related_img, (target_w, target_h), interpolation=interpolation)
+                    # Save the scaled image
+                    if save_image(resized, related_image_path):
+                        pass  # Successfully scaled
+            # Now crop with the same coordinates (dimensions now match)
+            if abs(overlay_angle_rad) > 0.01:
+                crop_image_with_rotation(related_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig, overlay_angle_rad, related_image_path)
+            else:
+                crop_image(related_image_path, crop_x_orig, crop_y_orig, crop_w_orig, crop_h_orig, related_image_path)
+
+    return result
 
 def crop_image_with_rotation(
     image_path: str,
@@ -419,12 +571,13 @@ def crop_image_with_rotation(
 
 
 def crop_image_to_dimensions(
-    image_path: str, 
-    target_width: int, 
+    image_path: str,
+    target_width: int,
     target_height: int
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Scales an image proportionally to cover the target dimensions, then center crops.
+    Also crops the related control image (if exists and same dimensions).
     Returns (success, message, output_path_or_none).
     """
     metadata = get_image_metadata(image_path)
@@ -450,7 +603,7 @@ def crop_image_to_dimensions(
     result = load_image(image_path)
     if result is None:
         return False, f"Failed to load image {image_path}", None
-    
+
     img, _ = result
 
     # Resize the image
@@ -479,5 +632,56 @@ def crop_image_to_dimensions(
 
     if not save_image(cropped_img, output_path):
         return False, f"Failed to save scaled and cropped image to {output_path}", None
-        
+
+    # Also crop the related control image if it exists and has the same (or close) dimensions
+    related_info = get_related_image_info_for_crop(image_path)
+    if related_info:
+        related_image_path = related_info['path']
+
+        # First, scale the related image if needed (dimensions are close but not exact)
+        if related_info.get('needs_scaling'):
+            # Scale the related image to match the current image dimensions first
+            scale_result = load_image(related_image_path)
+            if scale_result is not None:
+                related_img, _ = scale_result
+                target_w = related_info['target_width']
+                target_h = related_info['target_height']
+                # Resize using INTER_AREA for shrinking, INTER_LINEAR for growing
+                interpolation = cv2.INTER_AREA if (related_img.shape[1] > target_w or related_img.shape[0] > target_h) else cv2.INTER_LINEAR
+                resized = cv2.resize(related_img, (target_w, target_h), interpolation=interpolation)
+                # Save the scaled image (overwrite the original related image)
+                if save_image(resized, related_image_path):
+                    pass  # Successfully scaled, now dimensions match
+
+        # Now get the (potentially updated) metadata and apply the same scale + crop
+        related_metadata = get_image_metadata(related_image_path)
+        if related_metadata:
+            related_width = related_metadata['width']
+            related_height = related_metadata['height']
+
+            # Use the same scale factor for consistency
+            related_scaled_width = int(related_width * scale_factor)
+            related_scaled_height = int(related_height * scale_factor)
+
+            # Load and resize the related image
+            related_result = load_image(related_image_path)
+            if related_result is not None:
+                related_img, _ = related_result
+                related_resized = cv2.resize(related_img, (related_scaled_width, related_scaled_height), interpolation=cv2.INTER_AREA)
+
+                # Calculate crop coordinates for related image (same as main image)
+                related_x = (related_scaled_width - target_width) // 2
+                related_y = (related_scaled_height - target_height) // 2
+                related_x = max(0, related_x)
+                related_y = max(0, related_y)
+
+                related_crop_w = min(target_width, related_scaled_width - related_x)
+                related_crop_h = min(target_height, related_scaled_height - related_y)
+
+                # Perform the crop
+                related_cropped = related_resized[related_y : related_y + related_crop_h, related_x : related_x + related_crop_w]
+
+                # Save the related cropped image directly to the related image path
+                save_image(related_cropped, related_image_path)
+
     return True, "Image scaled and cropped successfully", output_path

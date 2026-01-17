@@ -114,13 +114,14 @@ def make_video_control(path: str, width: int, height: int, page: Optional[ft.Pag
         )
     
     try:
-        # Use the same settings as main.py - important: volume=100, autoplay=False
+        # Use enable_audio setting to determine volume
+        audio_enabled = settings.get("enable_audio", False)
         video_player = ftv.Video(
             playlist=[video_media],
             aspect_ratio=16 / 9,
             playlist_mode=ftv.PlaylistMode.SINGLE,
             autoplay=True,  # Autoplay enabled by user request
-            volume=0,       # Muted by default by user request
+            volume=100 if audio_enabled else 0,  # Use setting for audio
             width=width,
             height=height,
             expand=False,
