@@ -72,7 +72,8 @@ desktop.ini
 
 # assets and temporary files
 workspace/*
-!workspace/**/*_here.txt
+workspace/datasets/*
+!workspace/datasets/.gitkeep
 temp/
 tmp/
 *.tmp
@@ -95,5 +96,8 @@ opencode.json
 flet_app/ui/utils/recent_files.txt
 diffusion-pipe_new/
 diffusion-pipe_kl/
-diffusion-trainers/LTX-2/
 1.png
+/dp_env2
+/dp_env_bak
+/diffusion-trainers/LTX-2_bak
+/diffusion-trainers/LTX-2

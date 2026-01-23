@@ -1482,6 +1482,28 @@ def open_unified_popup_dialog(
                         ps_btn.update()
             except Exception:
                 pass
+
+            # Update crop buttons to use the currently displayed image path (control or original)
+            if is_img and crop_btn:
+                def _on_crop_click(e):
+                    image_editor.handle_crop_image_click(page, width_field, height_field, _current_image_to_edit(), items, None)
+                crop_btn.on_click = _on_crop_click
+                if crop_btn.page:
+                    crop_btn.update()
+
+            # Update apply_crop_from_overlay to use the currently displayed image path
+            if is_img:
+                original_apply_crop = apply_crop_from_overlay
+                def _apply_crop_with_current_image(e):
+                    # Update the media_path before calling the original function
+                    current_path = _current_image_to_edit()
+                    nonlocal overlay_saved
+                    # Temporarily update the path used by area_editor
+                    if area_apply_crop(page, current_path, overlay_control, overlay_visible, viewer_w, viewer_h, overlay_angle):
+                        refresh()
+                apply_crop_btn.on_click = _apply_crop_with_current_image
+                if apply_crop_btn.page:
+                    apply_crop_btn.update()
         editing_row = ft.ResponsiveRow([left_col, slider_col], spacing=10)
 
         # Do not attach on_click to content container to avoid pointer button effect

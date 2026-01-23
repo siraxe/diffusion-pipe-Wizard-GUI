@@ -40,7 +40,7 @@ def get_training_data_config_page_content():
 
     frame_buckets_field = create_textfield(
         "frame_buckets",
-        "[1, 33]",
+        "[33,81]",
         hint_text="Frame bucket values",
         expand=True
     )

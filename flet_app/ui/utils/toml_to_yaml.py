@@ -103,7 +103,7 @@ def convert_toml_to_ltx2_yaml(toml_path: str, output_yaml_path: str = None):
     yaml_config['acceleration'] = {
         'mixed_precision_mode': acceleration_section.get('mixed_precision_mode', toml_config.get('mixed_precision', 'bf16')),
         'quantization': acceleration_section.get('quantization', toml_config.get('quantization', 'int8-quanto')),
-        'load_text_encoder_in_8bit': acceleration_section.get('load_text_encoder_in_8bit', toml_config.get('load_text_encoder_in_8bit', True)),
+        'load_text_encoder_in_8bit': acceleration_section.get('8_bit_text_encoder', acceleration_section.get('load_text_encoder_in_8bit', toml_config.get('8_bit_text_encoder', toml_config.get('load_text_encoder_in_8bit', True)))),
     }
 
     # =========================================================================

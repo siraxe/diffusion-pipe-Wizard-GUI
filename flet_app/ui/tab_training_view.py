@@ -331,7 +331,7 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
         cmd = [
             "deepspeed",
             f"--num_gpus={num_gpus}",
-            "diffusion-pipe/train.py",
+            "diffusion-trainers/diffusion-pipe/train.py",
             "--deepspeed",
             "--config",
             os.path.abspath(config_path),
@@ -343,7 +343,7 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
             # Only add adapter scale flag if the training script supports it.
             if resume_last_strength < 1.0:
                 try:
-                    train_py = os.path.join(project_root, "diffusion-pipe", "train.py")
+                    train_py = os.path.join(project_root, "diffusion-trainers","diffusion-pipe", "train.py")
                     with open(train_py, "r", encoding="utf-8") as f:
                         train_src = f.read()
                     if "resume_adapter_scale" in train_src:

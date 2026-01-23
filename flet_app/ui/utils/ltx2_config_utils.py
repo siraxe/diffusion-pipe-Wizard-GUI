@@ -155,8 +155,8 @@ def build_ltx2_toml_from_ui(training_tab_container) -> str:
     lines.append("[acceleration]")
     lines.append(f"mixed_precision_mode = {_quote(_get('mixed_precision_mode', 'bf16'))}")
     lines.append(f"quantization = {_quote(_get('quantization', 'int8-quanto'))}")
-    load_text_encoder_in_8bit = _as_bool(_get('load_text_encoder_in_8bit', False))
-    lines.append(f"load_text_encoder_in_8bit = {'true' if load_text_encoder_in_8bit else 'false'}")
+    load_text_encoder_in_8bit = _as_bool(_get('8_bit_text_encoder', True))
+    lines.append(f"8_bit_text_encoder = {'true' if load_text_encoder_in_8bit else 'false'}")
     lines.append("")
 
     # [data]
@@ -219,7 +219,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
     import flet as ft
 
     def _set_field_value(label, value):
-        """Helper to find and set a control's value by label."""
+        """Helper to find and set a control's value by label or data attribute."""
         try:
             found = False
             def _apply(control):
@@ -231,7 +231,9 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
                     _apply(control.content)
 
                 ctrl_label = getattr(control, 'label', None)
-                if ctrl_label == label:
+                ctrl_data = getattr(control, 'data', None)
+                # Match by label or data attribute
+                if ctrl_label == label or ctrl_data == label:
                     found = True
                     if isinstance(control, ft.TextField):
                         # Handle empty/None values - show as "null" string for specific fields
@@ -300,9 +302,34 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
 
             _set_field_value('load_checkpoint', model.get('load_checkpoint', ''))
 
-        # Output dir
+        # Output dir - set the bottom bar output_dir_field
+        # output_dir can be at top level OR inside [model] section for LTX2
         output_dir = toml_data.get('output_dir', '')
-        _set_field_value('output_dir', output_dir)
+        if not output_dir:
+            model = toml_data.get('model', {})
+            if isinstance(model, dict):
+                output_dir = model.get('output_dir', '')
+        if output_dir:
+            # Collapse to relative path for UI display
+            try:
+                from flet_app.project_root import get_project_root
+                proj_root = str(get_project_root()).replace('\\', '/').rstrip('/').lower()
+                od = str(output_dir).replace('\\', '/').lower()
+                if od.startswith(proj_root + '/'):
+                    # Strip project root to get relative path
+                    output_dir = output_dir.replace('\\', '/')[len(proj_root) + 1:]
+            except Exception:
+                pass
+
+        # Set the bottom bar output_dir_field
+        try:
+            bb_field = getattr(training_tab_container, 'output_dir_field', None)
+            if bb_field is not None and isinstance(bb_field, ft.TextField):
+                bb_field.value = str(output_dir) if output_dir is not None else ''
+                if bb_field.page:
+                    bb_field.update()
+        except Exception:
+            pass
 
         # LoRA section
         lora = toml_data.get('lora', {})
@@ -351,7 +378,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         # Always load values (section may be empty dict)
         _set_field_value('mixed_precision_mode', acceleration.get('mixed_precision_mode', 'bf16'))
         _set_field_value('quantization', acceleration.get('quantization', 'int8-quanto'))
-        _set_field_value('load_text_encoder_in_8bit', acceleration.get('load_text_encoder_in_8bit', False))
+        _set_field_value('8_bit_text_encoder', acceleration.get('8_bit_text_encoder', True))
 
         # Checkpoints section
         checkpoints = toml_data.get('checkpoints', {})

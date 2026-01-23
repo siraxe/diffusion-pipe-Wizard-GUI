@@ -119,8 +119,8 @@ def extract_config_from_controls(control):
             if getattr(child, 'visible', True):
                 key = getattr(child, 'data', None) or child.label
                 # Handle special cases where label is the key
-                if child.label in ['all_modules', 'video_attn', 'video_ff', 'audio_attn', 
-                                   'audio_ff', 'cross_modal_attn', 'with_audio']:
+                if child.label in ['all_modules', 'video_attn', 'video_ff', 'audio_attn',
+                                   'audio_ff', 'cross_modal_attn', 'with_audio', '8_bit_text_encoder']:
                     key = child.label
                 result[key] = child.value
 
@@ -670,9 +670,6 @@ def _handle_dataset_selection(toml_data, training_tab_container, page):
 def update_ui_from_toml(training_tab_container, toml_data: dict):
     """Populate UI controls from TOML data produced by our builder schema."""
     page = getattr(training_tab_container, 'page', None)
-    
-    def _to_bool(v):
-        return _to_bool(v)
 
     # Build label -> value map
     label_vals = {}

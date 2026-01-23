@@ -238,6 +238,10 @@ def get_training_config_page_content():
             "mixed_precision_mode": mixed_precision_mode_dropdown_ref,
             "quantization": quantization_dropdown_ref,
             "load_text_encoder_in_8bit": load_text_encoder_in_8bit_checkbox_ref,
+            # Flux2-specific fields
+            "flux2_vae": flux2_vae_field_ref,
+            "flux2_text_encoders": flux2_text_encoders_field_ref,
+            "flux2_shift": flux2_shift_field_ref,
         }
 
         try:
@@ -339,7 +343,6 @@ def get_training_config_page_content():
     def on_model_type_change(e):
         """Handle model type dropdown change to show/hide model-specific fields"""
         sel = model_type_dropdown_ref.current.value if model_type_dropdown_ref.current else None
-        print(f"DEBUG on_model_type_change: sel={sel}")
         if not sel:
             return
 
@@ -347,7 +350,6 @@ def get_training_config_page_content():
         sel_norm = mfc.normalize_model_name(sel)
         model_key = mfc.get_model_key(sel_norm)
         skip_defaults = _suppress_model_defaults
-        print(f"DEBUG on_model_type_change: sel_norm={sel_norm}, model_key={model_key}")
 
         # 2. Apply Field Visibility
         # We capture the visibility dict to determine if Rows should be hidden
@@ -447,24 +449,19 @@ def get_training_config_page_content():
         # Toggle standard training sections
         if standard_training_section_ref.current:
             standard_training_section_ref.current.visible = not is_ltx2
-            print(f"DEBUG: Set standard_training_section visible={not is_ltx2}")
             if standard_training_section_ref.current.page:
                 standard_training_section_ref.current.update()
         if standard_eval_optimizer_section_ref.current:
             standard_eval_optimizer_section_ref.current.visible = not is_ltx2
-            print(f"DEBUG: Set standard_eval_optimizer_section visible={not is_ltx2}")
             if standard_eval_optimizer_section_ref.current.page:
                 standard_eval_optimizer_section_ref.current.update()
 
         # Toggle LTX2 custom section
         if ltx2_custom_section_ref.current:
             ltx2_custom_section_ref.current.visible = is_ltx2
-            print(f"DEBUG: Set ltx2_custom_section visible={is_ltx2}, is_ltx2={is_ltx2}, sel_norm={sel_norm}")
             # Force update the ltx2 section
             if ltx2_custom_section_ref.current.page:
                 ltx2_custom_section_ref.current.update()
-        else:
-            print(f"DEBUG: ltx2_custom_section_ref.current is None!")
 
         # 10. Update adapter field visibility (hide old ones for LTX2, show new ones only for LTX2)
         ltx2_adapter_fields = {
@@ -498,8 +495,6 @@ def get_training_config_page_content():
         # 11. Update page
         if e and getattr(e, 'page', None):
             e.page.update()
-        else:
-            print("DEBUG: Page update - e or e.page is None")
 
     page_controls = []
 
@@ -546,7 +541,7 @@ def get_training_config_page_content():
             toml_lines.append("num_repeats = 1")
             toml_lines.append("")
             toml_lines.append("# Frame buckets (commented out by default)")
-            toml_lines.append("# frame_buckets = [1, 33]")
+            toml_lines.append("# frame_buckets = [33,81]")
             toml_lines.append("")
             toml_lines.append("[[directory]]")
             toml_lines.append("# The target images go in here. These are the images that the model will learn to produce.")
@@ -635,14 +630,24 @@ def get_training_config_page_content():
                                 col=6, expand=True, ref=model_path_field_ref,
                                 visible=_should_show_field("model_path")
                             ),
-                            ft.Checkbox(
-                                label="with_audio",
-                                value=True,
-                                scale=0.8,
-                                ref=with_audio_checkbox_ref,
-                                visible=_should_show_field("with_audio"),
-                                col=6,
-                            ),
+                            ft.Column([
+                                ft.Checkbox(
+                                    label="with_audio",
+                                    value=True,
+                                    scale=0.8,
+                                    ref=with_audio_checkbox_ref,
+                                    visible=_should_show_field("with_audio"),
+                                    data="with_audio",
+                                ),
+                                ft.Checkbox(
+                                    label="8_bit_text_encoder",
+                                    value=True,
+                                    scale=0.8,
+                                    ref=load_text_encoder_in_8bit_checkbox_ref,
+                                    visible=_should_show_field("load_text_encoder_in_8bit"),
+                                    data="8_bit_text_encoder",
+                                ),
+                            ], col=6, spacing=2),
                         ],
                         ref=checkpoint_row_ref,
                         visible=_should_show_field("model_path")
@@ -903,14 +908,6 @@ def get_training_config_page_content():
                             {
                                 "lora": "lora"
                             }, col=3, expand=False, scale=0.8,
-                        ),
-                        ft.Checkbox(
-                            label="load_text_encoder_in_8bit",
-                            value=False,
-                            scale=0.8,
-                            ref=load_text_encoder_in_8bit_checkbox_ref,
-                            visible=_should_show_field("load_text_encoder_in_8bit"),
-                            col=3,
                         ),
                         ft.Column([
                             ft.ResponsiveRow(controls=[

@@ -1,6 +1,9 @@
 import argparse
 import os
 import wandb
+# Disable comfy_kitchen during training to avoid autograd errors
+import sys
+sys.modules["comfy_kitchen"] = None
 from datetime import datetime, timezone
 import shutil
 import glob
@@ -393,6 +396,12 @@ if __name__ == '__main__':
     elif model_type == 'flux2':
         from models import flux2
         model = flux2.Flux2Pipeline(config)
+    elif model_type == 'qwen_image_plus':
+        from models import qwen_image_plus
+        model = qwen_image_plus.QwenImagePlusPipeline(config)
+    elif model_type == 'longcat':
+        from models import longcat_video
+        model = longcat_video.LongcatVideoPipeline(config)
     else:
         raise NotImplementedError(f'Model type {model_type} is not implemented')
 

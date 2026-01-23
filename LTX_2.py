@@ -1,10 +1,13 @@
 """LTX-2 model handler - processes ltx-video-2 model configurations"""
+import json
+import math
 import toml
 import os
 import subprocess
 import asyncio
 import gc
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 
 def _build_ltx2_pythonpath(current_dir: str, existing_pythonpath: str = '') -> str:
@@ -40,8 +43,241 @@ def _get_popen_kwargs(cwd: str, env: dict) -> dict:
     return kwargs
 
 
-def _build_resolution_buckets(resolutions: list, frame_buckets: list) -> str:
-    """Build resolution-buckets string from resolutions and frame buckets."""
+def _get_media_resolution(media_path: str) -> tuple[int, int] | None:
+    """Get the resolution (width, height) of a video or image file.
+    Returns None if the file type is not supported or cannot be read.
+    """
+    media_path = Path(media_path)
+    suffix = media_path.suffix.lower()
+
+    # For images, use PIL
+    if suffix in [".png", ".jpg", ".jpeg", ".webp"]:
+        try:
+            from PIL import Image
+            with Image.open(media_path) as img:
+                return img.size  # (width, height)
+        except Exception as e:
+            print(f"[DEBUG] Could not read image {media_path}: {e}")
+            return None
+
+    # For videos, use av/PyAV
+    elif suffix in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".gif"]:
+        try:
+            import av
+            with av.open(str(media_path)) as container:
+                video_stream = container.streams.video[0]
+                return (video_stream.width, video_stream.height)
+        except Exception as e:
+            print(f"[DEBUG] Could not read video {media_path}: {e}")
+            return None
+
+    return None
+
+
+def _get_unique_aspect_ratios(dataset_json: str, sample_size: int = 10) -> list[tuple[float, int, int]]:
+    """Get unique aspect ratios from the dataset by sampling media files.
+    Returns list of tuples: (aspect_ratio, width, height) for unique aspect ratios found.
+    """
+    aspect_ratios = {}
+
+    try:
+        with open(dataset_json, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if not isinstance(data, list):
+            return []
+
+        # Determine media column name (common variants)
+        media_column = None
+        for col in ['media_path', 'video_path', 'video', 'path']:
+            if col in data[0]:
+                media_column = col
+                break
+
+        if not media_column:
+            print("[DEBUG] No media column found in dataset")
+            return []
+
+        # Get data root for relative paths
+        data_root = Path(dataset_json).parent
+
+        # Sample files to find unique aspect ratios
+        sample_count = min(sample_size, len(data))
+        for i in range(sample_count):
+            media_rel_path = data[i].get(media_column)
+            if not media_rel_path:
+                continue
+
+            media_path = data_root / media_rel_path
+            resolution = _get_media_resolution(str(media_path))
+
+            if resolution:
+                width, height = resolution
+                aspect_ratio = round(width / height, 4)  # Round to avoid float precision issues
+                if aspect_ratio not in aspect_ratios:
+                    aspect_ratios[aspect_ratio] = (width, height)
+
+        # Convert to list of tuples sorted by aspect ratio
+        result = [(ar, w, h) for ar, (w, h) in aspect_ratios.items()]
+        result.sort(key=lambda x: x[0])
+        return result
+
+    except Exception as e:
+        print(f"[DEBUG] Error reading dataset for aspect ratios: {e}")
+        return []
+
+
+def _calculate_resolution_for_aspect_ratio(
+    target_pixels: int,
+    aspect_ratio: float,
+    divisor: int = 32
+) -> tuple[int, int]:
+    """Calculate width and height that:
+    - Has approximately target_pixels area (width * height)
+    - Has the given aspect ratio (width / height)
+    - Both dimensions are divisible by divisor (default 32)
+
+    Example:
+        target_pixels = 512 * 512 = 262144
+        aspect_ratio = 715 / 366 ≈ 1.9536
+        Returns: (704, 352) -> area = 247,808 pixels, 704/32=22, 352/32=11
+    """
+    # Calculate ideal dimensions from area and aspect ratio
+    # area = width * height
+    # aspect_ratio = width / height
+    # Therefore: height = sqrt(area / aspect_ratio), width = height * aspect_ratio
+
+    ideal_height = math.sqrt(target_pixels / aspect_ratio)
+    ideal_width = ideal_height * aspect_ratio
+
+    # Find closest values divisible by divisor
+    height = int(round(ideal_height / divisor)) * divisor
+    width = int(round(ideal_width / divisor)) * divisor
+
+    # Ensure minimum size
+    if height < divisor:
+        height = divisor
+    if width < divisor:
+        width = divisor
+
+    return (width, height)
+
+
+def _create_captions_from_txt(dataset_folder_path: str, dataset_type: str = "video") -> bool:
+    """Create captions.json from .txt files in the dataset folder.
+    Returns True if captions.json was created/updated, False if error or no .txt files found.
+    """
+    try:
+        import glob
+        from flet_app.ui import settings
+
+        captions_json_path = os.path.join(dataset_folder_path, "captions.json")
+
+        # Load existing captions if any
+        if os.path.exists(captions_json_path):
+            with open(captions_json_path, 'r', encoding='utf-8') as f:
+                captions_data = json.load(f)
+            if not isinstance(captions_data, list):
+                captions_data = []
+        else:
+            captions_data = []
+
+        # Get media extensions based on dataset type
+        if dataset_type == "image":
+            media_extensions = settings.IMAGE_EXTENSIONS
+        else:
+            media_extensions = list(dict.fromkeys(settings.VIDEO_EXTENSIONS + settings.IMAGE_EXTENSIONS))
+
+        # Get all media files
+        media_files = []
+        for ext in media_extensions:
+            media_files.extend(glob.glob(os.path.join(dataset_folder_path, f"*{ext}")))
+            media_files.extend(glob.glob(os.path.join(dataset_folder_path, f"*{ext.upper()}")))
+
+        media_files = sorted(list(set(os.path.normpath(f) for f in media_files)))
+
+        # Build captions dict from existing data
+        captions_dict = {os.path.basename(item['media_path']): item for item in captions_data if 'media_path' in item}
+
+        # Update captions from .txt files
+        updated_count = 0
+        for media_path in media_files:
+            base_filename, _ = os.path.splitext(os.path.basename(media_path))
+            txt_caption_path = os.path.join(dataset_folder_path, f"{base_filename}.txt")
+
+            if os.path.exists(txt_caption_path):
+                with open(txt_caption_path, 'r', encoding='utf-8') as f:
+                    caption_text = f.read().strip()
+
+                media_basename = os.path.basename(media_path)
+                if media_basename in captions_dict:
+                    captions_dict[media_basename]['caption'] = caption_text
+                else:
+                    captions_dict[media_basename] = {
+                        "media_path": media_basename,
+                        "caption": caption_text
+                    }
+                updated_count += 1
+
+        if updated_count > 0:
+            with open(captions_json_path, 'w', encoding='utf-8') as f:
+                json.dump(list(captions_dict.values()), f, indent=4)
+            print(f"[Auto-Caption] Created/updated captions.json with {updated_count} entries from .txt files")
+            return True
+        else:
+            print("[Auto-Caption] No .txt files found to create captions.json")
+            return False
+
+    except Exception as e:
+        print(f"[Auto-Caption] Error creating captions.json: {e}")
+        return False
+
+
+def _build_resolution_buckets(
+    resolutions: list,
+    frame_buckets: list,
+    dataset_json: str | None = None
+) -> str:
+    """Build resolution-buckets string from resolutions and frame buckets.
+    If dataset_json is provided and resolutions is non-empty, calculates resolution buckets
+    based on the actual aspect ratios found in the dataset media files.
+
+    Args:
+        resolutions: List of target resolution values (e.g., [512, 768])
+        frame_buckets: List of frame counts (e.g., [1, 33, 65])
+        dataset_json: Optional path to dataset JSON file for auto-resolution
+
+    Returns:
+        Resolution bucket string like "704x352x33;512x512x49"
+    """
+    buckets = []
+
+    if dataset_json and resolutions and frame_buckets:
+        # Get unique aspect ratios from the dataset
+        aspect_ratios = _get_unique_aspect_ratios(dataset_json)
+
+        if aspect_ratios:
+            print(f"\n[Auto-Resolution] Found {len(aspect_ratios)} unique aspect ratio(s) in dataset:")
+            for ar, w, h in aspect_ratios:
+                print(f"  - {w}x{h} (aspect ratio: {ar:.4f})")
+
+            # Calculate resolution buckets for each target resolution and aspect ratio
+            for target_res in resolutions:
+                target_pixels = target_res * target_res  # Area of square resolution
+
+                for aspect_ratio, orig_w, orig_h in aspect_ratios:
+                    width, height = _calculate_resolution_for_aspect_ratio(target_pixels, aspect_ratio)
+
+                    for fb in frame_buckets:
+                        buckets.append(f"{width}x{height}x{fb}")
+
+                    print(f"[Auto-Resolution] Target {target_res}x{target_res} ({target_pixels:,} pixels) "
+                          f"-> {width}x{height} ({width * height:,} pixels) for aspect ratio {aspect_ratio:.4f}")
+
+            if buckets:
+                return ";".join(buckets)
+
+    # Fallback to square resolutions
     buckets = []
     if resolutions and frame_buckets:
         for res in resolutions:
@@ -92,9 +328,37 @@ async def run_process_dataset(config_path: str):
         _print_config_info(yaml_path, preprocessed_data_root, frame_buckets, resolutions)
 
         dataset_json = os.path.join(preprocessed_data_root, 'captions.json')
-        resolution_buckets_str = _build_resolution_buckets(resolutions, frame_buckets)
+
+        # Check if captions.json exists, if not try to create from .txt files
+        if not os.path.exists(dataset_json):
+            print(f"\n[Auto-Caption] captions.json not found at: {dataset_json}")
+            print(f"[Auto-Caption] Attempting to create captions.json from .txt files...")
+            if _create_captions_from_txt(preprocessed_data_root):
+                print(f"[Auto-Caption] Successfully created captions.json")
+            else:
+                print(f"[Auto-Caption] Warning: Could not create captions.json from .txt files")
+                print(f"[Auto-Caption] You may need to create captions.json manually or use 'txt > json' button")
+        resolution_buckets_str = _build_resolution_buckets(resolutions, frame_buckets, dataset_json)
         current_dir = os.getcwd()
         script_path = os.path.join(current_dir, "diffusion-trainers/LTX-2/packages/ltx-trainer/scripts/process_dataset.py")
+
+        # Read TOML config to get 8_bit_text_encoder and with_audio values
+        use_8bit = False
+        no_audio = False
+        try:
+            with open(config_path, 'r') as f:
+                toml_config = toml.load(f)
+            # Check acceleration section for 8_bit_text_encoder
+            acceleration = toml_config.get('acceleration', {})
+            if acceleration.get('8_bit_text_encoder', True):
+                use_8bit = True
+            # Check training_strategy section for with_audio
+            training_strategy = toml_config.get('training_strategy', {})
+            with_audio = training_strategy.get('with_audio', True)
+            if not with_audio:
+                no_audio = True
+        except Exception as e:
+            print(f"[DEBUG] Could not read TOML config for flags: {e}")
 
         # Add -u flag for unbuffered output
         cmd = [
@@ -110,7 +374,22 @@ async def run_process_dataset(config_path: str):
             "--batch-size",
             str(num_repeats),
         ]
-        cmd_str = " ".join(cmd)
+
+        # Add --load-text-encoder-in-8bit flag if 8_bit_text_encoder is True
+        if use_8bit:
+            cmd.append("--load-text-encoder-in-8bit")
+            print("[LTX2] Added --load-text-encoder-in-8bit flag (8-bit text encoder enabled)")
+
+        # Add --with-audio flag only if with_audio is True (default is False)
+        if not no_audio:
+            cmd.append("--with-audio")
+            print("[LTX2] Added --with-audio flag (audio processing enabled)")
+
+        # Quote the resolution-buckets argument for shell-safe display
+        cmd_str = " ".join(
+            f'"{arg}"' if " " in arg or ";" in arg else arg
+            for arg in cmd
+        )
         _print_command(cmd_str, "Process Dataset Command")
         print("LTX2")
 

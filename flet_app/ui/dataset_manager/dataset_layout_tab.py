@@ -368,8 +368,8 @@ def create_abc_action_container():
                             force_refresh=False,
                         )
 
-                    # Hide the container after operation
-                    abc_action_container.visible = False
+                    # Hide the buttons after operation
+                    abc_action_container.content.visible = False
                     abc_action_container.update()
                     e.page.update()
         except Exception as ex:
@@ -449,8 +449,8 @@ def create_abc_action_container():
                                        grid_control=thumbnails_grid_ref.current,
                                        force_refresh=True)
 
-                    # Hide the container after operation
-                    abc_action_container.visible = False
+                    # Hide the buttons after operation
+                    abc_action_container.content.visible = False
                     abc_action_container.update()
                     e.page.update()
         except Exception as ex:
@@ -576,49 +576,45 @@ def create_abc_action_container():
                 )
                 e.page.update()
 
-    abc_action_container = ft.Container(
-        content=ft.Row(
-            [
-                ft.Row([
-                    ft.IconButton(
-                        icon=ft.Icons.DOWNLOAD,
-                        on_click=on_download_click,
-                        icon_color=ft.Colors.GREEN_600,
-                        tooltip="Download selected items",
-                        icon_size=20
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.CONTENT_COPY,
-                        on_click=on_duplicate_click,
-                        icon_color=ft.Colors.BLUE_600,
-                        tooltip="Duplicate selected items",
-                        icon_size=20
-                    ),
-                    ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        on_click=on_delete_click,
-                        icon_color=ft.Colors.RED_600,
-                        tooltip="Delete selected items",
-                        icon_size=20
-                    ),
-                ], spacing=8),
-            ],
-            alignment=ft.MainAxisAlignment.START,
-            expand=False
+    # Create button icons column with visibility control
+    abc_buttons_column = ft.Column([
+        ft.IconButton(
+            icon=ft.Icons.DOWNLOAD,
+            on_click=on_download_click,
+            icon_color=ft.Colors.GREEN_600,
+            tooltip="Download selected items",
+            icon_size=20
         ),
-        top=0,
-        right=160,  # 30px offset from the right
-        padding=ft.padding.all(2),
-        visible=False,  # Initially hidden
+        ft.IconButton(
+            icon=ft.Icons.CONTENT_COPY,
+            on_click=on_duplicate_click,
+            icon_color=ft.Colors.BLUE_600,
+            tooltip="Duplicate selected items",
+            icon_size=20
+        ),
+        ft.IconButton(
+            icon=ft.Icons.DELETE,
+            on_click=on_delete_click,
+            icon_color=ft.Colors.RED_600,
+            tooltip="Delete selected items",
+            icon_size=20
+        ),
+    ], spacing=8, visible=False)  # Buttons hidden initially, panel always visible
+
+    abc_action_container = ft.Container(
+        content=abc_buttons_column,
+        padding=ft.padding.all(5),
+        width=50,  # Fixed width to prevent layout jumping
+        bgcolor=ft.Colors.with_opacity(0.9, ft.Colors.SURFACE),
+        border_radius=8,
+        border=ft.border.all(1, ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE)),
     )
 
     return abc_action_container
 
 def create_sort_controls_container():
     global dataset_sort_controls_container
-    if dataset_sort_controls_container is not None:
-        return dataset_sort_controls_container
-
+    # Always recreate to avoid page session conflicts
     sort_dropdown = create_dropdown(
         label=None,
         value=dataset_sort_mode["value"],
@@ -662,8 +658,9 @@ def update_abc_container_visibility(page=None):
         is_in_dataset_tab_flag = getattr(page, 'is_in_dataset_tab', False) if page else False
         selected_thumbnails_set = getattr(page, 'selected_thumbnails_set', set()) if page else set()
 
-        # Main container visible only if we are in dataset tab AND have selections
-        abc_action_container.visible = is_in_dataset_tab_flag and len(selected_thumbnails_set) > 0
+        # Buttons visible only if we are in dataset tab AND have selections
+        # Panel stays visible to prevent layout jumping
+        abc_action_container.content.visible = is_in_dataset_tab_flag and len(selected_thumbnails_set) > 0
 
         if abc_action_container.page:
             abc_action_container.update()
@@ -1021,9 +1018,7 @@ def reload_current_dataset(
 def _create_global_controls():
     global bucket_size_textfield, rename_textfield, model_name_dropdown, trigger_word_textfield
 
-    if bucket_size_textfield is not None:
-        return
-
+    # Always recreate controls to avoid page session conflicts
     bucket_size_textfield = create_textfield(
         label="Bucket Size (e.g., [W, H, F] or WxHxF)",
         value=settings.DEFAULT_BUCKET_SIZE_STR,
@@ -1036,7 +1031,6 @@ def _create_global_controls():
         hint_text="Name of videos + _num will be added",
         expand=True,
     )
-
 
     trigger_word_textfield = create_textfield(
         "Trigger WORD", "", col=9, expand=True, hint_text="e.g. 'CAKEIFY' , leave empty for none"
@@ -2114,16 +2108,22 @@ def dataset_tab_layout(page=None):
     # Create a simple container for the thumbnails area with upload button
     # Since true OS-level drag and drop isn't supported in Flet web, we'll use a clickable area approach
     rc_content = ft.Column([
-        ft.Container(
-            content=ft.Column([
-                thumbnails_grid_control,
-                ft.Row([upload_button], alignment=ft.MainAxisAlignment.CENTER, spacing=10)  # Add upload button below thumbnails
-            ]),
-            expand=True,
-            border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY_400)),
-            border_radius=5,
-            margin=ft.margin.only(top=10),
-        ),
+        # Row with thumbnails grid on left and action buttons on right
+        ft.Row([
+            # Left column: thumbnails grid
+            ft.Container(
+                content=ft.Column([
+                    thumbnails_grid_control,
+                    ft.Row([upload_button], alignment=ft.MainAxisAlignment.CENTER, spacing=10)  # Add upload button below thumbnails
+                ]),
+                expand=True,
+                border=ft.border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.GREY_400)),
+                border_radius=5,
+                margin=ft.margin.only(top=10),
+            ),
+            # Right column: action buttons (Download, Duplicate, Delete) - appears when items are selected
+            abc_container_ref,
+        ], alignment=ft.MainAxisAlignment.START, spacing=10, expand=True),
         bottom_app_bar,
     ], alignment=ft.CrossAxisAlignment.STRETCH, expand=True, spacing=10)
 

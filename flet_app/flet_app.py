@@ -96,12 +96,12 @@ def build_main_tabs(page):
         expand=True,
     )
     
-    # Create a container with the tabs and the ABC container positioned to the right
+    # Create a container with the tabs and sort controls
+    # Note: abc_container is now part of the dataset tab layout, not in the Stack
     tab_with_abc_container = ft.Stack(
         [
             main_tabs,
             sort_controls_container,
-            abc_container
         ],
         expand=True
     )
