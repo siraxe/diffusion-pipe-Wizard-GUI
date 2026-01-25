@@ -1,6 +1,8 @@
 [submodule "diffusion-trainers/LTX-2"]
 	path = diffusion-trainers/LTX-2
 	url = https://github.com/Lightricks/LTX-2.git
+	ignore = dirty
 [submodule "diffusion-trainers/diffusion-pipe"]
 	path = diffusion-trainers/diffusion-pipe
 	url = https://github.com/tdrussell/diffusion-pipe.git
+	ignore = dirty

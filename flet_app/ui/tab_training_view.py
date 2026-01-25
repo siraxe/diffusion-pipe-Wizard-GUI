@@ -321,6 +321,11 @@ async def run_training_deepspeed(config_path: str, use_multi_gpu: bool, trust_ca
     """Launch deepspeed training with env vars and computed GPU count.
     Returns (proc, cmd_string) where proc is a Popen object with stdout piped.
     """
+    from flet_app.ui.utils.process_cleanup import kill_existing_training_processes
+
+    # Kill any existing training processes before starting new one
+    kill_existing_training_processes()
+
     import asyncio
     from concurrent.futures import ThreadPoolExecutor
 

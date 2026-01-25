@@ -1,5 +1,5 @@
+/home/e/Dpipe/workspace/configs/f_ghoul.toml
+/home/e/Dpipe/workspace/configs/h4rd8are.toml
 /home/e/Dpipe/workspace/configs/LLT.toml
 /home/e/Dpipe/workspace/configs/chrom.toml
 /home/e/Dpipe/workspace/configs/LLT2.toml
-/home/e/Dpipe/workspace/configs/aaa.toml
-/home/e/Dpipe/workspace/configs/j1.toml

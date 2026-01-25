@@ -320,6 +320,11 @@ def _print_command(cmd_str: str, title: str = "Command"):
 
 async def run_process_dataset(config_path: str):
     """Run process_dataset.py for LTX-2 model. Returns process immediately for streaming."""
+    from flet_app.ui.utils.process_cleanup import kill_existing_training_processes
+
+    # Kill any existing training processes before starting new one
+    kill_existing_training_processes()
+
     def _run():
         from flet_app.ui.utils.toml_to_yaml import convert_toml_to_ltx2_yaml
         result = convert_toml_to_ltx2_yaml(config_path)
@@ -411,6 +416,11 @@ async def run_process_dataset(config_path: str):
 
 async def run_ltx_training(yaml_config_path: str, cache_only: bool = False):
     """Run LTX-2 training script with Python."""
+    from flet_app.ui.utils.process_cleanup import kill_existing_training_processes
+
+    # Kill any existing training processes before starting new one
+    kill_existing_training_processes()
+
     def _run():
         import sys
         current_dir = os.getcwd()
