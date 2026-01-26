@@ -1,5 +1,4 @@
 import os
-import re
 import time
 import warnings
 from pathlib import Path
@@ -501,156 +500,18 @@ class LtxvTrainer:
         logger.info("✅ Full model checkpoint loaded successfully")
 
     def _load_lora_checkpoint(self, checkpoint_path: Path) -> None:
-        """Load LoRA checkpoint with DDP/FSDP compatibility.
-
-        Handles rank mismatches between checkpoint and current model configuration.
-        When increasing rank, old weights are preserved and new dimensions are zero-initialized.
-        When decreasing rank, weights are truncated to fit the new rank.
-
-        Supports blending with an additional checkpoint via load_checkpoint_extra.
-
-        Supports both old PEFT format (lora_A.weight) and new PEFT format (lora_A.default.weight).
-        """
-        # Load and resize main checkpoint
-        main_state_dict = self._load_and_resize_lora_checkpoint(checkpoint_path, "main")
-
-        # Load and blend extra checkpoint if specified
-        if self._config.model.load_checkpoint_extra:
-            extra_path = self._find_checkpoint(self._config.model.load_checkpoint_extra)
-            if extra_path:
-                extra_state_dict = self._load_and_resize_lora_checkpoint(extra_path, "extra")
-                opacity = self._config.model.lce_opacity
-
-                # Blend: main + (opacity × extra)
-                for key in main_state_dict:
-                    if key in extra_state_dict:
-                        main_state_dict[key] = main_state_dict[key] + opacity * extra_state_dict[key]
-
-                logger.info(f"🎨 Blended extra checkpoint with opacity {opacity}")
-
-        # Apply the blended weights to the model
-        base_model = self._transformer.get_base_model()
-
-        for key, weight in main_state_dict.items():
-            # Navigate to the parameter in the model
-            parts = key.split('.')
-            module = base_model
-            for part in parts[:-1]:
-                module = getattr(module, part)
-            param_name = parts[-1]
-            param = getattr(module, param_name)
-            # Copy the weight data directly
-            with torch.no_grad():
-                param.data.copy_(weight.to(param.data.device))
-
-        logger.info("✅ LoRA checkpoint loaded successfully")
-
-    def _load_and_resize_lora_checkpoint(self, checkpoint_path: Path, checkpoint_type: str) -> dict[str, Tensor]:
-        """Load a LoRA checkpoint and resize it to match current model rank.
-
-        Args:
-            checkpoint_path: Path to the checkpoint file
-            checkpoint_type: Type identifier for logging ("main" or "extra")
-
-        Returns:
-            Dictionary of resized LoRA weights keyed by parameter name
-        """
+        """Load LoRA checkpoint with DDP/FSDP compatibility."""
         state_dict = load_file(checkpoint_path)
 
         # Adjust layer names to match internal format.
         # (Weights are saved in ComfyUI-compatible format, with "diffusion_model." prefix)
         state_dict = {k.replace("diffusion_model.", "", 1): v for k, v in state_dict.items()}
 
-        # Handle rank mismatches between checkpoint and current config
+        # Load LoRA weights and verify all weights were loaded
         base_model = self._transformer.get_base_model()
-        current_rank = self._config.lora.rank
+        set_peft_model_state_dict(base_model, state_dict)
 
-        # Get the current model's state dict to check shapes
-        current_state_dict = {}
-        for name, param in base_model.named_parameters():
-            if param.requires_grad:  # Only LoRA parameters are trainable
-                current_state_dict[name] = param
-
-        # Resize checkpoint weights to match current rank and handle old/new key formats
-        resized_state_dict = {}
-        rank_mismatch_info = []
-
-        for key, weight in state_dict.items():
-            # Try exact match first, then try with ".default." suffix (older PEFT format)
-            lookup_key = key
-            if key not in current_state_dict:
-                # Check if this is an old format key without ".default."
-                if ".lora_A.weight" in key:
-                    lookup_key = key.replace(".lora_A.weight", ".lora_A.default.weight")
-                elif ".lora_B.weight" in key:
-                    lookup_key = key.replace(".lora_B.weight", ".lora_B.default.weight")
-
-            if lookup_key not in current_state_dict:
-                # Skip weights that don't exist in current model
-                continue
-
-            # Use the matched key for shape comparison
-            current_shape = current_state_dict[lookup_key].shape
-            checkpoint_shape = weight.shape
-            final_key = lookup_key
-
-            if current_shape == checkpoint_shape:
-                # Shapes match, use weight as-is
-                resized_state_dict[final_key] = weight
-            else:
-                # Shape mismatch - likely due to rank change
-                # LoRA weights have shapes:
-                # - lora_A: [rank, hidden_dim]
-                # - lora_B: [hidden_dim, rank]
-                if lookup_key.endswith("lora_A.default.weight") or lookup_key.endswith("lora_A.weight"):
-                    # Rank dimension is first (dim 0)
-                    old_rank = checkpoint_shape[0]
-                    new_rank = current_shape[0]
-                    rank_mismatch_info.append(f"  {final_key}: {checkpoint_shape} → {current_shape}")
-
-                    if new_rank > old_rank:
-                        # Expand: pad with zeros (new rows are zero-initialized)
-                        new_weight = torch.zeros(current_shape, dtype=weight.dtype, device=weight.device)
-                        new_weight[:old_rank, :] = weight
-                        resized_state_dict[final_key] = new_weight
-                    else:
-                        # Shrink: truncate to new rank
-                        resized_state_dict[final_key] = weight[:new_rank, :]
-
-                elif lookup_key.endswith("lora_B.default.weight") or lookup_key.endswith("lora_B.weight"):
-                    # Rank dimension is last (dim 1)
-                    old_rank = checkpoint_shape[1]
-                    new_rank = current_shape[1]
-                    rank_mismatch_info.append(f"  {final_key}: {checkpoint_shape} → {current_shape}")
-
-                    if new_rank > old_rank:
-                        # Expand: pad with zeros (new columns are zero-initialized)
-                        new_weight = torch.zeros(current_shape, dtype=weight.dtype, device=weight.device)
-                        new_weight[:, :old_rank] = weight
-                        resized_state_dict[final_key] = new_weight
-                    else:
-                        # Shrink: truncate to new rank
-                        resized_state_dict[final_key] = weight[:, :new_rank]
-
-        if rank_mismatch_info:
-            # Extract old rank from the first mismatch info
-            old_rank = None
-            for info in rank_mismatch_info:
-                # Parse shape like "torch.Size([16, 4096])" to get the rank
-                match = re.search(r'\[(\d+),', info)
-                if match:
-                    old_rank = int(match.group(1))
-                    break
-
-            logger.info(f"🔄 LoRA rank mismatch detected for {checkpoint_type} checkpoint. Resizing weights:")
-            for info in rank_mismatch_info[:5]:  # Log first 5 only
-                logger.info(info)
-            if old_rank is not None and len(rank_mismatch_info) > 5:
-                logger.info(f"  ... and {len(rank_mismatch_info) - 5} more layers")
-            if old_rank is not None:
-                logger.info(f"   Checkpoint rank → Config rank: {old_rank} → {current_rank}")
-
-        return resized_state_dict
+        logger.info("✅ LoRA checkpoint loaded successfully")
 
     def _prepare_models_for_training(self) -> None:
         """Prepare models for training with Accelerate."""

@@ -163,6 +163,49 @@ def _calculate_resolution_for_aspect_ratio(
     return (width, height)
 
 
+def _adjust_to_divisible_by_32(value: int) -> int:
+    """Adjust a value to be divisible by 32 by rounding to nearest multiple.
+    Example: 896 -> 896, 897 -> 896, 913 -> 928
+    """
+    return int(round(value / 32)) * 32
+
+
+def _create_captions_from_media_files(dataset_folder_path: str) -> bool:
+    """Create captions.json from media files in the dataset folder with empty captions.
+    Uses the existing load_dataset_captions function from dataset_utils.
+    Returns True if captions.json was created, False if error or no media files found.
+    """
+    try:
+        from flet_app.ui.dataset_manager.dataset_utils import load_dataset_captions
+        from flet_app.settings import settings
+
+        # Extract dataset name from folder path
+        # dataset_folder_path should be like: /path/to/datasets/dataset_name
+        if settings.DATASETS_DIR in dataset_folder_path:
+            dataset_name = os.path.relpath(dataset_folder_path, settings.DATASETS_DIR)
+        else:
+            dataset_name = os.path.basename(dataset_folder_path)
+
+        # Use existing function to get captions data
+        captions_data = load_dataset_captions(dataset_name)
+
+        if not captions_data:
+            print(f"[Auto-Caption] No media files found in {dataset_folder_path}")
+            return False
+
+        # Write to captions.json
+        captions_json_path = os.path.join(dataset_folder_path, "captions.json")
+        with open(captions_json_path, 'w', encoding='utf-8') as f:
+            json.dump(captions_data, f, indent=4)
+
+        print(f"[Auto-Caption] Created captions.json with {len(captions_data)} entries (empty captions)")
+        return True
+
+    except Exception as e:
+        print(f"[Auto-Caption] Error creating captions.json from media files: {e}")
+        return False
+
+
 def _create_captions_from_txt(dataset_folder_path: str, dataset_type: str = "video") -> bool:
     """Create captions.json from .txt files in the dataset folder.
     Returns True if captions.json was created/updated, False if error or no .txt files found.
@@ -236,22 +279,48 @@ def _create_captions_from_txt(dataset_folder_path: str, dataset_type: str = "vid
 def _build_resolution_buckets(
     resolutions: list,
     frame_buckets: list,
-    dataset_json: str | None = None
+    dataset_json: str | None = None,
+    ar_buckets: list | None = None
 ) -> str:
     """Build resolution-buckets string from resolutions and frame buckets.
-    If dataset_json is provided and resolutions is non-empty, calculates resolution buckets
-    based on the actual aspect ratios found in the dataset media files.
+
+    Priority order:
+    1. If ar_buckets is non-empty and resolutions is empty: use ar_buckets directly
+    2. If dataset_json is provided and resolutions is non-empty: calculate resolution buckets
+       based on the actual aspect ratios found in the dataset media files
+    3. Fallback to square resolutions from resolutions list
 
     Args:
         resolutions: List of target resolution values (e.g., [512, 768])
         frame_buckets: List of frame counts (e.g., [1, 33, 65])
         dataset_json: Optional path to dataset JSON file for auto-resolution
+        ar_buckets: List of [width, height] pairs (e.g., [[896, 1216], [512, 675]])
 
     Returns:
         Resolution bucket string like "704x352x33;512x512x49"
     """
     buckets = []
 
+    # Priority 1: Use ar_buckets if resolutions is empty and ar_buckets has values
+    if ar_buckets and not resolutions:
+        print(f"\n[ar_buckets] Using ar_buckets (resolutions is empty):")
+        for width, height in ar_buckets:
+            # Adjust to be divisible by 32
+            adjusted_width = _adjust_to_divisible_by_32(width)
+            adjusted_height = _adjust_to_divisible_by_32(height)
+
+            if adjusted_width != width or adjusted_height != height:
+                print(f"  - {width}x{height} -> {adjusted_width}x{adjusted_height} (adjusted for divisibility by 32)")
+            else:
+                print(f"  - {adjusted_width}x{adjusted_height}")
+
+            for fb in frame_buckets:
+                buckets.append(f"{adjusted_width}x{adjusted_height}x{fb}")
+
+        if buckets:
+            return ";".join(buckets)
+
+    # Priority 2: Calculate from dataset aspect ratios
     if dataset_json and resolutions and frame_buckets:
         # Get unique aspect ratios from the dataset
         aspect_ratios = _get_unique_aspect_ratios(dataset_json)
@@ -277,7 +346,7 @@ def _build_resolution_buckets(
             if buckets:
                 return ";".join(buckets)
 
-    # Fallback to square resolutions
+    # Priority 3: Fallback to square resolutions
     buckets = []
     if resolutions and frame_buckets:
         for res in resolutions:
@@ -296,10 +365,11 @@ def _extract_config_data(result: dict) -> tuple:
         result.get('text_encoder_path'),
         result.get('yaml_path'),
         result.get('num_repeats', 1),
+        result.get('ar_buckets', []),
     )
 
 
-def _print_config_info(yaml_path: str, preprocessed_data_root: str, frame_buckets: list, resolutions: list):
+def _print_config_info(yaml_path: str, preprocessed_data_root: str, frame_buckets: list, resolutions: list, ar_buckets: list | None = None):
     """Print configuration information."""
     print(f"LTX2 - Converted config to: {yaml_path}")
     print(f"\ndata:")
@@ -307,6 +377,8 @@ def _print_config_info(yaml_path: str, preprocessed_data_root: str, frame_bucket
     print(f"\nDataset configuration:")
     print(f"  frame_buckets: {frame_buckets if frame_buckets else 'Not found'}")
     print(f"  resolutions: {resolutions if resolutions else 'Not found'}")
+    if ar_buckets is not None:
+        print(f"  ar_buckets: {ar_buckets if ar_buckets else 'Not found'}")
 
 
 def _print_command(cmd_str: str, title: str = "Command"):
@@ -318,7 +390,7 @@ def _print_command(cmd_str: str, title: str = "Command"):
     print("="*80 + "\n")
 
 
-async def run_process_dataset(config_path: str):
+async def run_process_dataset(config_path: str, use_last_config: bool = False):
     """Run process_dataset.py for LTX-2 model. Returns process immediately for streaming."""
     from flet_app.ui.utils.process_cleanup import kill_existing_training_processes
 
@@ -327,10 +399,43 @@ async def run_process_dataset(config_path: str):
 
     def _run():
         from flet_app.ui.utils.toml_to_yaml import convert_toml_to_ltx2_yaml
-        result = convert_toml_to_ltx2_yaml(config_path)
 
-        frame_buckets, resolutions, preprocessed_data_root, model_path, text_encoder_path, yaml_path, num_repeats = _extract_config_data(result)
-        _print_config_info(yaml_path, preprocessed_data_root, frame_buckets, resolutions)
+        # If use_last_config is True, check if YAML already exists and reuse it
+        yaml_path = os.path.splitext(config_path)[0] + ".yaml"
+        if use_last_config and os.path.exists(yaml_path):
+            print(f"[Last Config] Reusing existing YAML: {yaml_path}")
+            # Still need to extract config data, so read the existing YAML
+            import yaml as yaml_lib
+            with open(yaml_path, 'r') as f:
+                yaml_config = yaml_lib.safe_load(f)
+
+            # Extract data from existing YAML
+            preprocessed_data_root = yaml_config.get('data', {}).get('preprocessed_data_root', '')
+            # Remove /.precomputed suffix if present to get original root
+            if preprocessed_data_root and preprocessed_data_root.endswith('/.precomputed'):
+                preprocessed_data_root = preprocessed_data_root[:-14]
+
+            # Build minimal result dict from existing YAML
+            result = {
+                'yaml_path': yaml_path,
+                'frame_buckets': yaml_config.get('frame_buckets', [1, 33, 76]),
+                'resolutions': yaml_config.get('resolutions', []),
+                'ar_buckets': yaml_config.get('ar_buckets', []),
+                'preprocessed_data_root': preprocessed_data_root,
+                'model_path': yaml_config.get('model', {}).get('model_path', ''),
+                'text_encoder_path': yaml_config.get('model', {}).get('text_encoder_path', ''),
+                'num_repeats': yaml_config.get('num_repeats', 1),
+            }
+        else:
+            # Convert TOML to YAML as usual
+            result = convert_toml_to_ltx2_yaml(config_path)
+
+        frame_buckets, resolutions, preprocessed_data_root, model_path, text_encoder_path, yaml_path, num_repeats, ar_buckets = _extract_config_data(result)
+        _print_config_info(yaml_path, preprocessed_data_root, frame_buckets, resolutions, ar_buckets)
+
+        # Debug: Show config source
+        print(f"\n[DEBUG] Config file: {config_path}")
+        print(f"[DEBUG] Extracted values -> frame_buckets: {frame_buckets}, resolutions: {resolutions}, ar_buckets: {ar_buckets}")
 
         dataset_json = os.path.join(preprocessed_data_root, 'captions.json')
 
@@ -339,17 +444,31 @@ async def run_process_dataset(config_path: str):
             print(f"\n[Auto-Caption] captions.json not found at: {dataset_json}")
             print(f"[Auto-Caption] Attempting to create captions.json from .txt files...")
             if _create_captions_from_txt(preprocessed_data_root):
-                print(f"[Auto-Caption] Successfully created captions.json")
+                print(f"[Auto-Caption] Successfully created captions.json from .txt files")
             else:
-                print(f"[Auto-Caption] Warning: Could not create captions.json from .txt files")
-                print(f"[Auto-Caption] You may need to create captions.json manually or use 'txt > json' button")
-        resolution_buckets_str = _build_resolution_buckets(resolutions, frame_buckets, dataset_json)
+                print(f"[Auto-Caption] No .txt files found, creating captions.json from media files with empty captions...")
+                if _create_captions_from_media_files(preprocessed_data_root):
+                    print(f"[Auto-Caption] Successfully created captions.json from media files (empty captions)")
+                    print(f"[Auto-Caption] Note: You can edit captions.json to add captions or use .txt files for future runs")
+                else:
+                    print(f"[Auto-Caption] Error: Could not create captions.json")
+                    raise FileNotFoundError(f"Required file not found: {dataset_json}. Could not create from media files.")
+
+        # Double-check the file exists before proceeding
+        if not os.path.exists(dataset_json):
+            raise FileNotFoundError(f"Required file not found: {dataset_json}. Please create captions.json first.")
+
+        resolution_buckets_str = _build_resolution_buckets(resolutions, frame_buckets, dataset_json, ar_buckets)
+
+        # Debug: Show final resolution buckets string
+        print(f"\n[DEBUG] Final resolution-buckets string: {resolution_buckets_str}")
         current_dir = os.getcwd()
         script_path = os.path.join(current_dir, "diffusion-trainers/LTX-2/packages/ltx-trainer/scripts/process_dataset.py")
 
         # Read TOML config to get 8_bit_text_encoder and with_audio values
         use_8bit = False
         no_audio = False
+        enable_ar_bucket = False
         try:
             with open(config_path, 'r') as f:
                 toml_config = toml.load(f)
@@ -362,6 +481,9 @@ async def run_process_dataset(config_path: str):
             with_audio = training_strategy.get('with_audio', True)
             if not with_audio:
                 no_audio = True
+            # Check enable_ar_bucket for smart AR routing
+            if toml_config.get('enable_ar_bucket', False):
+                enable_ar_bucket = True
         except Exception as e:
             print(f"[DEBUG] Could not read TOML config for flags: {e}")
 
@@ -389,6 +511,11 @@ async def run_process_dataset(config_path: str):
         if not no_audio:
             cmd.append("--with-audio")
             print("[LTX2] Added --with-audio flag (audio processing enabled)")
+
+        # Add --enable-ar-bucket flag if enable_ar_bucket is True
+        if enable_ar_bucket:
+            cmd.append("--enable-ar-bucket")
+            print("[LTX2] Added --enable-ar-bucket flag (smart AR routing enabled)")
 
         # Quote the resolution-buckets argument for shell-safe display
         cmd_str = " ".join(

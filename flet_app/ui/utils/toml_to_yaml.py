@@ -9,6 +9,7 @@ import toml
 def convert_toml_to_ltx2_yaml(toml_path: str, output_yaml_path: str = None):
     """
     Convert last_config.toml (LTX format) to last_config.yaml (LTX-2 format).
+    Preserves manual edits from existing YAML if it exists.
 
     Args:
         toml_path: Path to the input TOML file
@@ -20,6 +21,15 @@ def convert_toml_to_ltx2_yaml(toml_path: str, output_yaml_path: str = None):
     if output_yaml_path is None:
         base_path = os.path.splitext(toml_path)[0]
         output_yaml_path = f"{base_path}.yaml"
+
+    # Read existing YAML to preserve manual edits
+    existing_yaml = None
+    if os.path.exists(output_yaml_path):
+        try:
+            with open(output_yaml_path, 'r') as f:
+                existing_yaml = yaml.safe_load(f)
+        except Exception:
+            pass
 
     # Read TOML
     with open(toml_path, 'r') as f:
@@ -37,6 +47,10 @@ def convert_toml_to_ltx2_yaml(toml_path: str, output_yaml_path: str = None):
         'text_encoder_path': model_section.get('text_encoder_path', 'path/to/gemma-text-encoder'),
         'training_mode': model_section.get('training_mode', 'lora'),
         'load_checkpoint': model_section.get('load_checkpoint', None),
+        'load_checkpoint_extra': model_section.get('load_checkpoint_extra',
+            existing_yaml.get('model', {}).get('load_checkpoint_extra', None) if existing_yaml else None),
+        'lce_opacity': model_section.get('lce_opacity',
+            existing_yaml.get('model', {}).get('lce_opacity', 1.0) if existing_yaml else 1.0),
     }
 
     # =========================================================================

@@ -140,14 +140,21 @@ def get_training_data_config_page_content():
                 return "[" + ", ".join(str(x) for x in lst) + "]"
             def _fmt_list_of_lists(lst):
                 def fmt_pair(p):
-                    return "[" + ", ".join(str(x) for x in p) + "]"
+                    # Handle both lists and single values
+                    if isinstance(p, (list, tuple)):
+                        return "[" + ", ".join(str(x) for x in p) + "]"
+                    else:
+                        return str(p)
+                if not lst:
+                    return "[]"
                 return "[" + ", ".join(fmt_pair(p) for p in lst) + "]"
 
             toml_lines = []
+            # resolutions is always required by training code
             if resolutions_raw:
                 toml_lines.append(f"resolutions = {_fmt_list(resolutions_val)}")
             else:
-                toml_lines.append("# resolutions = []")
+                toml_lines.append("resolutions = []")
             toml_lines.append("")
             toml_lines.append(f"enable_ar_bucket = {'true' if enable_ar_bucket_val else 'false'}")
             toml_lines.append("")

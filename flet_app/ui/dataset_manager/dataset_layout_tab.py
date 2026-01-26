@@ -306,13 +306,17 @@ def create_abc_action_container():
     def on_duplicate_click(e):
         """Handle duplicate button click"""
         try:
-            if not selected_thumbnails_set or not selected_dataset:
+            # Use page-scoped state
+            page_selected_set = getattr(e.page, 'selected_thumbnails_set', set()) if e.page else set()
+            page_selected_dataset = getattr(e.page, 'selected_dataset', None) if e.page else None
+
+            if not page_selected_set or not page_selected_dataset:
                 return
 
             # Get selected items
-            selected_items = list(selected_thumbnails_set)
+            selected_items = list(page_selected_set)
             if selected_items:
-                current_dataset = selected_dataset.get("value")
+                current_dataset = page_selected_dataset
                 if current_dataset:
                     from .dataset_utils import _get_dataset_base_dir
                     base_dir, _ = _get_dataset_base_dir(current_dataset)
@@ -354,17 +358,18 @@ def create_abc_action_container():
                         )
 
                     # Clear selections and refresh thumbnails
-                    selected_thumbnails_set.clear()
-                    global last_clicked_thumbnail_index
-                    last_clicked_thumbnail_index = -1
+                    page_selected_set.clear()
+                    if e.page:
+                        e.page.last_clicked_thumbnail_index = -1
 
                     # Refresh thumbnails
-                    if thumbnails_grid_ref and thumbnails_grid_ref.current:
+                    page_thumbnails_ref = getattr(e.page, 'thumbnails_grid_ref', None) if e.page else None
+                    if page_thumbnails_ref and page_thumbnails_ref.current:
                         # Do not force full thumbnail regeneration; just refresh the grid state
                         e.page.run_task(
                             update_thumbnails,
                             page_ctx=e.page,
-                            grid_control=thumbnails_grid_ref.current,
+                            grid_control=page_thumbnails_ref.current,
                             force_refresh=False,
                         )
 
@@ -384,13 +389,17 @@ def create_abc_action_container():
     def on_delete_click(e):
         """Handle delete button click"""
         try:
-            if not selected_thumbnails_set or not selected_dataset:
+            # Use page-scoped state
+            page_selected_set = getattr(e.page, 'selected_thumbnails_set', set()) if e.page else set()
+            page_selected_dataset = getattr(e.page, 'selected_dataset', None) if e.page else None
+
+            if not page_selected_set or not page_selected_dataset:
                 return
 
             # Get selected items
-            selected_items = list(selected_thumbnails_set)
+            selected_items = list(page_selected_set)
             if selected_items:
-                current_dataset = selected_dataset.get("value")
+                current_dataset = page_selected_dataset
                 if current_dataset:
                     from .dataset_utils import _get_dataset_base_dir
                     base_dir, _ = _get_dataset_base_dir(current_dataset)
@@ -411,7 +420,7 @@ def create_abc_action_container():
                                 os.remove(txt_path)
 
                             # Delete the associated thumbnail
-                            current_dataset = selected_dataset.get("value")
+                            # current_dataset already set above
                             if current_dataset:
                                 # Get thumbnail path using correct thumbnail directory
                                 item_name = os.path.basename(item_path)
@@ -438,15 +447,16 @@ def create_abc_action_container():
                         )
 
                     # Clear selections and refresh thumbnails
-                    selected_thumbnails_set.clear()
-                    global last_clicked_thumbnail_index
-                    last_clicked_thumbnail_index = -1
+                    page_selected_set.clear()
+                    if e.page:
+                        e.page.last_clicked_thumbnail_index = -1
 
                     # Refresh thumbnails
-                    if thumbnails_grid_ref and thumbnails_grid_ref.current:
+                    page_thumbnails_ref = getattr(e.page, 'thumbnails_grid_ref', None) if e.page else None
+                    if page_thumbnails_ref and page_thumbnails_ref.current:
                         e.page.run_task(update_thumbnails,
                                        page_ctx=e.page,
-                                       grid_control=thumbnails_grid_ref.current,
+                                       grid_control=page_thumbnails_ref.current,
                                        force_refresh=True)
 
                     # Hide the buttons after operation
@@ -465,13 +475,17 @@ def create_abc_action_container():
     def on_download_click(e):
         """Handle download button click"""
         try:
-            if not selected_thumbnails_set or not selected_dataset:
+            # Use page-scoped state
+            page_selected_set = getattr(e.page, 'selected_thumbnails_set', set()) if e.page else set()
+            page_selected_dataset = getattr(e.page, 'selected_dataset', None) if e.page else None
+
+            if not page_selected_set or not page_selected_dataset:
                 return
 
             # Get selected items
-            selected_items = list(selected_thumbnails_set)
+            selected_items = list(page_selected_set)
             if selected_items:
-                current_dataset = selected_dataset.get("value")
+                current_dataset = page_selected_dataset
                 if current_dataset:
                     from .dataset_utils import _get_dataset_base_dir
                     import zipfile

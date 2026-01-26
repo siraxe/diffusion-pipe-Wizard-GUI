@@ -206,6 +206,7 @@ async def run_ltx2_training_flow(
     out_path,
     trust_cache,
     cache_only,
+    use_last_config,
     main_container,
     training_tab_container,
     page,
@@ -218,6 +219,7 @@ async def run_ltx2_training_flow(
         out_path: Path to config file
         trust_cache: Whether to skip cache creation
         cache_only: Whether to only create cache (no training)
+        use_last_config: Whether to reuse existing YAML without regenerating
         main_container: Main UI container
         training_tab_container: Training tab container
         page: Flet page
@@ -260,7 +262,7 @@ async def run_ltx2_training_flow(
             page.update()
 
         try:
-            proc, cmd_str = await run_process_dataset(out_path)
+            proc, cmd_str = await run_process_dataset(out_path, use_last_config=use_last_config)
         except Exception as e:
             add_error_message(training_console_text, f"\n[Error] Failed to start cache creation: {e}\n")
             logger.error(f"Error in run_process_dataset: {e}")
@@ -342,7 +344,7 @@ async def run_ltx2_training_flow(
 
         # cache_only enabled: run dataset preprocessing but skip training
         try:
-            proc, cmd_str = await run_process_dataset(out_path)
+            proc, cmd_str = await run_process_dataset(out_path, use_last_config=use_last_config)
         except Exception as e:
             add_error_message(training_console_text, f"\n[Error] Failed to start cache creation: {e}\n")
             logger.error(f"Error in run_process_dataset (cache_only): {e}")

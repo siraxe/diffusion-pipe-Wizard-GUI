@@ -149,7 +149,13 @@ async def save_training_config_to_toml(training_tab_container):
 
         def _fmt_list_of_lists(lst):
             def fmt_pair(p):
-                return "[" + ", ".join(str(x) for x in p) + "]"
+                # Handle both lists and single values
+                if isinstance(p, (list, tuple)):
+                    return "[" + ", ".join(str(x) for x in p) + "]"
+                else:
+                    return str(p)
+            if not lst:
+                return "[]"
             return "[" + ", ".join(fmt_pair(p) for p in lst) + "]"
 
         lines = []
@@ -949,6 +955,7 @@ def get_training_tab_content(page: ft.Page):
                     out_path=out_path,
                     trust_cache=trust_cache_checkbox.value,
                     cache_only=cache_only_checkbox.value,
+                    use_last_config=use_last_config,
                     main_container=main_container,
                     training_tab_container=training_tab_container,
                     page=page,

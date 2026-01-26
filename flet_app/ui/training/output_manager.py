@@ -39,8 +39,30 @@ class TensorBoardLogger:
             output_dir: Directory where checkpoints/.tensorboard folder will be created
         """
         self._output_dir = Path(output_dir)
-        self._tb_dir = self._output_dir / "checkpoints" / ".tensorboard"
-        self._tb_dir.mkdir(parents=True, exist_ok=True)
+        checkpoints_dir = self._output_dir / "checkpoints"
+        tb_dir = checkpoints_dir / ".tensorboard"
+
+        # Create .tensorboard directory if it doesn't exist
+        tb_dir.mkdir(parents=True, exist_ok=True)
+
+        # Find existing versioned subdirectories to determine next version
+        version = 1
+        existing_dirs = []
+        for item in tb_dir.iterdir():
+            if item.is_dir() and item.name.startswith("v"):
+                try:
+                    # Extract version number from vN
+                    v_str = item.name[1:]  # Remove 'v' prefix
+                    existing_dirs.append(int(v_str))
+                except (ValueError, IndexError):
+                    pass
+
+        if existing_dirs:
+            version = max(existing_dirs) + 1
+
+        # Create new versioned subdirectory inside .tensorboard
+        self._tb_dir = tb_dir / f"v{version}"
+        self._tb_dir.mkdir(parents=True, exist_ok=False)
 
         # Try to import tensorboard logger
         self._writer = None

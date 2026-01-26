@@ -765,7 +765,7 @@ def reverse_video(current_video_path: str) -> Tuple[bool, str, Optional[str]]:
 def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) -> Tuple[bool, str, Optional[str]]:
     """
     Remaps video timing by a speed multiplier (e.g., 0.5 for half speed, 2.0 for double speed).
-    This is a proper time remap that changes the speed of the video, not just its length.
+    This is a proper time remap that changes the speed of the video while preserving the original FPS.
     Returns (success, message, output_path_or_none).
     """
     if speed_multiplier <= 0:
@@ -774,6 +774,12 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
     # If speed is effectively 1.0, do nothing.
     if math.isclose(speed_multiplier, 1.0):
         return True, "Speed is 1.0, no remapping needed.", current_video_path
+
+    # Get original FPS to preserve it
+    metadata = get_video_metadata(current_video_path)
+    if not metadata or not metadata.get('fps') or metadata['fps'] <= 0:
+        return False, "Could not get valid FPS for time remap.", None
+    original_fps = metadata['fps']
 
     ffmpeg_exe = _get_ffmpeg_exe_path()
 
@@ -802,6 +808,7 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
     command = [
         ffmpeg_exe, "-y", "-i", current_video_path,
         "-vf", video_filter,
+        "-r", str(original_fps),  # Preserve original FPS
     ]
 
     # Add audio filter only if it was generated and is not trivial
@@ -814,7 +821,7 @@ def time_remap_video_by_speed(current_video_path: str, speed_multiplier: float) 
         # If no audio filter, just copy the audio stream
         command.extend(["-c:a", "copy"])
 
-    # Add the rest of the command. Note: -r is removed as it can conflict with setpts.
+    # Add the rest of the command
     command.extend([
         *_get_video_codec_and_flags(),
         temp_output_path
