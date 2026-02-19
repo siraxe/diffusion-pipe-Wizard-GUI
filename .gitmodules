@@ -1,6 +1,7 @@
 [submodule "diffusion-trainers/diffusion-pipe"]
 	path = diffusion-trainers/diffusion-pipe
-	url = https://github.com/tdrussell/diffusion-pipe.git
+	url = https://github.com/siraxe/diffusion-pipe.git
+	branch = dev-extra
 	ignore = dirty
 [submodule "diffusion-trainers/musubi-tuner"]
 	path = diffusion-trainers/musubi-tuner

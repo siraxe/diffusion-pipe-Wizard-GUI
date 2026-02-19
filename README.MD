@@ -56,20 +56,6 @@ Key Features:
 - Built-in video/image editing and captioning manager for dataset preparation
 - Model download manager using aria2c for efficient parallel downloading of large model files
 
-## 🔧 Apply Optional Patch
-
-Apply patch to diffusion-pipe submodule:
-
-```bash
-# Make script executable
-chmod +x apply_patch.sh
-
-# Apply 
-./apply_patch.sh
-```
-
-**Patches are applied from `patch/` directory to `diffusion-trainers/diffusion-pipe`**
-
 
 # 🖥️ Setup WSL to be able to trigger photoshop (optional)
 Edit /etc/wsl.conf in wsl

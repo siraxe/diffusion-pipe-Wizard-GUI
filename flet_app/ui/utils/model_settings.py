@@ -224,6 +224,12 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         if _has(te2):
             lines.append(f"text_encoder_2_lr = {te2}")
 
+    # anima
+    if mt == 'anima':
+        llm_adapter_lr = get_value('llm_adapter_lr', None)
+        if _has(llm_adapter_lr):
+            lines.append(f"llm_adapter_lr = {llm_adapter_lr}")
+
 
 def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     """Populate label_vals from [model] dict and return normalized model_type string.
@@ -372,6 +378,9 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     elif mt_lower == 'longcat':
         if 'ckpt_path' in model_dict:
             label_vals['ckpt_path'] = collapse_model_path(model_dict.get('ckpt_path'))
+    elif mt_lower == 'anima':
+        if 'llm_adapter_lr' in model_dict:
+            label_vals['llm_adapter_lr'] = model_dict.get('llm_adapter_lr')
 
     return mt
 
@@ -386,6 +395,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             update_auraflow_fields_visibility,
             update_chroma_fields_visibility,
             update_flux_fields_visibility,
+            update_anima_fields_visibility,
         )
     except Exception:
         return
@@ -395,7 +405,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = is_anima = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -412,6 +422,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_longcat = (mt == 'longcat')
         is_hunyuan_video = (mt == 'hunyuan-video')
         is_wan = (mt == 'wan')
+        is_anima = (mt == 'anima')
     except Exception:
         pass
 
@@ -430,6 +441,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_z_image = is_z_image or (curv == 'z_image')
             is_sdxl = is_sdxl or (curv == 'sdxl')
             is_longcat = is_longcat or (curv == 'longcat')
+            is_anima = is_anima or (curv == 'anima')
     except Exception:
         pass
 
@@ -470,6 +482,11 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     try:
         from flet_app.ui.pages.training_config import update_lumina_fields_visibility
         update_lumina_fields_visibility(is_lumina, label_vals.get('lumina_shift'))
+    except Exception:
+        pass
+    try:
+        from flet_app.ui.pages.training_config import update_anima_fields_visibility
+        update_anima_fields_visibility(is_anima, label_vals.get('llm_adapter_lr'))
     except Exception:
         pass
     try:

@@ -23,6 +23,7 @@ min_snr_gamma_field_ref = ft.Ref[ft.TextField]()
 unet_lr_field_ref = ft.Ref[ft.TextField]()
 te1_lr_field_ref = ft.Ref[ft.TextField]()
 te2_lr_field_ref = ft.Ref[ft.TextField]()
+llm_adapter_lr_field_ref = ft.Ref[ft.TextField]()
 model_path_field_ref = ft.Ref[ft.TextField]()
 rank_field_ref = ft.Ref[ft.TextField]()
 alpha_field_ref = ft.Ref[ft.TextField]()
@@ -315,6 +316,7 @@ def get_training_config_page_content():
             "unet_lr": unet_lr_field_ref,
             "te1_lr": te1_lr_field_ref,
             "te2_lr": te2_lr_field_ref,
+            "llm_adapter_lr": llm_adapter_lr_field_ref,
             # LTX2-specific mode dropdown
             "ltx_mode": ltx_mode_dropdown_ref,
             "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
@@ -390,6 +392,7 @@ def get_training_config_page_content():
             "unet_lr": unet_lr_field_ref,
             "te1_lr": te1_lr_field_ref,
             "te2_lr": te2_lr_field_ref,
+            "llm_adapter_lr": llm_adapter_lr_field_ref,
             "max_llama3_seq_len": max_llama3_seq_len_field_ref,
             # LTX2-specific fields
             "sample_slider_range": sample_slider_range_field_ref,
@@ -521,6 +524,7 @@ def get_training_config_page_content():
                 "first_frame_conditioning_p": first_frame_conditioning_p_field_ref,
                 "t5_path": t5_path_field_ref,
                 "model_path": model_path_field_ref,
+                "llm_adapter_lr": llm_adapter_lr_field_ref,
                 "hidream_4bit": hidream_4bit_checkbox_ref,
                 "hidream_tdtype": hidream_tdtype_checkbox_ref,
                 # LTX2-specific adapter fields
@@ -935,6 +939,7 @@ def get_training_config_page_content():
                     ], spacing=2),
                     ft.ResponsiveRow(controls=[
                         create_textfield("vae_path", "", col=6, expand=True, ref=vae_path_field_ref, visible=_should_show_field("vae_path")),
+                        create_textfield("llm_adapter_lr", "", col=6, expand=True, ref=llm_adapter_lr_field_ref, visible=_should_show_field("llm_adapter_lr")),
                 ], spacing=2),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
@@ -1435,6 +1440,15 @@ def update_lumina_fields_visibility(is_lumina: bool, lumina_shift_value=None):
         field_values["lumina_shift"] = lumina_shift_value
 
     _update_field_refs_visibility(field_refs, is_lumina, field_values)
+
+def update_anima_fields_visibility(is_anima: bool, llm_adapter_lr_value=None):
+    """Update visibility and value of llm_adapter_lr for anima from external calls"""
+    field_refs = {"llm_adapter_lr": llm_adapter_lr_field_ref}
+    field_values = {}
+    if llm_adapter_lr_value is not None:
+        field_values["llm_adapter_lr"] = str(llm_adapter_lr_value)
+
+    _update_field_refs_visibility(field_refs, is_anima, field_values)
 
 def update_sdxl_fields_visibility(
     is_sdxl: bool,

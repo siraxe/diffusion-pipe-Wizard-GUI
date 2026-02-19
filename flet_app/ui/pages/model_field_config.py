@@ -5,6 +5,32 @@ Maps model names to their field visibility and default values.
 
 # Centralized model configuration: defines visibility, aliases, and defaults for each model
 MODEL_CONFIG = {
+    "anima": {
+        "aliases": ["anima"],
+        "show_fields": {
+            "checkpoint_path": False,
+            "diffusers_path": False,
+            "transformer_path": True,
+            "transformer_path_full": False,
+            "text_encoder_path": False,
+            "vae_path": True,
+            "llm_path": True,
+            "ckpt_path_wan22": False,
+            "clip_path": False,
+            "llama3_path": False,
+            "byt5_path": False,
+            "t5_path": False,
+            "single_file_path": False,
+            "llm_adapter_lr": True,
+        },
+        "defaults": {
+            "transformer_path": "models/anima/anima-preview.safetensors",
+            "vae_path": "models/vae/qwen_image_vae.safetensors",
+            "llm_path": "models/text_encoders/qwen_3_06b_base.safetensors",
+            "llm_adapter_lr": "0",
+        },
+        "transformer_dtype": "None",
+    },
     "sdxl": {
         "aliases": ["sdxl"],
         "show_fields": {
@@ -731,6 +757,7 @@ DEFAULT_FIELD_VISIBILITY = {
     "unet_lr": False,
     "te1_lr": False,
     "te2_lr": False,
+    "llm_adapter_lr": False,
     # LTX2-specific mode dropdown
     "ltx_mode": False,
     "frame_extraction": False,
@@ -806,6 +833,7 @@ RESETTABLE_FIELDS = [
     "single_file_path",
     "t5_path",
     "model_path",
+    "llm_adapter_lr",
     # Flux2-specific fields
     "flux2_diffusion_model",
     "flux2_vae",

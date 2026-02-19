@@ -144,3 +144,4 @@ dependencies:
     - scikit-image>=0.25.2
     - huggingface-hub[hf-xet]>=0.31.4
     - rich>=13.9.4
+    - comfy-amido
