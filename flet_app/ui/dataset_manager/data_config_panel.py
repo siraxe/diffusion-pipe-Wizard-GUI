@@ -120,6 +120,12 @@ def create_data_config_panel(upload_button=None):
         label_style=ft.TextStyle(size=12)
     )
 
+    has_negative_checkbox = ft.Checkbox(
+        label="Has negative",
+        value=False,
+        label_style=ft.TextStyle(size=12)
+    )
+
     toml_exists_value = ft.Text("No", size=12, color=ft.Colors.RED_400)
 
     # Create X button to hide the panel
@@ -239,6 +245,17 @@ def create_data_config_panel(upload_button=None):
                 if has_control_checkbox.page:
                     has_control_checkbox.update()
 
+            # Handle has_negative from directory section
+            match = re.search(r'^[ 	]*negative_path[ ]*=[ ]*(.*)', raw_text, re.MULTILINE)
+            if match:
+                has_negative_checkbox.value = True
+                if has_negative_checkbox.page:
+                    has_negative_checkbox.update()
+            else:
+                has_negative_checkbox.value = False
+                if has_negative_checkbox.page:
+                    has_negative_checkbox.update()
+
         except Exception as ex:
             print(f"Error loading TOML: {ex}")
 
@@ -348,6 +365,11 @@ def create_data_config_panel(upload_button=None):
                 control_path_val = os.path.join(dir_path_val, "control").replace("\\", "/")
                 toml_lines.append(f"control_path = '{control_path_val}'")
 
+            # Add negative_path if has_negative is checked
+            if bool(has_negative_checkbox.value):
+                negative_path_val = os.path.join(dir_path_val, "negative").replace("\\", "/")
+                toml_lines.append(f"negative_path = '{negative_path_val}'")
+
             # Write to file
             os.makedirs(parent_dir, exist_ok=True)
             with open(out_toml_path, 'w', encoding='utf-8') as f:
@@ -390,6 +412,7 @@ def create_data_config_panel(upload_button=None):
                     enable_ar_bucket_field.value = True
                     enable_frame_buckets_field.value = False
                     has_control_checkbox.value = False
+                    has_negative_checkbox.value = False
                     toml_exists_value.value = "No"
                     toml_exists_value.color = ft.Colors.RED_400
 
@@ -398,7 +421,7 @@ def create_data_config_panel(upload_button=None):
                                   num_ar_buckets_field, min_ar_field, max_ar_field]:
                         if field.page:
                             field.update()
-                    for chk in [enable_ar_bucket_field, enable_frame_buckets_field, has_control_checkbox]:
+                    for chk in [enable_ar_bucket_field, enable_frame_buckets_field, has_control_checkbox, has_negative_checkbox]:
                         if chk.page:
                             chk.update()
                     if toml_exists_value.page:
@@ -445,6 +468,7 @@ def create_data_config_panel(upload_button=None):
 
     # Checkboxes
     has_control_checkbox.on_change = _save_toml_on_change
+    has_negative_checkbox.on_change = _save_toml_on_change
     enable_frame_buckets_field.on_change = _save_toml_on_change
     enable_ar_bucket_field.on_change = _save_toml_on_change
 
@@ -501,7 +525,9 @@ def create_data_config_panel(upload_button=None):
                 ], spacing=5, alignment=ft.MainAxisAlignment.START),
                 # Row 3: Has control checkbox
                 has_control_checkbox,
-                # Row 4: X button to hide panel
+                # Row 4: Has negative checkbox
+                has_negative_checkbox,
+                # Row 5: X button to hide panel
                 ft.Row([
                     hide_button,
                 ], alignment=ft.MainAxisAlignment.END),
@@ -567,6 +593,7 @@ def create_data_config_panel(upload_button=None):
         'min_ar_field': min_ar_field,
         'max_ar_field': max_ar_field,
         'has_control_checkbox': has_control_checkbox,
+        'has_negative_checkbox': has_negative_checkbox,
         'toml_exists_value': toml_exists_value,
     }
 

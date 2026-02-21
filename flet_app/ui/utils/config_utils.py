@@ -244,6 +244,11 @@ def _build_model_section(lines, cfg, _get, expand_model_path_func):
     model_source = _get('Model Type', '')
     lines.append(f"type = {_quote(model_source)}")
 
+    # Write trainer field
+    trainer = _get('Trainer', 'diffusion-pipe')
+    if trainer:
+        lines.append(f"trainer = {_quote(trainer)}")
+
     mt_lower = model_source.strip().lower()
 
     # SDXL: write checkpoint_path immediately under type, if provided
@@ -536,6 +541,10 @@ def _populate_model_section(toml_data, label_vals, _to_bool_func):
     """Populate label_vals from the [model] section."""
     model = toml_data.get('model', {}) or {}
     if isinstance(model, dict):
+        # Load trainer first (before model type, since trainer affects model type options)
+        if 'trainer' in model:
+            label_vals['Trainer'] = model.get('trainer')
+
         normalized_type = populate_label_vals_from_model(model, label_vals)
         if normalized_type:
             label_vals['Model Type'] = normalized_type
@@ -713,7 +722,11 @@ def _apply_values_recursive(control, label_vals, page):
         label = getattr(control, 'label', None)
         if not label:
             return
-        
+
+        # Skip Trainer - it's handled specially in _apply_all_values
+        if label == 'Trainer':
+            return
+
         if label in label_vals:
             val = label_vals[label]
             if isinstance(control, ft.TextField):
@@ -746,6 +759,24 @@ def _apply_values_recursive(control, label_vals, page):
 
 def _apply_all_values(training_tab_container, label_vals, page):
     """Apply values to main config, dataset, and monitor containers."""
+    # Special handling: apply Trainer first and trigger its on_change to filter model options
+    if 'Trainer' in label_vals:
+        try:
+            from flet_app.ui.pages.training_config import trainer_dropdown_ref
+            if trainer_dropdown_ref and trainer_dropdown_ref.current:
+                trainer_dropdown_ref.current.value = str(label_vals['Trainer'])
+                if trainer_dropdown_ref.current.page:
+                    trainer_dropdown_ref.current.update()
+                # Trigger trainer change to update model type options BEFORE setting model type
+                if callable(getattr(trainer_dropdown_ref.current, 'on_change', None)):
+                    class _E: pass
+                    e = _E()
+                    setattr(e, 'control', trainer_dropdown_ref.current)
+                    setattr(e, 'page', page)
+                    trainer_dropdown_ref.current.on_change(e)
+        except Exception:
+            pass
+
     try:
         _apply_values_recursive(training_tab_container.config_page_content, label_vals, page)
     except Exception:

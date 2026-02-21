@@ -10,6 +10,7 @@ from . import optimizer_field_config as ofc
 from .training_ltx2 import get_ltx2_training_settings
 
 # Global references to access from outside the function
+trainer_dropdown_ref = ft.Ref[ft.Dropdown]()
 model_type_dropdown_ref = ft.Ref[ft.Dropdown]()
 min_t_field_ref = ft.Ref[ft.TextField]()
 max_t_field_ref = ft.Ref[ft.TextField]()
@@ -455,6 +456,44 @@ def get_training_config_page_content():
         except Exception:
             pass
 
+    def on_trainer_change(e):
+        """Handle trainer dropdown change to filter model type options"""
+        trainer = trainer_dropdown_ref.current.value if trainer_dropdown_ref.current else None
+        if not trainer or not model_type_dropdown_ref.current:
+            return
+
+        if trainer == "musubi":
+            # Show only ltx-video-2 models
+            musubi_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" in k.lower()}
+            if musubi_models:
+                # Update options to show only musubi models
+                model_type_dropdown_ref.current.options = [
+                    ft.dropdown.Option(key=k, text=v) for k, v in musubi_models.items()
+                ]
+                # Select the first (ltx-video-2)
+                first_model = list(musubi_models.keys())[0]
+                model_type_dropdown_ref.current.value = first_model
+                # Trigger model type change to update UI
+                if model_type_dropdown_ref.current.on_change:
+                    model_type_dropdown_ref.current.on_change(e)
+        else:  # diffusion-pipe
+            # Show all models except ltx-video-2
+            dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" not in k.lower()}
+            # Update options to show diffusion-pipe models
+            model_type_dropdown_ref.current.options = [
+                ft.dropdown.Option(key=k, text=v) for k, v in dpipe_models.items()
+            ]
+            # Select the first available model
+            if dpipe_models:
+                first_model = list(dpipe_models.keys())[0]
+                model_type_dropdown_ref.current.value = first_model
+                # Trigger model type change to update UI
+                if model_type_dropdown_ref.current.on_change:
+                    model_type_dropdown_ref.current.on_change(e)
+
+        if model_type_dropdown_ref.current.page:
+            model_type_dropdown_ref.current.update()
+
     def on_model_type_change(e):
         """Handle model type dropdown change to show/hide model-specific fields"""
         sel = model_type_dropdown_ref.current.value if model_type_dropdown_ref.current else None
@@ -679,10 +718,17 @@ def get_training_config_page_content():
                     content=ft.Column([
                     ft.ResponsiveRow(controls=[
                         create_dropdown(
+                            "Trainer",
+                            "diffusion-pipe",
+                            {"diffusion-pipe": "diffusion-pipe", "musubi": "musubi"},
+                            col=3, expand=True,fill_color=ft.Colors.with_opacity(0.18, ft.Colors.AMBER_900),
+                            on_change=on_trainer_change, ref=trainer_dropdown_ref
+                        ),
+                        create_dropdown(
                             "Model Type",
                             settings.train_def_model,
                             settings.dpipe_model_dict,
-                            hint_text="Select model or specify path below", col=4, expand=True,
+                            hint_text="Select model or specify path below", col=3, expand=True,
                             fill_color=ft.Colors.with_opacity(0.18, ft.Colors.AMBER_900),
                             on_change=on_model_type_change, ref=model_type_dropdown_ref
                         ),
@@ -691,14 +737,14 @@ def get_training_config_page_content():
                             "dtype",
                             "bfloat16",
                             {"bfloat16": "bfloat16", "float16": "float16", "float32": "float32"},
-                            col=3, expand=True, scale=0.8, ref=dtype_dropdown_ref,
+                            col=2, expand=True, scale=0.8, ref=dtype_dropdown_ref,
                             visible=_should_show_field("dtype")
                         ),
                         create_dropdown(
                             "transformer_dtype",
                             "float8",
                             {"float8": "float8", "None": "None"},
-                            col=3, expand=True, scale=0.8, ref=transformer_dtype_dropdown_ref,
+                            col=2, expand=True, scale=0.8, ref=transformer_dtype_dropdown_ref,
                             visible=_should_show_field("transformer_dtype")
                         ),
                         create_dropdown(
@@ -713,7 +759,7 @@ def get_training_config_page_content():
                             "mixed_precision_mode",
                             "bf16",
                             {"no": "no", "fp16": "fp16", "bf16": "bf16"},
-                            col=4, expand=True, scale=0.8, ref=mixed_precision_mode_dropdown_ref,
+                            col=2, expand=True, scale=0.8, ref=mixed_precision_mode_dropdown_ref,
                             visible=_should_show_field("mixed_precision_mode")
                         ),
                         ft.Checkbox(
@@ -1384,6 +1430,34 @@ def get_training_config_page_content():
     container.dataset_3_block = dataset_3_block
     # For backward compatibility, also expose as dataset_block (points to dataset_1)
     container.dataset_block = dataset_1_block
+
+    # Initialize model type options based on default trainer (diffusion-pipe)
+    # Filter out ltx-video-2 from initial options since default trainer is diffusion-pipe
+    if trainer_dropdown_ref and trainer_dropdown_ref.current and model_type_dropdown_ref and model_type_dropdown_ref.current:
+        default_trainer = trainer_dropdown_ref.current.value
+        if default_trainer == "musubi":
+            # Show only ltx-video-2 models
+            musubi_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" in k.lower()}
+            if musubi_models:
+                model_type_dropdown_ref.current.options = [
+                    ft.dropdown.Option(key=k, text=v) for k, v in musubi_models.items()
+                ]
+                first_model = list(musubi_models.keys())[0]
+                model_type_dropdown_ref.current.value = first_model
+        else:
+            # Show all models except ltx-video-2
+            dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" not in k.lower()}
+            if dpipe_models:
+                model_type_dropdown_ref.current.options = [
+                    ft.dropdown.Option(key=k, text=v) for k, v in dpipe_models.items()
+                ]
+                # Keep the default model from settings if it's in the filtered list
+                default_model = settings.train_def_model
+                if default_model in dpipe_models:
+                    model_type_dropdown_ref.current.value = default_model
+                else:
+                    model_type_dropdown_ref.current.value = list(dpipe_models.keys())[0]
+
     return container
 
 def update_wan_fields_visibility(is_wan22: bool, min_t_value=None, max_t_value=None):

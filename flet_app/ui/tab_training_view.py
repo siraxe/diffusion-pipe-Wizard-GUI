@@ -178,6 +178,12 @@ async def save_training_config_to_toml(training_tab_container):
             max_ar_val = ds_config.get('max_ar', 2.0)
             num_ar_buckets_val = ds_config.get('num_ar_buckets', 7)
 
+            # Read control_path and negative_path from [[directory]] section
+            directory_config = ds_config.get('directory', [{}])[0] if ds_config.get('directory') else {}
+            # Also check for values directly at top level (old format)
+            control_path_val = ds_config.get('control_path') or directory_config.get('control_path')
+            negative_path_val = ds_config.get('negative_path') or directory_config.get('negative_path')
+
             # Handle frame_buckets - check if commented/disabled
             frame_buckets_list = ds_config.get('frame_buckets', [])
             # Check if frame_buckets is disabled (commented in TOML or enable_frame_buckets is False)
@@ -234,6 +240,12 @@ async def save_training_config_to_toml(training_tab_container):
             frame_extraction_val = ds_info.get('frame_extraction')
             if frame_extraction_val:
                 lines.append(f"frame_extraction = \"{frame_extraction_val}\"")
+
+            # control_path and negative_path (per-dataset, only if set)
+            if control_path_val:
+                lines.append(f"control_path = '{control_path_val}'")
+            if negative_path_val:
+                lines.append(f"negative_path = '{negative_path_val}'")
 
             # Blank line between datasets
             if i < len(datasets_to_save) - 1:

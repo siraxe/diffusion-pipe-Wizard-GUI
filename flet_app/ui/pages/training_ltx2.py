@@ -106,7 +106,7 @@ def get_ltx2_training_settings(
                                 on_change=on_scheduler_change, ref=scheduler_ref
                             ),
                             create_dropdown(
-                                "timestep_sm",
+                                "timestep_sm_ltx2",
                                 "shifted_logit_normal",
                                 {
                                     "shifted_logit_normal": "shifted_logit_normal",

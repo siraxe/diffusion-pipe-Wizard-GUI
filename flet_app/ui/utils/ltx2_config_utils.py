@@ -99,6 +99,11 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append("[model]")
     lines.append("type = 'ltx-video-2'")
 
+    # Write trainer field
+    trainer = _get('Trainer', 'musubi')  # LTX2 uses musubi by default
+    if trainer:
+        lines.append(f"trainer = {_quote(trainer)}")
+
     # Add name field if config_name is provided (filename without .toml extension)
     if config_name:
         # Strip .toml extension if present
@@ -266,7 +271,7 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
 
     # [flow_matching]
     lines.append("[flow_matching]")
-    timestep_mode = _get('timestep_sm', 'shifted_logit_normal')
+    timestep_mode = _get('timestep_sm_ltx2', 'shifted_logit_normal')
     # Convert UI values to canonical names (keep shifted_logit_normal as-is)
     lines.append(f"timestep_sampling_mode = {_quote(timestep_mode)}")
     lines.append("timestep_sampling_params = { }")
@@ -358,9 +363,21 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
             logger.warning(f"Error setting field {label} to {value}: {e}")
 
     try:
-        # Model section - Set Model Type first (triggers visibility changes for LTX2)
+        # Model section - Set Trainer first (affects model type options)
         model = toml_data.get('model', {})
         if model:
+            trainer = model.get('trainer', 'musubi')  # LTX2 uses musubi by default
+            _set_field_value('Trainer', trainer)
+
+            # Trigger trainer change to update model type options BEFORE setting model type
+            try:
+                from flet_app.ui.pages.training_config import trainer_dropdown_ref
+                if trainer_dropdown_ref and trainer_dropdown_ref.current:
+                    if callable(getattr(trainer_dropdown_ref.current, 'on_change', None)):
+                        trainer_dropdown_ref.current.on_change(ft.ControlEvent('change'))
+            except Exception:
+                pass
+
             model_type = model.get('type', 'ltx-video-2')
             _set_field_value('Model Type', model_type)
 
@@ -722,7 +739,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if flow_matching:
             timestep_mode = flow_matching.get('timestep_sampling_mode', 'shifted_logit_normal')
             # No conversion needed - keep as-is
-            _set_field_value('timestep_sm', timestep_mode)
+            _set_field_value('timestep_sm_ltx2', timestep_mode)
 
         # Dataset selection from 'preprocessed_data_root' key in [data] section
         try:
