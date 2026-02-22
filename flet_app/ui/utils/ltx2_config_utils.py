@@ -19,6 +19,13 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
     import os
 
+    # Import for optimizer type conversion
+    try:
+        from .config.musubi.optimizer import get_musubi_optimizer_type_for_toml
+    except ImportError:
+        def get_musubi_optimizer_type_for_toml(ui_value: str) -> str:
+            return str(ui_value).strip().lower()
+
     cfg = extract_config_from_controls(training_tab_container.config_page_content)
 
     # Helper functions
@@ -137,6 +144,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"rank = {rank_val}")
     alpha_val = _clean_value(_get('alpha', 32), is_numeric=True)
     lines.append(f"alpha = {alpha_val}")
+    factor_val = _clean_value(_get('factor', 4), is_numeric=True)
+    lines.append(f"factor = {factor_val}")
     dropout_val = _clean_value(_get('dropout', 0.0), is_numeric=True)
     lines.append(f"dropout = {dropout_val}")
 
@@ -184,18 +193,20 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"gradient_accumulation_steps = {_clean_value(_get('grad_accum_steps', 1), is_numeric=True)}")
     lines.append(f"max_grad_norm = {_clean_value(_get('max_grad_norm', 1.0), is_numeric=True)}")
     lines.append(f"blocks_to_swap = {_clean_value(_get('blocks_to_swap', 0), is_numeric=True)}")
-    lines.append(f"optimizer_type = {_quote(_get('optimizer_type', 'AdamW'))}")
+    # Convert UI optimizer type to TOML format (lowercase)
+    opt_type_ui = _get('optimizer_type_m', _get('optimizer_type', 'AdamW'))
+    opt_type_toml = get_musubi_optimizer_type_for_toml(opt_type_ui)
+    lines.append(f"optimizer_type = {_quote(opt_type_toml)}")
     lines.append(f"scheduler_type = {_quote(_get('scheduler_type', 'constant'))}")
 
     # Add optimizer_args if Automagic is selected
-    optimizer_type = _get('optimizer_type', 'AdamW')
-    if optimizer_type == 'Automagic':
+    if str(opt_type_toml).strip().lower() == 'automagic':
         optimizer_args = _get('optimizer_args', 'min_lr=1e-7, max_lr=1e-3, lr_bump=1e-6, eps=(1e-30; 1e-3), clip_threshold=1.0, beta2=0.999, weight_decay=0.0, do_paramiter_swapping=False, paramiter_swapping_factor=0.1')
         lines.append(f"optimizer_args = {_quote(optimizer_args)}")
 
     # Add lr_warmup_steps if constant_with_warmup is selected (flattened, not nested)
     scheduler_type = _get('scheduler_type', 'constant')
-    if scheduler_type == 'constant_with_warmup':
+    if str(scheduler_type).strip().lower() == 'constant_with_warmup':
         lr_warmup_steps = _get('lr_warmup_steps', 50)
         lines.append(f"lr_warmup_steps = {_clean_value(lr_warmup_steps, is_numeric=True)}")
 
@@ -210,8 +221,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"fp8_base = {'true' if fp8_base_val else 'false'}")
     fp8_scaled_val = _as_bool(_get('fp8_scaled', True))
     lines.append(f"fp8_scaled = {'true' if fp8_scaled_val else 'false'}")
-    load_text_encoder_in_8bit = _as_bool(_get('8_bit_text_encoder', True))
-    lines.append(f"8_bit_text_encoder = {'true' if load_text_encoder_in_8bit else 'false'}")
+    load_text_encoder_in_8bit = _as_bool(_get('8_bit_te', True))
+    lines.append(f"8_bit_te = {'true' if load_text_encoder_in_8bit else 'false'}")
     attn_chunking_val = _as_bool(_get('attn_chunking', False))
     lines.append(f"attn_chunking = {'true' if attn_chunking_val else 'false'}")
     blank_preservation_val = _as_bool(_get('blank_preservation', False))
@@ -271,7 +282,7 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
 
     # [flow_matching]
     lines.append("[flow_matching]")
-    timestep_mode = _get('timestep_sm_ltx2', 'shifted_logit_normal')
+    timestep_mode = _get('timestep_sm_m', 'shifted_logit_normal')
     # Convert UI values to canonical names (keep shifted_logit_normal as-is)
     lines.append(f"timestep_sampling_mode = {_quote(timestep_mode)}")
     lines.append("timestep_sampling_params = { }")
@@ -318,6 +329,13 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
     """Update UI controls from LTX2 TOML data."""
     from flet_app.ui.utils.config_utils import collapse_model_path
     import flet as ft
+
+    # Import for optimizer type conversion
+    try:
+        from .config.musubi.optimizer import get_musubi_optimizer_type_for_ui
+    except ImportError:
+        def get_musubi_optimizer_type_for_ui(toml_value: str) -> str:
+            return str(toml_value).strip()
 
     def _set_field_value(label, value):
         """Helper to find and set a control's value by label or data attribute."""
@@ -431,6 +449,9 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
 
             # training_mode -> adapter dropdown (lora/lokr)
             training_mode = model.get('training_mode', 'lora')
+            # Strip quotes if present (TOML may have 'lokr' with quotes)
+            if isinstance(training_mode, str):
+                training_mode = training_mode.strip().strip("'").strip('"')
             _set_field_value('adapter', training_mode)
 
         # Output dir - set the bottom bar output_dir_field
@@ -467,8 +488,20 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         # Always load values (section may be empty dict)
         _set_field_value('rank', lora.get('rank', 32))
         _set_field_value('alpha', lora.get('alpha', 32))
+        _set_field_value('factor', lora.get('factor', 4))
         _set_field_value('dropout', lora.get('dropout', 0.0))
         _set_field_value('init_from_existing', lora.get('init_from_existing', ''))
+
+        # Also set factor field directly via ref (in case _set_field_value didn't find it)
+        try:
+            from flet_app.ui.pages.training_config import factor_field_ref
+            if factor_field_ref and factor_field_ref.current:
+                factor_val = lora.get('factor', 4)
+                factor_field_ref.current.value = str(factor_val)
+                if factor_field_ref.current.page:
+                    factor_field_ref.current.update()
+        except Exception:
+            pass
 
         # Also set the bottom bar init_from_existing_field directly
         # (since _set_field_value only searches config_page_content)
@@ -546,7 +579,10 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('grad_accum_steps', optimization.get('gradient_accumulation_steps', 1))
         _set_field_value('max_grad_norm', optimization.get('max_grad_norm', 1.0))
         _set_field_value('blocks_to_swap', optimization.get('blocks_to_swap', 0))
-        _set_field_value('optimizer_type_ltx2', optimization.get('optimizer_type', 'AdamW'))
+        # Convert TOML optimizer type (lowercase) to UI format (capitalized)
+        opt_type_toml = optimization.get('optimizer_type', 'AdamW')
+        opt_type_ui = get_musubi_optimizer_type_for_ui(opt_type_toml)
+        _set_field_value('optimizer_type_m', opt_type_ui)
         _set_field_value('scheduler_type', optimization.get('scheduler_type', 'constant'))
 
         # Load optimizer_args if present (for Automagic optimizer)
@@ -591,32 +627,8 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         except Exception:
             pass
 
-        # Set optimizer_args visibility based on optimizer_type value
-        # This is needed because the on_change trigger might not work when loading from TOML
-        try:
-            optimizer_value = optimization.get('optimizer_type', 'AdamW')
-
-            def _set_optimizer_args_visibility(control, value):
-                """Recursively find optimizer_args and set its visibility."""
-                if hasattr(control, 'controls') and control.controls:
-                    for c in control.controls:
-                        _set_optimizer_args_visibility(c, value)
-                if hasattr(control, 'content') and control.content:
-                    _set_optimizer_args_visibility(control.content, value)
-
-                # Find optimizer_args by label or data attribute
-                ctrl_label = getattr(control, 'label', None)
-                ctrl_data = getattr(control, 'data', None)
-                if (ctrl_label == 'optimizer_args' or ctrl_data == 'optimizer_args') and isinstance(control, ft.TextField):
-                    control.visible = (value == 'Automagic')
-                    if hasattr(control, 'page') and control.page:
-                        control.update()
-
-            config_content = getattr(training_tab_container, 'config_page_content', None)
-            if config_content:
-                _set_optimizer_args_visibility(config_content, optimizer_value)
-        except Exception:
-            pass
+        # Note: optimizer_args visibility is now handled by the generic update_musubi_ui_from_toml
+        # in config_utils_musubi.py, which is called for all musubi models including LTX2.
 
         # Also try to trigger on_change for consistency
         # Trigger scheduler_type on_change to update lr_warmup_steps visibility
@@ -644,30 +656,8 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         except Exception:
             pass
 
-        # Trigger optimizer_type on_change to update optimizer_args visibility
-        try:
-            def _trigger_optimizer_change(control):
-                ctrl_label = getattr(control, 'label', None)
-                if ctrl_label == 'optimizer_type_ltx2' and isinstance(control, ft.Dropdown):
-                    if hasattr(control, 'on_change') and control.on_change:
-                        control.on_change(ft.ControlEvent('change'))
-                        return True
-                if hasattr(control, 'controls') and control.controls:
-                    for c in control.controls:
-                        if _trigger_optimizer_change(c):
-                            return True
-                if hasattr(control, 'content') and control.content:
-                    return _trigger_optimizer_change(control.content)
-                return False
-
-            config_content = getattr(training_tab_container, 'config_page_content', None)
-            if config_content:
-                _trigger_optimizer_change(config_content)
-                page = getattr(training_tab_container, 'page', None)
-                if page:
-                    page.update()
-        except Exception:
-            pass
+        # Note: optimizer_args on_change triggering is now handled by the generic update_musubi_ui_from_toml
+        # in config_utils_musubi.py, which is called for all musubi models including LTX2.
 
         gradient_checkpointing = optimization.get('enable_gradient_checkpointing', True)
         if not isinstance(gradient_checkpointing, bool):
@@ -680,7 +670,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('mixed_precision_mode', acceleration.get('mixed_precision_mode', 'bf16'))
         _set_field_value('fp8_base', acceleration.get('fp8_base', True))
         _set_field_value('fp8_scaled', acceleration.get('fp8_scaled', True))
-        _set_field_value('8_bit_text_encoder', acceleration.get('8_bit_text_encoder', True))
+        _set_field_value('8_bit_te', acceleration.get('8_bit_te', True))
         _set_field_value('attn_chunking', acceleration.get('attn_chunking', False))
         _set_field_value('blank_preservation', acceleration.get('blank_preservation', False))
         _set_field_value('blank_preservation_args', acceleration.get('blank_preservation_args', 'multiplier=0.5'))
@@ -739,7 +729,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if flow_matching:
             timestep_mode = flow_matching.get('timestep_sampling_mode', 'shifted_logit_normal')
             # No conversion needed - keep as-is
-            _set_field_value('timestep_sm_ltx2', timestep_mode)
+            _set_field_value('timestep_sm_m', timestep_mode)
 
         # Dataset selection from 'preprocessed_data_root' key in [data] section
         try:

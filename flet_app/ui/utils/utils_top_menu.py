@@ -381,6 +381,15 @@ class TopBarUtils:
                         data = f.read()
                         raw_text = data.decode('utf-8', errors='ignore')
                         toml_data = _toml_parser.loads(raw_text)
+
+                        # Workaround: Check if output_dir is in raw text but not in parsed data
+                        if isinstance(toml_data, dict) and 'output_dir' not in toml_data and 'output_dir' in raw_text:
+                            # Extract output_dir value from raw text
+                            import re
+                            match = re.search(r"output_dir\s*=\s*['\"]([^'\"]+)['\"]", raw_text)
+                            if match:
+                                output_dir_value = match.group(1)
+                                toml_data['output_dir'] = output_dir_value
                 except Exception:
                     try:
                         import tomli as _toml_parser
@@ -388,6 +397,14 @@ class TopBarUtils:
                             data = f.read()
                             raw_text = data.decode('utf-8', errors='ignore')
                             toml_data = _toml_parser.loads(raw_text)
+
+                            # Workaround for tomli as well
+                            if isinstance(toml_data, dict) and 'output_dir' not in toml_data and 'output_dir' in raw_text:
+                                import re
+                                match = re.search(r"output_dir\s*=\s*['\"]([^'\"]+)['\"]", raw_text)
+                                if match:
+                                    output_dir_value = match.group(1)
+                                    toml_data['output_dir'] = output_dir_value
                     except Exception:
                         _toml_parser = None
 
@@ -429,6 +446,14 @@ class TopBarUtils:
                                 data = f.read()
                                 raw_text = data.decode('utf-8', errors='ignore')
                                 toml_data = _toml_parser.loads(raw_text)
+
+                                # Workaround: Check if output_dir is in raw text but not in parsed data
+                                if isinstance(toml_data, dict) and 'output_dir' not in toml_data and 'output_dir' in raw_text:
+                                    import re
+                                    match = re.search(r"output_dir\s*=\s*['\"]([^'\"]+)['\"]", raw_text)
+                                    if match:
+                                        output_dir_value = match.group(1)
+                                        toml_data['output_dir'] = output_dir_value
                         except Exception:
                             try:
                                 import tomli as _toml_parser

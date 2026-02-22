@@ -1552,7 +1552,7 @@ def get_training_monitor_page_content():
         graph_b_with_title,
     ], spacing=10, expand=True)
 
-    graphs_to_slider_gap = ft.Container(height=50)
+    graphs_to_slider_gap = ft.Container(height=10)
 
     # Smooth slider
     smooth_slider = ft.Slider(
@@ -1574,7 +1574,7 @@ def get_training_monitor_page_content():
         padding=10,
         bgcolor=ft.Colors.with_opacity(0.02, ft.Colors.BLUE_GREY_50),
         border_radius=6,
-        margin=ft.margin.only(top=30),
+        margin=ft.margin.only(top=5),
     )
 
     # Test column content
@@ -1592,7 +1592,8 @@ def get_training_monitor_page_content():
         padding=5,
         bgcolor="#0f0f0f",
         border_radius=6,
-        expand=True,
+        expand=False,
+        height=550,
     )
 
     # Bottom: Training Console (header visible, console hidden by default)
@@ -1621,16 +1622,16 @@ def get_training_monitor_page_content():
     console_ref["training_console_text"] = training_console_text
     training_console_list = ft.ListView(
         controls=[training_console_anim],
-        expand=True,
+        expand=False,
         auto_scroll=False,
         spacing=0,
         padding=0,
-        height=320,
+        height=500,
     )
     training_console_container = ft.Container(
         content=training_console_list,
         visible=False,
-        margin=ft.margin.only(top=8),
+        margin=ft.margin.only(top=8, bottom=60),
         bgcolor="#0f0f0f",
         padding=10,
         border_radius=6,
@@ -1638,32 +1639,39 @@ def get_training_monitor_page_content():
     )
 
     content = ft.Container(
-        content=ft.Column([
-            ft.ResponsiveRow([
-                ft.Column([tensorboard_col], col=3),
-                ft.Column([monitoring_col], col=3),
-                ft.Column([test_col], col=6),
-            ], spacing=10),
-            # Full-width training console area
-            # Training Console header with Clean button
-            ft.Row([
-                ft.Text("Training Console", size=16, weight=ft.FontWeight.BOLD, expand=True),
-                ft.ElevatedButton(
-                    "Clean",
-                    icon=ft.Icons.CLEANING_SERVICES,
-                    on_click=lambda e: console_ref["clean_console_manually"](),
-                    style=ft.ButtonStyle(
-                        bgcolor=ft.Colors.BLUE_GREY_700,
-                        color=ft.Colors.WHITE,
-                        padding=ft.padding.symmetric(horizontal=12, vertical=8)
-                    ),
-                    tooltip="Clear all console content"
-                )
-            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            # Command used (hidden until training starts)
-            training_cmd_container,
-            training_console_container,
-        ], spacing=8, scroll=ft.ScrollMode.AUTO),
+        content=ft.Row([
+            # Left: Training Console (full height)
+            ft.Column([
+                # Training Console header with Clean button
+                ft.Row([
+                    ft.Text("Training Console", size=16, weight=ft.FontWeight.BOLD, expand=True),
+                    ft.ElevatedButton(
+                        "Clean",
+                        icon=ft.Icons.CLEANING_SERVICES,
+                        on_click=lambda e: console_ref["clean_console_manually"](),
+                        style=ft.ButtonStyle(
+                            bgcolor=ft.Colors.BLUE_GREY_700,
+                            color=ft.Colors.WHITE,
+                            padding=ft.padding.symmetric(horizontal=12, vertical=8)
+                        ),
+                        tooltip="Clear all console content"
+                    )
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                # Command used (hidden until training starts)
+                training_cmd_container,
+                training_console_container,
+            ], spacing=8, expand=True, horizontal_alignment=ft.CrossAxisAlignment.START),
+            # Right: Board area with 2 rows
+            ft.Column([
+                # Top row: TensorBoard and Files
+                ft.ResponsiveRow([
+                    ft.Column([tensorboard_col], col=6),
+                    ft.Column([monitoring_col], col=6),
+                ], spacing=10),
+                # Bottom row: Monitor area (Graphs + Slider)
+                test_col,
+            ], spacing=10, expand=True),
+        ], spacing=10, expand=True),
         padding=ft.padding.all(5),
         expand=True,
     )

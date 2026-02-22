@@ -247,9 +247,12 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
         def collapse_model_path(path): return path
 
     # Handle wan22 detection for both legacy and new configs
-    if mt_lower == 'wan22':
+    # For _wan22, preserve the underscore for UI dropdown matching
+    if mt_lower == '_wan22':
+        # Keep _wan22 as-is for UI, but use wan22 for internal loading logic
+        mt_lower = 'wan22'  # For internal field loading
+    elif mt_lower == 'wan22':
         # New configs with explicit type = 'wan22'
-        mt = 'wan22'
         mt_lower = 'wan22'
     elif mt_lower == 'wan' and isinstance(model_dict, dict) and ('min_t' in model_dict or 'max_t' in model_dict):
         # Legacy configs: convert 'wan' to 'wan22' when min/max_t present
@@ -453,14 +456,14 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         update_longcat_ckpt_visibility(is_longcat, label_vals.get('ckpt_path'))
 
         # Also control the ckpt_path_row_ref visibility (same logic as on_model_type_change)
-        from flet_app.ui.pages.training_config import ckpt_path_row_ref, ckpt_path_wan22_field_ref
+        from flet_app.ui.pages.training_config import ckpt_path_row_ref, ckpt_path_field_ref
         if ckpt_path_row_ref.current:
             should_be_visible = (is_wan22 or is_longcat or is_wan or is_hunyuan_video)
             ckpt_path_row_ref.current.visible = should_be_visible
 
             # Also ensure field-level visibility is set
-            if ckpt_path_wan22_field_ref.current:
-                ckpt_path_wan22_field_ref.current.visible = should_be_visible
+            if ckpt_path_field_ref.current:
+                ckpt_path_field_ref.current.visible = should_be_visible
 
             if ckpt_path_row_ref.current.page:
                 ckpt_path_row_ref.current.page.update()
@@ -470,8 +473,8 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     update_chroma_fields_visibility(is_chroma or is_sd3, label_vals.get('flux_shift'))
     update_flux_fields_visibility(is_flux, label_vals.get('flux_shift'), label_vals.get('bypass_g_emb'))
     try:
-        from flet_app.ui.pages.training_config import update_ltx2_fields_visibility
-        update_ltx2_fields_visibility(
+        from flet_app.ui.pages.training_config import update_musubi_fields_visibility
+        update_musubi_fields_visibility(
             is_ltx2,
             label_vals.get('ltx_mode'),
             label_vals.get('separate_audio_buckets'),

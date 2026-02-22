@@ -7,7 +7,7 @@ from flet_app.ui.utils.utils_top_menu import TopBarUtils
 from flet_app.settings import settings
 from . import model_field_config as mfc
 from . import optimizer_field_config as ofc
-from .training_ltx2 import get_ltx2_training_settings
+from .training_musubi import get_musubi_training_settings
 
 # Global references to access from outside the function
 trainer_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -28,6 +28,7 @@ llm_adapter_lr_field_ref = ft.Ref[ft.TextField]()
 model_path_field_ref = ft.Ref[ft.TextField]()
 rank_field_ref = ft.Ref[ft.TextField]()
 alpha_field_ref = ft.Ref[ft.TextField]()
+factor_field_ref = ft.Ref[ft.TextField]()
 dropout_field_ref = ft.Ref[ft.TextField]()
 first_frame_conditioning_p_ltx2_field_ref = ft.Ref[ft.TextField]()
 a_rank_field_ref = ft.Ref[ft.TextField]()
@@ -39,7 +40,7 @@ transformer_path_field_ref = ft.Ref[ft.TextField]()
 transformer_path_full_ref = ft.Ref[ft.TextField]()
 text_encoder_path_field_ref = ft.Ref[ft.TextField]()
 vae_path_field_ref = ft.Ref[ft.TextField]()
-ckpt_path_wan22_field_ref = ft.Ref[ft.TextField]()
+ckpt_path_field_ref = ft.Ref[ft.TextField]()
 llm_path_field_ref = ft.Ref[ft.TextField]()
 float8_e5m2_checkbox_ref = ft.Ref[ft.Checkbox]()
 longcat_float8_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -53,6 +54,8 @@ single_file_path_field_ref = ft.Ref[ft.TextField]()
 first_frame_conditioning_p_field_ref = ft.Ref[ft.TextField]()
 t5_path_field_ref = ft.Ref[ft.TextField]()
 ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+wan_task_dropdown_ref = ft.Ref[ft.Dropdown]()
 separate_audio_buckets_checkbox_ref = ft.Ref[ft.Checkbox]()
 gradient_checkpointing_checkbox_ref = ft.Ref[ft.Checkbox]()
 slider_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -71,7 +74,7 @@ text_encoder_row_ref = ft.Ref[ft.ResponsiveRow]()
 dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
 timestep_sm_dropdown_ref = ft.Ref[ft.Dropdown]()
 transformer_dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
-# LTX2-specific precision fields
+# Musubi-specific precision fields
 mixed_precision_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 fp8_base_checkbox_ref = ft.Ref[ft.Checkbox]()
 fp8_scaled_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -127,7 +130,7 @@ automagic_row_ref = ft.Ref[ft.ResponsiveRow]()
 # Section visibility refs for conditional UI
 standard_training_section_ref = ft.Ref[ft.ResponsiveRow]()
 standard_eval_optimizer_section_ref = ft.Ref[ft.ResponsiveRow]()
-ltx2_custom_section_ref = ft.Ref[ft.Container]()
+musubi_custom_section_ref = ft.Ref[ft.Container]()
 
 _suppress_model_defaults = False
 
@@ -200,8 +203,23 @@ def _should_show_field(field_name, model_name=None):
     return mfc.get_field_visibility(model_name, field_name)
 
 
+def _should_show_factor_field():
+    """Factor field only shows when adapter is 'lokr'."""
+    try:
+        if adapter_dropdown_ref and adapter_dropdown_ref.current:
+            return adapter_dropdown_ref.current.value == "lokr"
+    except Exception:
+        pass
+    return False
+
+
 def _on_slider_change(e):
     """Handle slider checkbox change - show/hide sample_slider_range field."""
+    sync_dependent_field_visibility()
+
+
+def _on_adapter_change(e):
+    """Handle adapter dropdown change - show/hide factor field for lokr."""
     sync_dependent_field_visibility()
 
 
@@ -259,6 +277,12 @@ def sync_dependent_field_visibility():
             crepa_args_field_ref.current.visible = crepa_checked
             if crepa_args_field_ref.current.page:
                 crepa_args_field_ref.current.update()
+
+        # Factor field (only for lokr)
+        if factor_field_ref and factor_field_ref.current:
+            factor_field_ref.current.visible = _should_show_factor_field()
+            if factor_field_ref.current.page:
+                factor_field_ref.current.update()
     except Exception:
         pass
 
@@ -291,7 +315,7 @@ def get_training_config_page_content():
             "text_encoder_path": text_encoder_path_field_ref,
             "vae_path": vae_path_field_ref,
             "llm_path": llm_path_field_ref,
-            "ckpt_path_wan22": ckpt_path_wan22_field_ref,
+            "ckpt_path": ckpt_path_field_ref,
             "clip_path": clip_path_field_ref,
             "llama3_path": llama3_path_field_ref,
             "byt5_path": byt5_path_field_ref,
@@ -318,23 +342,27 @@ def get_training_config_page_content():
             "te1_lr": te1_lr_field_ref,
             "te2_lr": te2_lr_field_ref,
             "llm_adapter_lr": llm_adapter_lr_field_ref,
-            # LTX2-specific mode dropdown
+            # Musubi-specific fields (ltx_mode dropdown)
             "ltx_mode": ltx_mode_dropdown_ref,
+            "wan_mode": wan_mode_dropdown_ref,
+            "wan_task": wan_task_dropdown_ref,
             "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
             "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
+            "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
             "slider": slider_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             "sample_slider_range": sample_slider_range_field_ref,
-            # LTX2-specific adapter fields
+            # Musubi-specific adapter fields
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
+            "factor": factor_field_ref,
             "dropout": dropout_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
             # dtype, transformer_dtype, timestep_sm
             "dtype": dtype_dropdown_ref,
             "transformer_dtype": transformer_dtype_dropdown_ref,
             "timestep_sm": timestep_sm_dropdown_ref,
-            # LTX2-specific precision fields
+            # Musubi-specific precision fields
             "mixed_precision_mode": mixed_precision_mode_dropdown_ref,
             "fp8_base": fp8_base_checkbox_ref,
             "fp8_scaled": fp8_scaled_checkbox_ref,
@@ -378,7 +406,7 @@ def get_training_config_page_content():
             "text_encoder_path": text_encoder_path_field_ref,
             "vae_path": vae_path_field_ref,
             "llm_path": llm_path_field_ref,
-            "ckpt_path_wan22": ckpt_path_wan22_field_ref,
+            "ckpt_path": ckpt_path_field_ref,
             "clip_path": clip_path_field_ref,
             "llama3_path": llama3_path_field_ref,
             "byt5_path": byt5_path_field_ref,
@@ -395,11 +423,12 @@ def get_training_config_page_content():
             "te2_lr": te2_lr_field_ref,
             "llm_adapter_lr": llm_adapter_lr_field_ref,
             "max_llama3_seq_len": max_llama3_seq_len_field_ref,
-            # LTX2-specific fields
+            # Musubi-specific fields
             "sample_slider_range": sample_slider_range_field_ref,
-            # LTX2-specific adapter fields
+            # Musubi-specific adapter fields
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
+            "factor": factor_field_ref,
             "dropout": dropout_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
             # Model-specific fields
@@ -463,39 +492,53 @@ def get_training_config_page_content():
             return
 
         if trainer == "musubi":
-            # Show only ltx-video-2 models
-            musubi_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" in k.lower()}
+            # Show ltx-video-2 and _wan22 models for musubi trainer
+            musubi_models = {k: v for k, v in settings.dpipe_model_dict.items()
+                          if "ltx-video-2" in k.lower()}
+            # Add _wan22 as a separate entry for musubi trainer
+            musubi_models["_wan22"] = "_wan22"
             if musubi_models:
                 # Update options to show only musubi models
                 model_type_dropdown_ref.current.options = [
                     ft.dropdown.Option(key=k, text=v) for k, v in musubi_models.items()
                 ]
-                # Select the first (ltx-video-2)
-                first_model = list(musubi_models.keys())[0]
-                model_type_dropdown_ref.current.value = first_model
+                # Preserve current value if valid for musubi, otherwise select first
+                current_model = model_type_dropdown_ref.current.value
+                if current_model and current_model in musubi_models:
+                    model_type_dropdown_ref.current.value = current_model
+                else:
+                    model_type_dropdown_ref.current.value = list(musubi_models.keys())[0]
                 # Trigger model type change to update UI
                 if model_type_dropdown_ref.current.on_change:
                     model_type_dropdown_ref.current.on_change(e)
         else:  # diffusion-pipe
-            # Show all models except ltx-video-2
-            dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" not in k.lower()}
+            # Show all models except ltx-video-2 and _wan22 (those are musubi-only)
+            dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items()
+                          if "ltx-video-2" not in k.lower() and k != "_wan22"}
             # Update options to show diffusion-pipe models
             model_type_dropdown_ref.current.options = [
                 ft.dropdown.Option(key=k, text=v) for k, v in dpipe_models.items()
             ]
-            # Select the first available model
-            if dpipe_models:
-                first_model = list(dpipe_models.keys())[0]
-                model_type_dropdown_ref.current.value = first_model
-                # Trigger model type change to update UI
-                if model_type_dropdown_ref.current.on_change:
-                    model_type_dropdown_ref.current.on_change(e)
+            # Preserve current value if valid for diffusion-pipe, otherwise select first
+            current_model = model_type_dropdown_ref.current.value
+            if current_model and current_model in dpipe_models:
+                model_type_dropdown_ref.current.value = current_model
+            else:
+                model_type_dropdown_ref.current.value = list(dpipe_models.keys())[0]
+            # Trigger model type change to update UI
+            if model_type_dropdown_ref.current.on_change:
+                model_type_dropdown_ref.current.on_change(e)
 
         if model_type_dropdown_ref.current.page:
             model_type_dropdown_ref.current.update()
 
-    def on_model_type_change(e):
-        """Handle model type dropdown change to show/hide model-specific fields"""
+    def on_model_type_change(e, from_toml_load=False):
+        """Handle model type dropdown change to show/hide model-specific fields
+
+        Args:
+            e: Event object
+            from_toml_load: If True, skip value updates (values already loaded from TOML)
+        """
         sel = model_type_dropdown_ref.current.value if model_type_dropdown_ref.current else None
         if not sel:
             return
@@ -503,24 +546,78 @@ def get_training_config_page_content():
         # 1. Normalize and Prep
         sel_norm = mfc.normalize_model_name(sel)
         model_key = mfc.get_model_key(sel_norm)
-        skip_defaults = _suppress_model_defaults
+        skip_defaults = _suppress_model_defaults or from_toml_load
 
         # 2. Apply Field Visibility
         # We capture the visibility dict to determine if Rows should be hidden
         vis_config = _apply_field_visibility(sel_norm)
 
-        # Ensure model_path is visible for both SDXL and LTX2
-        is_ltx2 = sel_norm in ("ltx-video-2", "ltx2")
-        if sel_norm == "sdxl" or is_ltx2:
+        # 3. Determine UI mode based on trainer (trainer takes precedence)
+        trainer = trainer_dropdown_ref.current.value if trainer_dropdown_ref.current else None
+        uses_musubi_ui = (trainer == "musubi")
+
+        # Update musubi custom section visibility
+        if musubi_custom_section_ref and musubi_custom_section_ref.current:
+            musubi_custom_section_ref.current.visible = uses_musubi_ui
+            if musubi_custom_section_ref.current.page:
+                musubi_custom_section_ref.current.page.update()
+
+        # Ensure model_path is visible for SDXL and Musubi ltx-video-2 (but not _wan22)
+        if sel_norm == "sdxl" or (uses_musubi_ui and sel_norm not in ["_wan22"]):
             vis_config["model_path"] = True
             if model_path_field_ref and model_path_field_ref.current:
                 model_path_field_ref.current.visible = True
+
+        # Force load_text_encoder_in_8bit visible for _wan22 + musubi
+        if sel_norm == "_wan22" and uses_musubi_ui:
+            vis_config["load_text_encoder_in_8bit"] = True
+            if load_text_encoder_in_8bit_checkbox_ref and load_text_encoder_in_8bit_checkbox_ref.current:
+                load_text_encoder_in_8bit_checkbox_ref.current.visible = True
+            if text_encoder_row_ref and text_encoder_row_ref.current:
+                text_encoder_row_ref.current.visible = True
+                if text_encoder_row_ref.current.page:
+                    text_encoder_row_ref.current.update()
+
+        # Show wan_mode and wan_task for _wan22 (they're hidden by default for wan22)
+        # These fields are in the main config area
+        if sel_norm == "_wan22":
+            if wan_mode_dropdown_ref and wan_mode_dropdown_ref.current:
+                wan_mode_dropdown_ref.current.visible = True
+                if wan_mode_dropdown_ref.current.page:
+                    wan_mode_dropdown_ref.current.page.update()
+            if wan_task_dropdown_ref and wan_task_dropdown_ref.current:
+                wan_task_dropdown_ref.current.visible = True
+                if wan_task_dropdown_ref.current.page:
+                    wan_task_dropdown_ref.current.page.update()
+
+        # Hide dtype, transformer_dtype, and timestep_sm for all musubi trainer types
+        # These are replaced by mixed_precision_mode in the musubi UI
+        if uses_musubi_ui:
+            vis_config["dtype"] = False
+            vis_config["transformer_dtype"] = False
+            vis_config["timestep_sm"] = False
+            for ref in [dtype_dropdown_ref, transformer_dtype_dropdown_ref, timestep_sm_dropdown_ref]:
+                if ref and ref.current:
+                    ref.current.visible = False
+                    if ref.current.page:
+                        ref.current.update()
+
+            # Show musubi-specific precision fields for all musubi trainer types
+            vis_config["mixed_precision_mode"] = True
+            vis_config["fp8_base"] = True
+            vis_config["fp8_scaled"] = True
+            vis_config["attn_chunking"] = True
+            for ref in [mixed_precision_mode_dropdown_ref, fp8_base_checkbox_ref, fp8_scaled_checkbox_ref, attn_chunking_checkbox_ref]:
+                if ref and ref.current:
+                    ref.current.visible = True
+                    if ref.current.page:
+                        ref.current.update()
 
         # 3. Dynamic Row Visibility
         # Map Rows to the "Main Field" they contain. If the field is visible, the row is visible.
         row_triggers = {
             checkpoint_row_ref: "model_path",
-            ckpt_path_row_ref: "ckpt_path_wan22",
+            ckpt_path_row_ref: "ckpt_path",
             diffusers_row_ref: "diffusers_path",
             single_file_row_ref: "single_file_path",
             first_frame_conditioning_p_row_ref: "first_frame_conditioning_p",
@@ -554,7 +651,7 @@ def get_training_config_page_content():
                 "llm_path": llm_path_field_ref,
                 "text_encoder_path": text_encoder_path_field_ref,
                 "vae_path": vae_path_field_ref,
-                "ckpt_path_wan22": ckpt_path_wan22_field_ref,
+                "ckpt_path": ckpt_path_field_ref,
                 "clip_path": clip_path_field_ref,
                 "llama3_path": llama3_path_field_ref,
                 "max_llama3_seq_len": max_llama3_seq_len_field_ref,
@@ -566,7 +663,7 @@ def get_training_config_page_content():
                 "llm_adapter_lr": llm_adapter_lr_field_ref,
                 "hidream_4bit": hidream_4bit_checkbox_ref,
                 "hidream_tdtype": hidream_tdtype_checkbox_ref,
-                # LTX2-specific adapter fields
+                # Musubi-specific adapter fields
                 "rank": rank_field_ref,
                 "alpha": alpha_field_ref,
                 "dropout": dropout_field_ref,
@@ -593,33 +690,42 @@ def get_training_config_page_content():
             _safe_set_value(timestep_sm_dropdown_ref, mfc.get_timestep_sm_default(sel_norm))
             _safe_set_value(transformer_dtype_dropdown_ref, mfc.get_transformer_dtype_default(sel_norm))
 
+        # 6.5. Apply Musubi-specific precision defaults (for all musubi trainer types)
+        if uses_musubi_ui and not skip_defaults:
+            _safe_set_value(mixed_precision_mode_dropdown_ref, "bf16")
+            _safe_set_value(fp8_base_checkbox_ref, True)
+            _safe_set_value(fp8_scaled_checkbox_ref, True)
+            _safe_set_value(attn_chunking_checkbox_ref, False)
+
         # 7. Handle model-specific defaults not yet in config (model-specific field overrides)
         # Note: Most defaults are now in model_field_config.py and applied in step 5
 
         # 8. Dynamic Row Visibility (handled earlier)
 
-        # 9. Conditional UI Swap for LTX2
-        # Toggle standard training sections
+        # 9. Conditional UI Swap for Musubi Trainer
+        # Toggle standard training sections (hide for musubi trainer)
         if standard_training_section_ref.current:
-            standard_training_section_ref.current.visible = not is_ltx2
+            standard_training_section_ref.current.visible = not uses_musubi_ui
             if standard_training_section_ref.current.page:
                 standard_training_section_ref.current.update()
         if standard_eval_optimizer_section_ref.current:
-            standard_eval_optimizer_section_ref.current.visible = not is_ltx2
+            standard_eval_optimizer_section_ref.current.visible = not uses_musubi_ui
             if standard_eval_optimizer_section_ref.current.page:
                 standard_eval_optimizer_section_ref.current.update()
 
-        # Toggle LTX2 custom section
-        if ltx2_custom_section_ref.current:
-            ltx2_custom_section_ref.current.visible = is_ltx2
-            # Force update the ltx2 section
-            if ltx2_custom_section_ref.current.page:
-                ltx2_custom_section_ref.current.update()
+        # Toggle Musubi custom section (show only for musubi trainer)
+        if musubi_custom_section_ref.current:
+            show_musubi = uses_musubi_ui
+            musubi_custom_section_ref.current.visible = show_musubi
+            # Force update the musubi section
+            if musubi_custom_section_ref.current.page:
+                musubi_custom_section_ref.current.update()
 
-        # 10. Update adapter field visibility (hide old ones for LTX2, show new ones only for LTX2)
-        ltx2_adapter_fields = {
+        # 10. Update adapter field visibility (hide old ones for Musubi, show new ones only for Musubi)
+        musubi_adapter_fields = {
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
+            "factor": factor_field_ref,
             "dropout": dropout_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
         }
@@ -630,36 +736,38 @@ def get_training_config_page_content():
             "disable_bsfe": disable_bsfe_field_ref,
         }
         try:
-            # Show new LTX2 fields only for LTX2
-            for field_name, ref in ltx2_adapter_fields.items():
+            # Show new Musubi fields only for Musubi trainer
+            # But hide dropout and first_frame_conditioning for wan/wan22
+            for field_name, ref in musubi_adapter_fields.items():
                 if ref and ref.current:
-                    ref.current.visible = is_ltx2
+                    should_hide = (field_name in ["dropout", "first_frame_conditioning_p_ltx2"] and sel_norm in ["wan", "wan22"])
+                    ref.current.visible = uses_musubi_ui and not should_hide
                     if ref.current.page:
                         ref.current.update()
-            # Hide old adapter fields for LTX2
+            # Hide old adapter fields for Musubi trainer
             for field_name, ref in old_adapter_fields.items():
                 if ref and ref.current:
-                    ref.current.visible = not is_ltx2
+                    ref.current.visible = not uses_musubi_ui
                     if ref.current.page:
                         ref.current.update()
         except Exception:
             pass
 
-        # 11. Show/hide frame_extraction dropdowns for dataset blocks (only for LTX2)
+        # 11. Show/hide frame_extraction dropdowns for dataset blocks (only for Musubi trainer)
         try:
             for ds_block in [dataset_1_block, dataset_2_block, dataset_3_block]:
                 if hasattr(ds_block, 'set_frame_extraction_visible'):
-                    ds_block.set_frame_extraction_visible(is_ltx2)
+                    ds_block.set_frame_extraction_visible(uses_musubi_ui)
         except Exception:
             pass
 
-        # 11.5. Update adapter dropdown options based on model type
-        # For LTX2: show both "lora" and "lokr"
-        # For other models: show only "lora"
+        # 11.5. Update adapter dropdown options based on trainer type
+        # For Musubi: show both "lora" and "lokr"
+        # For other trainers: show only "lora"
         try:
             if adapter_dropdown_ref and adapter_dropdown_ref.current:
-                if is_ltx2:
-                    # LTX2 supports both lora and lokr
+                if uses_musubi_ui:
+                    # Musubi supports both lora and lokr
                     adapter_dropdown_ref.current.options = [
                         ft.dropdown_option("lora"),
                         ft.dropdown_option("lokr"),
@@ -732,7 +840,7 @@ def get_training_config_page_content():
                             fill_color=ft.Colors.with_opacity(0.18, ft.Colors.AMBER_900),
                             on_change=on_model_type_change, ref=model_type_dropdown_ref
                         ),
-                        # Non-LTX2 fields
+                        # Non-Musubi fields
                         create_dropdown(
                             "dtype",
                             "bfloat16",
@@ -754,7 +862,7 @@ def get_training_config_page_content():
                             col=2, expand=True, scale=0.8, ref=timestep_sm_dropdown_ref,
                             visible=_should_show_field("timestep_sm")
                         ),
-                        # LTX2-specific precision fields
+                        # Musubi-specific precision fields
                         create_dropdown(
                             "mixed_precision_mode",
                             "bf16",
@@ -798,29 +906,19 @@ def get_training_config_page_content():
                             create_textfield(
                                 "ckpt_path",
                                 "models/Wan2.2-T2V-A14B",
-                                col=12, expand=True, ref=ckpt_path_wan22_field_ref,
-                                visible=_should_show_field("ckpt_path_wan22")
+                                col=12, expand=True, ref=ckpt_path_field_ref,
+                                visible=_should_show_field("ckpt_path")
                             ),
                         ],
                         ref=ckpt_path_row_ref,
-                        visible=_should_show_field("ckpt_path_wan22")
+                        visible=_should_show_field("ckpt_path")
                     ),
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield("text_encoder_path", "", col=6, expand=True, ref=text_encoder_path_field_ref, visible=_should_show_field("text_encoder_path")),
-                            ft.Column([
-                                ft.Checkbox(
-                                    label="8_bit_text_encoder",
-                                    value=True,
-                                    scale=0.8,
-                                    ref=load_text_encoder_in_8bit_checkbox_ref,
-                                    visible=_should_show_field("load_text_encoder_in_8bit"),
-                                    data="8_bit_text_encoder",
-                                ),
-                            ], col=6, spacing=2),
                         ], spacing=2,
                         ref=text_encoder_row_ref,
-                        visible=_should_show_field("text_encoder_path") or _should_show_field("load_text_encoder_in_8bit")
+                        visible=True
                     ),
                     ft.ResponsiveRow(
                         controls=[
@@ -1009,15 +1107,9 @@ def get_training_config_page_content():
                             col=3,
                         ),
                     ], spacing=2),
-                    # LTX2 mode dropdown
+                    # Musubi mode dropdown (ltx_mode)
                     ft.ResponsiveRow(controls=[
-                        create_dropdown(
-                            "ltx_mode",
-                            "video",
-                            {"video": "video", "av": "av", "audio": "audio"},
-                            col=2, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
-                            visible=_should_show_field("ltx_mode")
-                        ),
+                        #here
                         ft.Checkbox(
                             label="separate_audio_buckets",
                             value=True,
@@ -1025,7 +1117,7 @@ def get_training_config_page_content():
                             ref=separate_audio_buckets_checkbox_ref,
                             visible=_should_show_field("separate_audio_buckets"),
                             data="separate_audio_buckets",
-                            col=3.5,
+                            col=3.0,
                         ),
                         ft.Checkbox(
                             label="gradient_checkpointing",
@@ -1034,17 +1126,7 @@ def get_training_config_page_content():
                             ref=gradient_checkpointing_checkbox_ref,
                             visible=_should_show_field("gradient_checkpointing"),
                             data="gradient_checkpointing",
-                            col=3.5,
-                        ),
-                        ft.Checkbox(
-                            label="slider",
-                            value=False,
-                            scale=0.8,
-                            ref=slider_checkbox_ref,
-                            visible=_should_show_field("slider"),
-                            data="slider",
-                            col=1.5,
-                            on_change=lambda e: _on_slider_change(e),
+                            col=3.0,
                         ),
                         ft.Checkbox(
                             label="use_mask",
@@ -1053,7 +1135,26 @@ def get_training_config_page_content():
                             ref=use_mask_checkbox_ref,
                             visible=_should_show_field("use_mask"),
                             data="use_mask",
-                            col=1.5,
+                            col=2,
+                        ),
+                        ft.Checkbox(
+                            label="slider",
+                            value=False,
+                            scale=0.8,
+                            ref=slider_checkbox_ref,
+                            visible=_should_show_field("slider"),
+                            data="slider",
+                            col=2,
+                            on_change=lambda e: _on_slider_change(e),
+                        ),
+                        ft.Checkbox(
+                            label="8_bit_te",
+                            value=True,
+                            scale=0.8,
+                            col=2,
+                            ref=load_text_encoder_in_8bit_checkbox_ref,
+                            visible=True,
+                            data="8_bit_te",
                         ),
                     ], spacing=2),
                     # Adapter row with sample_slider_range
@@ -1064,12 +1165,35 @@ def get_training_config_page_content():
                             {
                                 "lora": "lora",
                                 "lokr": "lokr"
-                            }, col=3, expand=False, scale=0.8, ref=adapter_dropdown_ref,
+                            }, col=3, expand=False, scale=0.8, ref=adapter_dropdown_ref, on_change=_on_adapter_change,
                         ),
+                        create_dropdown(
+                            "ltx_mode",
+                            "video",
+                            {"video": "video", "av": "av", "audio": "audio"},
+                            col=2, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
+                            visible=_should_show_field("ltx_mode")
+                        ),
+                        # Wan2.2 mode dropdown
+                        create_dropdown(
+                            "wan_mode",
+                            "high",
+                            {"high": "high", "low": "low", "both": "both"},
+                            col=2.0, expand=True, scale=0.8, ref=wan_mode_dropdown_ref,
+                            visible=_should_show_field("wan_mode")
+                        ),
+                        create_dropdown(
+                            "wan_task",
+                            "i2v-A14B",
+                            {"i2v-A14B": "i2v-A14B","t2v-A14B": "t2v-A14B", },
+                            col=2.5, expand=True, scale=0.8, ref=wan_task_dropdown_ref,
+                            visible=_should_show_field("wan_task")
+                        ),
+                        #slider
                         create_textfield(
-                            "sample_slider_range", "-2.0, -1.0, 0.0, 1.0, 2.0",
+                            "sample_slider_range", "0.0, 1.0, 2.0",
                             hint_text="Slider sample range",
-                            expand=True, col=9, scale=0.8,
+                            expand=True, col=5, scale=0.8,
                             ref=sample_slider_range_field_ref,
                             visible=False  # Invisible by default (only visible when slider checkbox is checked)
                         ),
@@ -1162,11 +1286,12 @@ def get_training_config_page_content():
                         create_textfield("blocks_swap", 0, col=3, expand=True, ref=blocks_swap_field_ref, visible=not _should_show_field("rank")),
                         create_textfield("disable_bsfe", "true", col=3, expand=True, ref=disable_bsfe_field_ref, visible=not _should_show_field("rank")),
                     ], spacing=2),
-                    # LTX2 specific adapter row
+                    # Musubi-specific adapter row
                     ft.ResponsiveRow(controls=[
-                        create_textfield("rank", 32, col=3, expand=True, ref=rank_field_ref, visible=_should_show_field("rank")),
-                        create_textfield("alpha", 32, col=3, expand=True, ref=alpha_field_ref, visible=_should_show_field("alpha")),
-                        create_textfield("dropout", 0.0, col=3, expand=True, ref=dropout_field_ref, visible=_should_show_field("dropout")),
+                        create_textfield("rank", 32, col=2.5, expand=True, ref=rank_field_ref, visible=_should_show_field("rank")),
+                        create_textfield("alpha", 32, col=2.5, expand=True, ref=alpha_field_ref, visible=_should_show_field("alpha")),
+                        create_textfield("factor", 4, col=2, expand=True, ref=factor_field_ref, visible=_should_show_factor_field()),
+                        create_textfield("dropout", 0.0, col=2, expand=True, ref=dropout_field_ref, visible=_should_show_field("dropout")),
                         create_textfield("first_frame_conditioning_p", 0.5, col=3, expand=True, ref=first_frame_conditioning_p_ltx2_field_ref, visible=_should_show_field("first_frame_conditioning_p_ltx2")),
                     ], spacing=2),
                 ]),
@@ -1299,9 +1424,10 @@ def get_training_config_page_content():
             ], col=6),
         ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START, ref=standard_training_section_ref)
 
-    # Determine initial visibility based on default model
-    is_default_ltx2 = settings.train_def_model.lower() in ("ltx-video-2", "ltx2")
-    standard_training_section.visible = not is_default_ltx2
+    # Determine initial visibility based on default trainer (not model)
+    default_trainer = trainer_dropdown_ref.current.value if trainer_dropdown_ref.current else None
+    uses_musubi_ui = (default_trainer == "musubi")
+    standard_training_section.visible = not uses_musubi_ui
     page_controls.append(standard_training_section)
 
     # --- Eval & Optimizer Settings (Two Columns) ---
@@ -1394,12 +1520,12 @@ def get_training_config_page_content():
             ], col=6),
         ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START, ref=standard_eval_optimizer_section_ref)
 
-    standard_eval_optimizer_section.visible = not is_default_ltx2
+    standard_eval_optimizer_section.visible = not uses_musubi_ui
     page_controls.append(standard_eval_optimizer_section)
 
-    # --- LTX2 Custom Training Settings ---
-    ltx2_custom_section = get_ltx2_training_settings(
-        ref=ltx2_custom_section_ref,
+    # --- Musubi Custom Training Settings ---
+    musubi_custom_section = get_musubi_training_settings(
+        ref=musubi_custom_section_ref,
         attn_chunking_ref=attn_chunking_checkbox_ref,
         blank_preservation_ref=blank_preservation_checkbox_ref,
         blank_preservation_args_ref=blank_preservation_args_field_ref,
@@ -1412,8 +1538,8 @@ def get_training_config_page_content():
         crepa_args_ref=crepa_args_field_ref,
         sync_visibility_func=sync_dependent_field_visibility,
     )
-    ltx2_custom_section.visible = is_default_ltx2
-    page_controls.append(ltx2_custom_section)
+    musubi_custom_section.visible = uses_musubi_ui
+    page_controls.append(musubi_custom_section)
 
     container = ft.Container(
         content=ft.Column(
@@ -1432,12 +1558,13 @@ def get_training_config_page_content():
     container.dataset_block = dataset_1_block
 
     # Initialize model type options based on default trainer (diffusion-pipe)
-    # Filter out ltx-video-2 from initial options since default trainer is diffusion-pipe
+    # Filter out ltx-video-2 and wan22 from initial options since default trainer is diffusion-pipe
     if trainer_dropdown_ref and trainer_dropdown_ref.current and model_type_dropdown_ref and model_type_dropdown_ref.current:
         default_trainer = trainer_dropdown_ref.current.value
         if default_trainer == "musubi":
-            # Show only ltx-video-2 models
-            musubi_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" in k.lower()}
+            # Show ltx-video-2 and wan22 models
+            musubi_models = {k: v for k, v in settings.dpipe_model_dict.items()
+                          if "ltx-video-2" in k.lower() or "wan22" in k.lower()}
             if musubi_models:
                 model_type_dropdown_ref.current.options = [
                     ft.dropdown.Option(key=k, text=v) for k, v in musubi_models.items()
@@ -1445,8 +1572,9 @@ def get_training_config_page_content():
                 first_model = list(musubi_models.keys())[0]
                 model_type_dropdown_ref.current.value = first_model
         else:
-            # Show all models except ltx-video-2
-            dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items() if "ltx-video-2" not in k.lower()}
+            # Show all models except ltx-video-2 (wan22 works with both trainers)
+            dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items()
+                          if "ltx-video-2" not in k.lower()}
             if dpipe_models:
                 model_type_dropdown_ref.current.options = [
                     ft.dropdown.Option(key=k, text=v) for k, v in dpipe_models.items()
@@ -1533,7 +1661,7 @@ def update_sdxl_fields_visibility(
     te1_lr_value=None,
     te2_lr_value=None,
     model_path_value=None,
-    is_ltx2=False,  # Added parameter to handle LTX2 model as well
+    is_ltx2=False,  # For model_path visibility (shared by SDXL and LTX2/Musubi models)
 ):
     """Update visibility and values for SDXL-specific fields."""
     field_refs = {
@@ -1561,7 +1689,7 @@ def update_sdxl_fields_visibility(
     if model_path_value is not None:
         field_values["model_path"] = str(model_path_value)
 
-    # model_path field is used by both SDXL and LTX2 models, so handle special case
+    # model_path field is used by both SDXL and LTX2/Musubi models, so handle special case
     page_obj = None
     try:
         for field_name, ref in field_refs.items():
@@ -1594,19 +1722,19 @@ def update_sdxl_fields_visibility(
 
 def update_wan22_ckpt_visibility(is_wan22: bool, ckpt_value=None):
     """Update visibility and value for wan22 ckpt_path field."""
-    field_refs = {"ckpt_path_wan22": ckpt_path_wan22_field_ref}
+    field_refs = {"ckpt_path": ckpt_path_field_ref}
     field_values = {}
     if ckpt_value is not None:
-        field_values["ckpt_path_wan22"] = str(ckpt_value)
+        field_values["ckpt_path"] = str(ckpt_value)
 
     _update_field_refs_visibility(field_refs, is_wan22, field_values)
 
 def update_longcat_ckpt_visibility(is_longcat: bool, ckpt_value=None):
     """Update visibility and value for longcat ckpt_path field."""
-    field_refs = {"ckpt_path_wan22": ckpt_path_wan22_field_ref}
+    field_refs = {"ckpt_path": ckpt_path_field_ref}
     field_values = {}
     if ckpt_value is not None:
-        field_values["ckpt_path_wan22"] = str(ckpt_value)
+        field_values["ckpt_path"] = str(ckpt_value)
 
     _update_field_refs_visibility(field_refs, is_longcat, field_values)
 
@@ -1650,18 +1778,19 @@ def update_flux2_fields_visibility(is_flux2: bool, diffusion_model_value=None, v
 
     _update_field_refs_visibility(field_refs, is_flux2, field_values)
 
-def update_ltx2_fields_visibility(
-    is_ltx2: bool,
+def update_musubi_fields_visibility(
+    is_musubi: bool,
     ltx_mode_value=None,
     separate_audio_buckets_value=None,
     gradient_checkpointing_value=None,
     slider_value=None
 ):
-    """Update visibility and values for LTX2-specific fields."""
+    """Update visibility and values for Musubi-specific fields."""
     field_refs = {
         "ltx_mode": ltx_mode_dropdown_ref,
         "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
         "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
+        "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
         "slider": slider_checkbox_ref,
         "use_mask": use_mask_checkbox_ref,
     }
@@ -1675,12 +1804,12 @@ def update_ltx2_fields_visibility(
     if slider_value is not None:
         field_values["slider"] = slider_value
 
-    _update_field_refs_visibility(field_refs, is_ltx2, field_values)
+    _update_field_refs_visibility(field_refs, is_musubi, field_values)
 
-    # separate_audio_buckets is always visible for ltx2 (ignored if ltx_mode is not 'av')
+    # separate_audio_buckets is always visible for musubi (ignored if ltx_mode is not 'av')
     try:
         if separate_audio_buckets_checkbox_ref and separate_audio_buckets_checkbox_ref.current:
-            separate_audio_buckets_checkbox_ref.current.visible = is_ltx2
+            separate_audio_buckets_checkbox_ref.current.visible = is_musubi
             if separate_audio_buckets_checkbox_ref.current.page:
                 separate_audio_buckets_checkbox_ref.current.page.update()
     except Exception:

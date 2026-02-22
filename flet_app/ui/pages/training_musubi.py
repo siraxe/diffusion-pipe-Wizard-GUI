@@ -2,7 +2,7 @@ import flet as ft
 from .._styles import add_section_title, create_textfield, create_dropdown, create_checkbox
 
 
-def get_ltx2_training_settings(
+def get_musubi_training_settings(
     ref=None,
     attn_chunking_ref=None,
     blank_preservation_ref=None,
@@ -17,8 +17,8 @@ def get_ltx2_training_settings(
     sync_visibility_func=None,
 ):
     """
-    Get LTX2-specific training settings UI.
-    Returns a container with LTX2-specific training options.
+    Get Musubi trainer-specific training settings UI.
+    Returns a container with Musubi-specific training options.
 
     Args:
         ref: Optional Flet Ref to attach to the container
@@ -35,13 +35,8 @@ def get_ltx2_training_settings(
 
     def on_optimizer_change(e):
         """Update learning rate when optimizer changes."""
-        if optimizer_ref.current and learning_rate_ref.current:
-            if optimizer_ref.current.value == "Prodigy":
-                learning_rate_ref.current.value = "1.0"
-                learning_rate_ref.current.update()
-            elif optimizer_ref.current.value == "Automagic":
-                learning_rate_ref.current.value = "1e-6"
-                learning_rate_ref.current.update()
+        # NOTE: Disabled automatic learning rate changes to preserve loaded TOML values
+        # Users can manually adjust the learning rate as needed
 
         # Show/hide optimizer_args field based on optimizer selection
         if optimizer_ref.current and optimizer_args_ref.current:
@@ -60,8 +55,8 @@ def get_ltx2_training_settings(
                 lr_warmup_steps_ref.current.visible = False
             lr_warmup_steps_ref.current.update()
 
-    # --- LTX2 Optimization & Checkpoints Settings (Two Columns) ---
-    ltx2_settings_section = ft.ResponsiveRow([
+    # --- Musubi Optimization & Checkpoints Settings (Two Columns) ---
+    musubi_settings_section = ft.ResponsiveRow([
             ft.Column([
                 *add_section_title("Optimization"),
                 ft.Container(
@@ -77,7 +72,7 @@ def get_ltx2_training_settings(
                         ft.ResponsiveRow(controls=[
                             create_textfield("learning_rate", 0.0001, col=3, expand=True, ref=learning_rate_ref),
                             create_dropdown(
-                                "optimizer_type_ltx2",
+                                "optimizer_type_m",
                                 "AdamW",
                                 {
                                     "AdamW": "AdamW",
@@ -106,7 +101,7 @@ def get_ltx2_training_settings(
                                 on_change=on_scheduler_change, ref=scheduler_ref
                             ),
                             create_dropdown(
-                                "timestep_sm_ltx2",
+                                "timestep_sm_m",
                                 "shifted_logit_normal",
                                 {
                                     "shifted_logit_normal": "shifted_logit_normal",
@@ -382,7 +377,7 @@ def get_ltx2_training_settings(
             ], col=6),
         ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
 
-    page_controls.append(ltx2_settings_section)
+    page_controls.append(musubi_settings_section)
     page_controls.append(ft.Divider(height=5, color=ft.Colors.TRANSPARENT))
 
     container = ft.Container(

@@ -403,7 +403,7 @@ def _build_ltx2_train_args(cfg: dict, musubi_config_path: str, slider_config_pat
         args.append('--fp8_base')
     if parse_bool(a.get('fp8_scaled', True)):
         args.append('--fp8_scaled')
-    if parse_bool(a.get('8_bit_text_encoder', False)):
+    if parse_bool(a.get('8_bit_te', False)):
         args.append('--gemma_load_in_8bit')
     if parse_bool(a.get('attn_chunking', False)):
         args.extend(['--split_attn_target', 'video', '--split_attn_mode', 'query', '--split_attn_chunk_size', '512'])
@@ -860,7 +860,7 @@ def build_cache_commands(config_path: str, musubi_config_path: str) -> dict:
         "gemma": model_cfg.get('text_encoder_path', DEFAULT_GEMMA_ROOT),
         "mode": strat_cfg.get('ltx_mode', 'video'),
         "prec": accel_cfg.get('mixed_precision_mode', 'bf16'),
-        "gemma_8bit": parse_bool(accel_cfg.get('8_bit_text_encoder', True)),
+        "gemma_8bit": parse_bool(accel_cfg.get('8_bit_te', True)),
         "latents_script": os.path.join(root, 'diffusion-trainers/musubi-tuner/ltx2_cache_latents.py'),
         "te_script": os.path.join(root, 'diffusion-trainers/musubi-tuner/ltx2_cache_text_encoder_outputs.py')
     }
@@ -1685,7 +1685,7 @@ def run_ltx2_cache_text_encoder(last_config_path, musubi_config_path, console, c
         '--ltx2_mode', strat_cfg.get('ltx_mode', 'video'), '--batch_size', '1'
     ]
 
-    if parse_bool(accel.get('8_bit_text_encoder', True)):
+    if parse_bool(accel.get('8_bit_te', True)):
         cmd.append('--gemma_load_in_8bit')
 
     musubi_src = os.path.join(resolve_project_root(), 'diffusion-trainers/musubi-tuner/src')
@@ -1815,7 +1815,7 @@ def run_ltx2_cache_sample_prompts(
         '--sample_prompts_cache', cache_path,
     ]
 
-    if parse_bool(accel.get('8_bit_text_encoder', True)):
+    if parse_bool(accel.get('8_bit_te', True)):
         cmd.append('--gemma_load_in_8bit')
 
     # Add cache_i2v flag if enabled in validation config

@@ -935,10 +935,17 @@ def get_training_tab_content(page: ft.Page):
             else:
                 out_path, _ = await save_training_config_to_toml(training_tab_container)
 
-            # Check if model type is ltx-video-2
-            from musubi_ltx2 import handle_musubi_model as handle_ltx_model
-            if handle_ltx_model(out_path):
-                # Use the new centralized LTX2 training flow
+            # Check if trainer is musubi (for ltx-video-2, wan22 models)
+            import toml
+            try:
+                with open(out_path, 'r') as f:
+                    config = toml.load(f)
+                    is_musubi_trainer = config.get('model', {}).get('trainer', 'diffusion-pipe') == 'musubi'
+            except:
+                is_musubi_trainer = False
+
+            if is_musubi_trainer:
+                # Use the new centralized musubi training flow
                 await run_ltx2_training_flow(
                     out_path=out_path,
                     trust_cache=trust_cache_checkbox.value,
@@ -1220,18 +1227,21 @@ def get_training_tab_content(page: ft.Page):
                     e.page.update()
             except Exception:
                 pass
-            # Check if this is LTX2 model by checking the training container
-            from musubi_ltx2 import handle_musubi_model as handle_ltx_model
+            # Check if this is musubi trainer (LTX2/WAN22) by checking the training container
             training_proc = None
 
-            # Try to get training_proc from LTX2 specific container
+            # Try to get training_proc from musubi specific container
             try:
                 if hasattr(e.page, 'training_tab_container'):
                     training_tab = e.page.training_tab_container
-                    # Check if this is LTX2 by checking the config
+                    # Check if this is musubi by checking the config
                     last_config_path = getattr(training_tab, 'last_config_path', None)
                     if last_config_path and os.path.exists(last_config_path):
-                        if handle_ltx_model(last_config_path):
+                        import toml
+                        with open(last_config_path, 'r') as f:
+                            config = toml.load(f)
+                            is_musubi_trainer = config.get('model', {}).get('trainer', 'diffusion-pipe') == 'musubi'
+                        if is_musubi_trainer:
                             training_proc = getattr(training_tab, 'training_proc', None)
                             # Also check main_container as backup
                             if training_proc is None:

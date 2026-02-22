@@ -191,11 +191,14 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
             else:
                 unique_cache_dir = cache_directory
 
+            # If AR bucketing is enabled, automatically enable bucketing
+            enable_bucket = dir_enable_ar_bucket
+
             dataset_config = {
                 'cache_directory': unique_cache_dir,
                 'num_repeats': dir_num_repeats,
                 'resolution': resolution,  # Each dataset has its own resolution
-                'enable_bucket': False,
+                'enable_bucket': enable_bucket,
                 'bucket_no_upscale': False,
                 'enable_ar_bucket': dir_enable_ar_bucket,
                 'min_ar': dir_min_ar,
@@ -220,7 +223,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         'general': {
             'caption_extension': '.txt',
             'batch_size': batch_size,
-            'enable_bucket': False,
+            'enable_bucket': global_enable_ar_bucket,
             'bucket_no_upscale': False,
             'enable_ar_bucket': global_enable_ar_bucket,
             'min_ar': global_min_ar,
@@ -394,11 +397,12 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
     lines.append(f"caption_extension = \"{general['caption_extension']}\"")
     lines.append(f"batch_size = {general['batch_size']}")
     lines.append(f"enable_bucket = {str(general['enable_bucket']).lower()}")
+    if general.get('enable_ar_bucket', False):
+        lines.append(f"enable_ar_bucket = {str(general['enable_ar_bucket']).lower()}")
+        lines.append(f"min_ar = {general.get('min_ar', 0.5)}")
+        lines.append(f"max_ar = {general.get('max_ar', 2.0)}")
+        lines.append(f"num_ar_buckets = {general.get('num_ar_buckets', 7)}")
     lines.append(f"bucket_no_upscale = {str(general['bucket_no_upscale']).lower()}")
-    lines.append(f"enable_ar_bucket = {str(general.get('enable_ar_bucket', False)).lower()}")
-    lines.append(f"min_ar = {general.get('min_ar', 0.5)}")
-    lines.append(f"max_ar = {general.get('max_ar', 2.0)}")
-    lines.append(f"num_ar_buckets = {general.get('num_ar_buckets', 2)}")
     lines.append("")
 
     # [[datasets]] section - may have multiple datasets
@@ -423,11 +427,12 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
         lines.append(f"cache_directory = \"{dataset['cache_directory']}\"")
         lines.append(f"num_repeats = {dataset['num_repeats']}")
         lines.append(f"enable_bucket = {str(dataset.get('enable_bucket', False)).lower()}")
+        if dataset.get('enable_ar_bucket', False):
+            lines.append(f"enable_ar_bucket = {str(dataset['enable_ar_bucket']).lower()}")
+            lines.append(f"min_ar = {dataset.get('min_ar', 0.5)}")
+            lines.append(f"max_ar = {dataset.get('max_ar', 2.0)}")
+            lines.append(f"num_ar_buckets = {dataset.get('num_ar_buckets', 7)}")
         lines.append(f"bucket_no_upscale = {str(dataset.get('bucket_no_upscale', False)).lower()}")
-        lines.append(f"enable_ar_bucket = {str(dataset.get('enable_ar_bucket', False)).lower()}")
-        lines.append(f"min_ar = {dataset.get('min_ar', 0.5)}")
-        lines.append(f"max_ar = {dataset.get('max_ar', 2.0)}")
-        lines.append(f"num_ar_buckets = {dataset.get('num_ar_buckets', 2)}")
 
         # Add blank line between datasets for readability
         if i < len(datasets) - 1:

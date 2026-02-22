@@ -18,7 +18,7 @@ from .output_manager import (
     add_error_message,
     add_action_message,
 )
-from musubi_ltx2 import run_musubi_ltx2_workflow
+from musubi_run import create_runner
 from flet_app.ui.utils.toml_to_musubi_toml import convert_toml_to_musubi_toml
 
 
@@ -134,40 +134,158 @@ def terminate_process(training_proc, main_container, page=None):
 
 
 # =====================
+# Cache Execution (Modular - shared by ltx-video-2 and wan22)
+# =====================
+
+async def run_cache_commands(
+    runner,
+    dataset_config: str,
+    main_container,
+    training_tab_container,
+    page,
+    training_console_text
+):
+    """
+    Execute cache commands sequentially (latents, then text_encoder).
+    Uses musubi_run.run_cache_async() for each cache, then chains the rest.
+
+    Args:
+        runner: MusubiRun instance
+        dataset_config: Path to dataset config
+        main_container: Main UI container
+        training_tab_container: Training tab container
+        page: Flet page
+        training_console_text: Console output control
+    """
+    import subprocess
+    import threading
+
+    def run_cache_thread():
+        try:
+            cache_cmds_dict = runner.get_cache_commands(dataset_config)
+            cache_order = ['latents', 'text_encoder']
+
+            # Track overall success/failure state
+            all_success = True
+            was_cancelled = False
+
+            # Flag to track if current cache was cancelled
+            cache_cancelled = False
+
+            for idx, cache_type in enumerate(cache_order):
+                if cache_type not in cache_cmds_dict:
+                    continue
+
+                # Print progress between caches
+                pass
+
+                # Get command string for display
+                cmd_list = cache_cmds_dict[cache_type]
+                cmd_str = " ".join(cmd_list)
+
+                # Capture current values for closures (avoid reference issues)
+                current_type = cache_type
+
+                async def show_start(ct=current_type, cs=cmd_str):
+                    add_info_message(training_console_text, f"\n[Info] Running {ct.upper()} caching...\n")
+                    add_info_message(training_console_text, f"\n[Command] {cs}\n")
+                if page:
+                    page.run_task(show_start)
+
+                # Run the cache command using musubi_run
+                proc = runner.run_cache_async(dataset_config, cache_type=cache_type)
+
+                main_container.training_proc = proc
+                training_tab_container.training_proc = proc
+
+                async def update_btn():
+                    set_button_state(main_container, "Stop", page)
+                if page:
+                    page.run_task(update_btn)
+
+                from flet_app.ui.training.output_manager import start_ltx_output_streamer
+                start_ltx_output_streamer(proc, training_console_text, main_container=main_container, page=page)
+                proc.wait()
+
+                # Process completed
+                pass
+
+                # Check if cancelled after process completes
+                # The process reference might be cleared by the output manager on normal completion
+                # or by user cancellation. We need to distinguish between these cases.
+                if proc.returncode == 0:
+                    # Process completed successfully - any clearing of training_proc is expected
+                    pass
+                elif getattr(main_container, 'training_proc', None) is None:
+                    # Process reference was cleared but it didn't complete successfully
+                    # This indicates it was cancelled by the user
+                    was_cancelled = True
+                    cache_cancelled = True
+                    async def show_cancel(ct=current_type):
+                        add_action_message(training_console_text, f"\n[Action] {ct.upper()} caching cancelled.\n")
+                    if page:
+                        page.run_task(show_cancel)
+                    # Don't return - continue to next cache type
+                    all_success = False
+                    continue
+
+                if proc.returncode != 0:
+                    async def show_err(ct=current_type):
+                        add_error_message(training_console_text, f"\n[Error] {ct.upper()} caching failed with exit code {proc.returncode}\n")
+                    if page:
+                        page.run_task(show_err)
+                    # Don't return - continue to next cache type
+                    all_success = False
+                    continue
+
+                async def show_success(ct=current_type):
+                    add_success_message(training_console_text, f"\n[Success] {ct.upper()} caching completed.\n")
+                if page:
+                    page.run_task(show_success)
+
+                # Cache completed successfully, moving to next
+                pass
+
+            # Show final status after all caches processed
+            async def show_final_status():
+                if was_cancelled:
+                    add_warning_message(training_console_text, f"\n[Info] Caching was cancelled. Partial caches may exist.\n")
+                elif all_success:
+                    add_success_message(training_console_text, f"\n[Success] All caching completed for {runner.model_type}.\n")
+                else:
+                    add_warning_message(training_console_text, f"\n[Warning] Caching completed with errors for {runner.model_type}.\n")
+                reset_to_start_button(main_container, training_tab_container, page)
+            if page:
+                page.run_task(show_final_status)
+
+        except Exception as e:
+            async def show_err():
+                add_error_message(training_console_text, f"\n[Error] Failed to run cache commands: {e}\n")
+            if page:
+                page.run_task(show_err)
+            logger.error(f"Failed to run cache commands: {e}")
+
+            async def reset_btn():
+                reset_to_start_button(main_container, training_tab_container, page)
+            if page:
+                page.run_task(reset_btn)
+
+    cache_thread = threading.Thread(target=run_cache_thread, daemon=True)
+    cache_thread.start()
+
+
+# =====================
 # Start Button Click Handler (Cancel logic)
 # =====================
 
 def handle_cancel_click(e, main_container):
-    """
-    Handle the Cancel button click - terminate running process.
-
-    Args:
-        e: Flet event
-        main_container: Main UI container
-
-    Returns:
-        True if process was cancelled, False if no process was running
-    """
-    from musubi_ltx2 import handle_musubi_model as handle_ltx_model
-
     training_proc = None
 
-    # Try to get training_proc from LTX2 specific container
-    try:
-        if hasattr(e.page, 'training_tab_container'):
-            training_tab = e.page.training_tab_container
-            # Check if this is LTX2 by checking the config
-            last_config_path = getattr(training_tab, 'last_config_path', None)
-            if last_config_path and os.path.exists(last_config_path):
-                if handle_ltx_model(last_config_path):
-                    training_proc = getattr(training_tab, 'training_proc', None)
-                    # Also check main_container as backup
-                    if training_proc is None:
-                        training_proc = getattr(main_container, 'training_proc', None)
-    except Exception:
-        pass
+    # Try to get training_proc from training_tab_container
+    if hasattr(e.page, 'training_tab_container'):
+        training_proc = getattr(e.page.training_tab_container, 'training_proc', None)
 
-    # Fallback to main_container if not found
+    # Fallback to main_container
     if training_proc is None:
         training_proc = getattr(main_container, 'training_proc', None)
 
@@ -178,18 +296,12 @@ def handle_cancel_click(e, main_container):
             alive = False
 
         if alive:
-            # First, set training_proc to None so the polling loop detects cancellation immediately
-            try:
-                if hasattr(e.page, 'training_tab_container'):
-                    e.page.training_tab_container.training_proc = None
-                main_container.training_proc = None
-            except Exception:
-                pass
+            # Set training_proc to None first
+            if hasattr(e.page, 'training_tab_container'):
+                e.page.training_tab_container.training_proc = None
+            main_container.training_proc = None
 
-            # Then terminate the process
             terminate_process(training_proc, main_container, e.page)
-
-            # Reset button to Start
             reset_to_start_button(main_container, None, e.page)
             return True
 
@@ -225,8 +337,6 @@ async def run_ltx2_training_flow(
         page: Flet page
         trust_cache_checkbox: Checkbox reference
     """
-    from musubi_ltx2 import handle_musubi_model as handle_ltx_model
-
     # Get monitor components
     monitor_content = getattr(training_tab_container, 'monitor_page_content', None)
     training_console_text = getattr(monitor_content, 'training_console_text', None)
@@ -282,22 +392,163 @@ async def run_ltx2_training_flow(
     else:
         mode = 'full'
 
-    # Run the musubi workflow (all logic handled in musubi_ltx2.py)
-    proc = run_musubi_ltx2_workflow(
-        last_config_path=last_config_path,
-        musubi_config_path=musubi_config_path,
-        mode=mode,
-        resume_last=resume_last,
-        training_console_text=training_console_text,
-        main_container=main_container,
-        page=page,
-        slider_config_path=slider_config_path
-    )
+    # Run using musubi_run wrapper
+    runner = create_runner(last_config_path)
+    dataset_config = musubi_config_path
 
-    # Update UI based on result
-    if proc is not None:
-        # Process started - update button to Stop
+    # Check if training is supported for this model
+    if not runner.run_handler:
+        add_info_message(training_console_text, f"\n[Info] Training not implemented for {runner.model_type} yet\n")
+        add_info_message(training_console_text, f"\n[Info] Running cache commands for {runner.model_type}...\n")
+
+        # Run cache commands using the shared function
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text)
+        return
+
+    # Find resume path if needed
+    resume_path = None
+    if resume_last:
+        from musubi_utils import find_last_state_directory
+        output_dir = runner.get_config().get('model', {}).get('output_dir', 'output/ltx2_lora')
+        output_name = runner.get_config().get('model', {}).get('name', '')
+        resume_path = find_last_state_directory(output_dir, output_name)
+        if resume_path:
+            add_info_message(training_console_text, f"\n[Resume] Found state: {resume_path}\n")
+        else:
+            add_warning_message(training_console_text, f"\n[Resume] No state found\n")
+
+    # Check if cache_only mode - run cache commands instead of training
+    if mode == 'cache_only':
+        add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running cache commands\n")
+        if training_console_text.page:
+            training_console_text.update()
+        # Run cache commands using the shared function
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text)
+        return
+
+    # Build training command
+    cmd = runner.get_training_command(dataset_config, slider_config_path, resume_path)
+
+    # Print the training command for reference (sorted and formatted)
+    add_info_message(training_console_text, f"\n[Info] Training command:\n")
+
+    # Keep accelerate launch and script path at start, sort the rest
+    base_cmd = []
+    flags = []
+    i = 0
+    # Skip 'accelerate', 'launch', and --num_cpu_threads_per_process + its value
+    while i < len(cmd):
+        base_cmd.append(cmd[i])
+        if cmd[i] == '--num_cpu_threads_per_process' and i + 1 < len(cmd):
+            base_cmd.append(cmd[i + 1])
+            i += 2
+        elif cmd[i].endswith('.py'):
+            # Script path - include it, then rest are flags
+            i += 1
+            break
+        else:
+            i += 1
+
+    # Remaining items are flags
+    while i < len(cmd):
+        flags.append(cmd[i])
+        i += 1
+
+    # Sort flags alphabetically (group --flag with its value(s))
+    def sort_flags(flags_list):
+        flag_pairs = []
+        i = 0
+        while i < len(flags_list):
+            item = flags_list[i]
+            if item.startswith('--') and i + 1 < len(flags_list) and not flags_list[i + 1].startswith('--'):
+                # Check if this is --optimizer_args with multiple quoted values
+                if item == '--optimizer_args':
+                    # Collect all following quoted strings (values that don't start with --)
+                    values = []
+                    j = i + 1
+                    while j < len(flags_list) and not flags_list[j].startswith('--'):
+                        values.append(flags_list[j])
+                        j += 1
+                    flag_pairs.append((item, values))
+                    i = j
+                else:
+                    # Single value
+                    flag_pairs.append((item, [flags_list[i + 1]]))
+                    i += 2
+            else:
+                flag_pairs.append((item, []))
+                i += 1
+        flag_pairs.sort(key=lambda x: x[0])
+        result = []
+        for flag, values in flag_pairs:
+            result.append(flag)
+            result.extend(values)
+        return result
+
+    sorted_flags = sort_flags(flags)
+    formatted_cmd = base_cmd + sorted_flags
+
+    # Print each flag on new line (flag and value(s) together)
+    add_info_message(training_console_text, f"{formatted_cmd[0]} {formatted_cmd[1]} \\\n")
+    i = 2
+    while i < len(formatted_cmd):
+        # Check if this is a flag with values
+        if formatted_cmd[i].startswith('--') and i + 1 < len(formatted_cmd) and not formatted_cmd[i + 1].startswith('--'):
+            # Collect all values for this flag
+            flag_line = f"    {formatted_cmd[i]}"
+            i += 1
+            while i < len(formatted_cmd) and not formatted_cmd[i].startswith('--'):
+                flag_line += f" {formatted_cmd[i]}"
+                i += 1
+            # Check if this is the last line
+            if i >= len(formatted_cmd):
+                add_info_message(training_console_text, f"{flag_line}\n")
+            else:
+                add_info_message(training_console_text, f"{flag_line} \\\n")
+        else:
+            # Standalone flag or value
+            if i == len(formatted_cmd) - 1:
+                add_info_message(training_console_text, f"    {formatted_cmd[i]}\n")
+            else:
+                add_info_message(training_console_text, f"    {formatted_cmd[i]} \\\n")
+            i += 1
+    if training_console_text.page:
+        training_console_text.update()
+
+    # Execute with proper process handling
+    import subprocess
+    try:
+        # Create process group for clean termination
+        creation_flags = {}
+        if os.name == 'posix':
+            creation_flags['preexec_fn'] = os.setsid
+        else:
+            creation_flags['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=runner.project_root,
+            **creation_flags
+        )
+
+        # Store process reference
+        main_container.training_proc = proc
+        training_tab_container.training_proc = proc
+
+        # Start output streaming
+        try:
+            from flet_app.ui.training.output_manager import start_ltx_output_streamer
+            start_ltx_output_streamer(proc, training_console_text, main_container=main_container, page=page)
+        except ImportError:
+            logger.error("Could not import output streamer")
+
         set_button_state(main_container, "Stop", page)
-    else:
-        # No process started - reset button
+        return
+    except Exception as e:
+        add_error_message(training_console_text, f"\n[Error] Failed to start training: {e}\n")
+        logger.error(f"Failed to start training: {e}")
         reset_to_start_button(main_container, training_tab_container, page)
