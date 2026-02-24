@@ -5,8 +5,16 @@ This module handles building commands for LTX-Video-2 training operations.
 """
 
 import os
+import logging
 from typing import Dict, List, Optional
 from pathlib import Path
+
+try:
+    import safetensors.torch
+except ImportError:
+    safetensors = None
+
+logger = logging.getLogger(__name__)
 
 
 class LTX2Run:
@@ -82,6 +90,112 @@ class LTX2Run:
             if arg:
                 result.append(arg.replace(';', ','))
         return result
+
+    # ==========================================================================
+    # LoRA Rank Detection & Conversion Helpers
+    # ==========================================================================
+
+    def get_lora_rank(self, file_path: str) -> int:
+        """
+        Detect the rank of a LoRA/LoKR checkpoint.
+
+        Returns the rank (dimension of lora_down/lora_A/lokr_w1), or 0 if unable to detect.
+        """
+        if safetensors is None:
+            logger.warning("safetensors not available, cannot detect LoRA rank")
+            return 0
+
+        try:
+            state_dict = safetensors.torch.load_file(file_path)
+            if not state_dict:
+                return 0
+
+            # Look for lora_down or lora_A weight to determine rank
+            for key in state_dict.keys():
+                # Training format: lora_unet_model_*.lora_down.weight
+                if key.endswith('.lora_down.weight'):
+                    return state_dict[key].shape[0]
+                # ComfyUI format: diffusion_model.*.lora_A.weight
+                elif key.endswith('.lora_A.weight'):
+                    return state_dict[key].shape[0]
+                # LoKR format: lokr_w1_a, lokr_w1_b, lokr_w2_a, lokr_w2_b
+                # For lokr_w1_b and lokr_w2_a, rank is typically the last dimension
+                # For lokr_w1_a and lokr_w2_b, rank is typically the first dimension
+                elif key.endswith('.lokr_w1_b'):
+                    # lokr_w1_b shape is [out_features, rank]
+                    return state_dict[key].shape[1]
+                elif key.endswith('.lokr_w2_a'):
+                    # lokr_w2_a shape is [rank, dim]
+                    return state_dict[key].shape[0]
+                elif key.endswith('.lokr_w1_a'):
+                    # lokr_w1_a shape - could be [rank, in_features] or [out_features, rank]
+                    # Use smaller dimension as rank
+                    shape = state_dict[key].shape
+                    return min(shape)
+                elif key.endswith('.lokr_w2_b'):
+                    # lokr_w2_b shape - could be [rank, out_features] or [in_features, rank]
+                    # Use smaller dimension as rank
+                    shape = state_dict[key].shape
+                    return min(shape)
+
+            return 0
+        except Exception as e:
+            logger.warning(f"Error detecting LoRA rank for {file_path}: {e}")
+            return 0
+
+    def rerank_training_format_lora(self, file_path: str, target_rank: int) -> Optional[str]:
+        """
+        Rerank a training format LoRA checkpoint to a different rank.
+
+        Creates a new file with _rank{target_rank} suffix.
+
+        Returns the path to the new file, or None if failed.
+        """
+        import subprocess
+        import sys
+
+        try:
+            # Determine output path
+            input_file = Path(file_path)
+            output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
+
+            # Use the dedicated reranking script
+            sys_path = os.path.join(self.project_root, 'scripts')
+            rerank_script = os.path.join(sys_path, 'rerank_lora.py')
+
+            logger.info(f"Reranking checkpoint: {file_path} -> rank {target_rank}")
+
+            # Build command
+            cmd = [
+                sys.executable,
+                rerank_script,
+                file_path,
+                '--target_rank', str(target_rank),
+                '-o', str(output_path),
+                '--device', 'cuda'
+            ]
+
+            # Run the conversion with timeout
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,  # 3 minute timeout
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Successfully reranked checkpoint: {output_path}")
+                return str(output_path)
+            else:
+                logger.error(f"Reranking failed: {result.stderr}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error("Reranking timed out after 3 minutes")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to rerank LoRA {file_path}: {e}")
+            return None
 
     # ==========================================================================
     # Training Command Building
@@ -246,9 +360,40 @@ class LTX2Run:
         if self.parse_bool(training_strategy.get('separate_audio_buckets', False)):
             cmd.append("--separate_audio_buckets")
 
-        # Load existing checkpoint
-        init_checkpoint = lora.get('init_from_existing', '')
+        # Load existing checkpoint with rank checking
+        # Check both [lora] section and top-level config
+        init_checkpoint = lora.get('init_from_existing', config.get('init_from_existing', ''))
         if init_checkpoint and str(init_checkpoint).lower() not in ('', 'null', 'none'):
+            # Convert to absolute path if relative
+            if not os.path.isabs(init_checkpoint):
+                init_checkpoint = str(self.project_root / init_checkpoint)
+                logger.info(f"Converted relative checkpoint path: {init_checkpoint}")
+
+            # Get target rank from config
+            target_rank = lora.get('rank', 64)
+
+            # Check if the file exists
+            if os.path.exists(init_checkpoint):
+                logger.info(f"Checkpoint file exists: {init_checkpoint}")
+
+                # Check for rank mismatch
+                checkpoint_rank = self.get_lora_rank(init_checkpoint)
+                logger.info(f"Detected checkpoint rank: {checkpoint_rank}, target rank: {target_rank}")
+
+                if checkpoint_rank > 0 and checkpoint_rank != target_rank:
+                    logger.info(f"Rank mismatch detected, reranking from {checkpoint_rank} to {target_rank}")
+                    converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
+
+                    if converted_path:
+                        init_checkpoint = converted_path
+                        logger.info(f"Using converted checkpoint: {init_checkpoint}")
+                    else:
+                        logger.warning(f"Conversion failed, using original checkpoint (may cause errors)")
+                else:
+                    logger.info(f"Checkpoint rank {checkpoint_rank} matches target rank {target_rank}")
+            else:
+                logger.warning(f"Checkpoint file does not exist: {init_checkpoint}")
+
             cmd.extend(["--network_weights", init_checkpoint])
 
         # Network module and rank/alpha

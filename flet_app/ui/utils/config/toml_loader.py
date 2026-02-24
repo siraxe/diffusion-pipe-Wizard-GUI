@@ -424,7 +424,8 @@ def update_ui_from_toml(container: Any, toml_data: dict) -> None:
         'gradient_accumulation_steps', 'gradient_clipping', 'warmup_steps',
         'activation_checkpointing', 'eval_every_n_epochs', 'eval_micro_batch_size_per_gpu',
         'eval_gradient_accumulation_steps', 'save_every_n_epochs', 'checkpoint_every_n_minutes',
-        'partition_method', 'save_dtype', 'caching_batch_size', 'steps_per_print', 'video_clip_mode'
+        'partition_method', 'save_dtype', 'caching_batch_size', 'steps_per_print', 'video_clip_mode',
+        'init_from_existing'
     ]
     for k in top_keys:
         if k in toml_data:

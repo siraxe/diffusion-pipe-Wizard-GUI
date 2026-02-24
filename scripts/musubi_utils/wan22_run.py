@@ -1,7 +1,15 @@
 import os
 import glob
+import logging
 from typing import Dict, List, Optional
 from pathlib import Path
+
+try:
+    import safetensors.torch
+except ImportError:
+    safetensors = None
+
+logger = logging.getLogger(__name__)
 
 
 class WAN22Run:
@@ -69,6 +77,198 @@ class WAN22Run:
             if arg:
                 result.append(arg.replace(';', ','))
         return result
+
+    # ==========================================================================
+    # LoRA Rank Detection & Conversion Helpers
+    # ==========================================================================
+
+    def get_lora_rank(self, file_path: str) -> int:
+        """
+        Detect the rank of a LoRA/LoKR checkpoint.
+
+        Returns the rank (dimension of lora_down/lora_A/lokr_w1), or 0 if unable to detect.
+        """
+        if safetensors is None:
+            logger.warning("safetensors not available, cannot detect LoRA rank")
+            return 0
+
+        try:
+            state_dict = safetensors.torch.load_file(file_path)
+            if not state_dict:
+                return 0
+
+            # Look for lora_down or lora_A weight to determine rank
+            for key in state_dict.keys():
+                # Training format: lora_unet_model_*.lora_down.weight
+                if key.endswith('.lora_down.weight'):
+                    return state_dict[key].shape[0]
+                # ComfyUI format: diffusion_model.*.lora_A.weight
+                elif key.endswith('.lora_A.weight'):
+                    return state_dict[key].shape[0]
+                # LoKR format: lokr_w1_a, lokr_w1_b, lokr_w2_a, lokr_w2_b
+                # For lokr_w1_b and lokr_w2_a, rank is typically the last dimension
+                # For lokr_w1_a and lokr_w2_b, rank is typically the first dimension
+                elif key.endswith('.lokr_w1_b'):
+                    # lokr_w1_b shape is [out_features, rank]
+                    return state_dict[key].shape[1]
+                elif key.endswith('.lokr_w2_a'):
+                    # lokr_w2_a shape is [rank, dim]
+                    return state_dict[key].shape[0]
+                elif key.endswith('.lokr_w1_a'):
+                    # lokr_w1_a shape - could be [rank, in_features] or [out_features, rank]
+                    # Use smaller dimension as rank
+                    shape = state_dict[key].shape
+                    return min(shape)
+                elif key.endswith('.lokr_w2_b'):
+                    # lokr_w2_b shape - could be [rank, out_features] or [in_features, rank]
+                    # Use smaller dimension as rank
+                    shape = state_dict[key].shape
+                    return min(shape)
+
+            return 0
+        except Exception as e:
+            logger.warning(f"Error detecting LoRA rank for {file_path}: {e}")
+            return 0
+
+    def is_comfy_format_lora(self, file_path: str) -> bool:
+        """
+        Check if a LoRA file is in ComfyUI format by examining the keys.
+
+        ComfyUI format keys start with 'diffusion_model.'
+        Training format keys start with 'lora_unet_model_'
+        """
+        if safetensors is None:
+            logger.warning("safetensors not available, cannot check LoRA format")
+            return False
+
+        try:
+            state_dict = safetensors.torch.load_file(file_path)
+            if not state_dict:
+                return False
+
+            # Check first few keys
+            for key in list(state_dict.keys())[:5]:
+                if key.startswith('diffusion_model.'):
+                    return True
+                if key.startswith('lora_unet_model_'):
+                    return False
+
+            # If no clear prefix, check for other ComfyUI patterns
+            for key in state_dict.keys():
+                if '.lora_A.' in key or '.lora_B.' in key:
+                    return True
+
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking LoRA format for {file_path}: {e}")
+            return False
+
+    def rerank_training_format_lora(self, file_path: str, target_rank: int) -> Optional[str]:
+        """
+        Rerank a training format LoRA checkpoint to a different rank.
+
+        Creates a new file with _rank{target_rank} suffix.
+
+        Returns the path to the new file, or None if failed.
+        """
+        import subprocess
+        import sys
+
+        try:
+            # Determine output path
+            input_file = Path(file_path)
+            output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
+
+            # Use the dedicated reranking script
+            sys_path = os.path.join(self.project_root, 'scripts')
+            rerank_script = os.path.join(sys_path, 'rerank_lora.py')
+
+            logger.info(f"Reranking checkpoint: {file_path} -> rank {target_rank}")
+
+            # Build command
+            cmd = [
+                sys.executable,
+                rerank_script,
+                file_path,
+                '--target_rank', str(target_rank),
+                '-o', str(output_path),
+                '--device', 'cuda'
+            ]
+
+            # Run the conversion with timeout
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,  # 3 minute timeout
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Successfully reranked checkpoint: {output_path}")
+                return str(output_path)
+            else:
+                logger.error(f"Reranking failed: {result.stderr}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error("Reranking timed out after 3 minutes")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to rerank LoRA {file_path}: {e}")
+            return None
+
+    def convert_comfy_to_training_with_rank(self, file_path: str, target_rank: int) -> Optional[str]:
+        """
+        Convert ComfyUI format LoRA to training format with optional rank conversion.
+
+        Creates a new file with _rank{target_rank} suffix instead of overwriting.
+
+        Returns the path to the new file, or None if failed.
+        """
+        import subprocess
+        import sys
+
+        try:
+            # Determine output path (with rank suffix)
+            input_file = Path(file_path)
+            output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
+
+            # Path to conversion script
+            sys_path = os.path.join(self.project_root, 'scripts')
+            convert_script = os.path.join(sys_path, 'convert_comfy_to_training_lora.py')
+
+            logger.info(f"Converting ComfyUI LoRA with rank conversion: {file_path} -> rank {target_rank}")
+
+            # Build command
+            cmd = [
+                sys.executable,
+                convert_script,
+                '--input', file_path,
+                '--output', str(output_path),
+                '--rank', str(target_rank),
+            ]
+
+            # Run the conversion with timeout
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,  # 3 minute timeout
+            )
+
+            if result.returncode == 0:
+                logger.info(f"Successfully created converted checkpoint: {output_path}")
+                return str(output_path)
+            else:
+                logger.error(f"ComfyUI conversion failed: {result.stderr}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error("ComfyUI conversion timed out after 3 minutes")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to convert ComfyUI LoRA {file_path}: {e}")
+            return None
 
     def _resolve_dit_path(self, transformer_path: str) -> str:
         if not transformer_path:
@@ -225,14 +425,62 @@ class WAN22Run:
             cmd.extend(["--max_grad_norm", str(max_grad_norm)])
 
         # LoRA settings
+        target_rank = adapter.get('rank', 32)
         cmd.extend([
             "--network_module", "networks.lora_wan",
-            "--network_dim", str(adapter.get('rank', 32)),
+            "--network_dim", str(target_rank),
         ])
 
-        # Init from existing checkpoint
+        # Init from existing checkpoint - with rank checking and conversion
         init_checkpoint = adapter.get('init_from_existing', '')
         if init_checkpoint and str(init_checkpoint).lower() not in ('', 'null', 'none'):
+            # Convert to absolute path if relative
+            if not os.path.isabs(init_checkpoint):
+                init_checkpoint = str(self.project_root / init_checkpoint)
+                logger.info(f"Converted relative checkpoint path: {init_checkpoint}")
+
+            # Check if the file exists
+            if os.path.exists(init_checkpoint):
+                logger.info(f"Checkpoint file exists: {init_checkpoint}")
+
+                # Check if conversion is needed (ComfyUI format OR rank mismatch)
+                needs_conversion = False
+                conversion_reason = ""
+                is_comfy = False
+
+                # Check 1: ComfyUI format
+                if self.is_comfy_format_lora(init_checkpoint):
+                    needs_conversion = True
+                    conversion_reason = "ComfyUI format"
+                    is_comfy = True
+                # Check 2: Rank mismatch (only for training format files)
+                else:
+                    checkpoint_rank = self.get_lora_rank(init_checkpoint)
+                    if checkpoint_rank > 0 and checkpoint_rank != target_rank:
+                        needs_conversion = True
+                        conversion_reason = f"rank mismatch (checkpoint: {checkpoint_rank}, config: {target_rank})"
+                    else:
+                        logger.info(f"Checkpoint rank {checkpoint_rank} matches config rank {target_rank}")
+
+                # Convert if needed
+                if needs_conversion:
+                    if is_comfy:
+                        # ComfyUI format: convert to training format with target rank
+                        converted_path = self.convert_comfy_to_training_with_rank(init_checkpoint, target_rank)
+                    else:
+                        # Training format but rank mismatch: just rerank
+                        converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
+
+                    if converted_path:
+                        init_checkpoint = converted_path
+                        logger.info(f"Using converted checkpoint: {init_checkpoint}")
+                    else:
+                        logger.warning(f"Conversion failed, using original checkpoint: {init_checkpoint}")
+                else:
+                    logger.info(f"Checkpoint is already in correct format and rank")
+            else:
+                logger.warning(f"Checkpoint file does not exist: {init_checkpoint}")
+
             cmd.extend(["--network_weights", init_checkpoint])
 
         # Timestep sampling - read from model section

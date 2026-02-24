@@ -59,9 +59,9 @@ def parse_bool(value) -> bool:
 
 def get_lora_rank(file_path: str) -> int:
     """
-    Detect the rank of a LoRA checkpoint.
+    Detect the rank of a LoRA/LoKR checkpoint.
 
-    Returns the rank (dimension of lora_down/lora_A), or 0 if unable to detect.
+    Returns the rank (dimension of lora_down/lora_A/lokr_w1), or 0 if unable to detect.
     """
     try:
         state_dict = safetensors.torch.load_file(file_path)
@@ -76,6 +76,25 @@ def get_lora_rank(file_path: str) -> int:
             # ComfyUI format: diffusion_model.*.lora_A.weight
             elif key.endswith('.lora_A.weight'):
                 return state_dict[key].shape[0]
+            # LoKR format: lokr_w1_a, lokr_w1_b, lokr_w2_a, lokr_w2_b
+            # For lokr_w1_b and lokr_w2_a, rank is typically the last dimension
+            # For lokr_w1_a and lokr_w2_b, rank is typically the first dimension
+            elif key.endswith('.lokr_w1_b'):
+                # lokr_w1_b shape is [out_features, rank]
+                return state_dict[key].shape[1]
+            elif key.endswith('.lokr_w2_a'):
+                # lokr_w2_a shape is [rank, dim]
+                return state_dict[key].shape[0]
+            elif key.endswith('.lokr_w1_a'):
+                # lokr_w1_a shape - could be [rank, in_features] or [out_features, rank]
+                # Use smaller dimension as rank
+                shape = state_dict[key].shape
+                return min(shape)
+            elif key.endswith('.lokr_w2_b'):
+                # lokr_w2_b shape - could be [rank, out_features] or [in_features, rank]
+                # Use smaller dimension as rank
+                shape = state_dict[key].shape
+                return min(shape)
 
         return 0
     except Exception as e:
@@ -540,7 +559,8 @@ def _build_ltx2_train_args(cfg: dict, musubi_config_path: str, slider_config_pat
         args.append('--separate_audio_buckets')
 
     # Load checkpoint from init_from_existing (formerly load_checkpoint)
-    init_from_existing = l.get('init_from_existing', '')
+    # Check both [lora] section and top-level config
+    init_from_existing = l.get('init_from_existing', cfg.get('init_from_existing', ''))
     if init_from_existing and str(init_from_existing).lower() not in ('', 'null', 'none'):
         original_path = init_from_existing
         # Convert to absolute path if relative
@@ -548,14 +568,20 @@ def _build_ltx2_train_args(cfg: dict, musubi_config_path: str, slider_config_pat
             # Resolve relative to project root
             project_root = resolve_project_root()
             init_from_existing = os.path.abspath(os.path.join(project_root, init_from_existing))
+            msg = f"[Rank Check] Converted relative checkpoint path: {original_path} -> {init_from_existing}\n"
+            _safe_append(console, msg)
             logger.info(f"Converted relative checkpoint path: {original_path} -> {init_from_existing}")
 
         # Check if the file exists
         if os.path.exists(init_from_existing):
+            msg = f"[Rank Check] Checkpoint file exists: {init_from_existing}\n"
+            _safe_append(console, msg)
             logger.info(f"Checkpoint file exists: {init_from_existing}")
 
             # Get target rank from config
             target_rank = l.get('rank', 32)
+            msg = f"[Rank Check] Target rank from config: {target_rank}\n"
+            _safe_append(console, msg)
 
             # Check if conversion is needed (ComfyUI format OR rank mismatch)
             needs_conversion = False
@@ -567,17 +593,27 @@ def _build_ltx2_train_args(cfg: dict, musubi_config_path: str, slider_config_pat
                 needs_conversion = True
                 conversion_reason = "ComfyUI format"
                 is_comfy = True
+                msg = f"[Rank Check] Detected ComfyUI format, conversion needed\n"
+                _safe_append(console, msg)
             # Check 2: Rank mismatch (only for training format files)
             else:
                 checkpoint_rank = get_lora_rank(init_from_existing)
+                msg = f"[Rank Check] Detected checkpoint rank: {checkpoint_rank}\n"
+                _safe_append(console, msg)
                 if checkpoint_rank > 0 and checkpoint_rank != target_rank:
                     needs_conversion = True
                     conversion_reason = f"rank mismatch (checkpoint: {checkpoint_rank}, config: {target_rank})"
+                    msg = f"[Rank Check] {conversion_reason} - conversion needed\n"
+                    _safe_append(console, msg, color='yellow')
                 else:
+                    msg = f"[Rank Check] Checkpoint rank {checkpoint_rank} matches config rank {target_rank}\n"
+                    _safe_append(console, msg)
                     logger.info(f"Checkpoint rank {checkpoint_rank} matches config rank {target_rank}")
 
             # Convert if needed
             if needs_conversion:
+                msg = f"[Rank Check] Starting conversion: {conversion_reason}\n"
+                _safe_append(console, msg, color='yellow')
                 if is_comfy:
                     # ComfyUI format: convert to training format with target rank
                     converted_path = convert_comfy_to_training_with_rank(init_from_existing, target_rank, console, page)
@@ -587,13 +623,24 @@ def _build_ltx2_train_args(cfg: dict, musubi_config_path: str, slider_config_pat
 
                 if converted_path:
                     init_from_existing = converted_path
+                    msg = f"[Rank Check] Using converted checkpoint: {init_from_existing}\n"
+                    _safe_append(console, msg, color='yellow')
                     logger.info(f"Using converted checkpoint: {init_from_existing}")
+                else:
+                    msg = f"[Rank Check] Conversion failed, using original checkpoint\n"
+                    _safe_append(console, msg, color='red')
             else:
+                msg = f"[Rank Check] Checkpoint is already in correct format and rank\n"
+                _safe_append(console, msg)
                 logger.info(f"Checkpoint is already in correct format and rank")
         else:
+            msg = f"[Rank Check] Checkpoint file does not exist: {init_from_existing}\n"
+            _safe_append(console, msg, color='red')
             logger.warning(f"Checkpoint file does not exist: {init_from_existing}")
             # Still add to args - let the training script handle the error
         args.extend(['--network_weights', init_from_existing])
+        msg = f"[Rank Check] Final network_weights path: {init_from_existing}\n"
+        _safe_append(console, msg)
 
     # Network module - use networks.lora_ltx2 for both lora and lokr
     # Note: lycoris.kohya doesn't support LTX-2's transformer architecture (finds 0 modules)
