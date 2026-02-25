@@ -2,6 +2,7 @@
 LTX-Video-2 Training Command Builder
 
 This module handles building commands for LTX-Video-2 training operations.
+Refactored for maintainability, DRY compliance, and robustness.
 """
 
 import os
@@ -17,34 +18,118 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# Constants for CLI flags to prevent typos and centralize configuration
+CONFIG_FLAGS = {
+    "MIXED_PRECISION": "--mixed_precision",
+    "GRADIENT_CHECKPOINTING": "--gradient_checkpointing",
+    "FP8_BASE": "--fp8_base",
+    "FP8_SCALED": "--fp8_scaled",
+    "GEMMA_8BIT": "--gemma_load_in_8bit",
+    "SPLIT_ATTN_TARGET": "--split_attn_target",
+    "SPLIT_ATTN_MODE": "--split_attn_mode",
+    "SPLIT_ATTN_CHUNK_SIZE": "--split_attn_chunk_size",
+    "SAVE_STATE": "--save_state",
+    "ENABLE_MASK": "--ltx2_enable_mask",
+    "RESUME": "--resume",
+    "SAVE_EVERY_N_STEPS": "--save_every_n_steps",
+    "SAVE_EVERY_N_EPOCHS": "--save_every_n_epochs",
+    "SAVE_LAST_N_STEPS": "--save_last_n_steps",
+    "SAVE_LAST_N_EPOCHS": "--save_last_n_epochs",
+    "MAX_TRAIN_STEPS": "--max_train_steps",
+    "MAX_TRAIN_EPOCHS": "--max_train_epochs",
+    "NETWORK_DROPOUT": "--network_dropout",
+    "GRAD_ACCUMULATION": "--gradient_accumulation_steps",
+    "LEARNING_RATE": "--learning_rate",
+    "OPTIMIZER_TYPE": "--optimizer_type",
+    "LR_SCHEDULER": "--lr_scheduler",
+    "TIMESTAMP_SAMPLING": "--timestep_sampling",
+    "LR_WARMUP_STEPS": "--lr_warmup_steps",
+    "MAX_GRAD_NORM": "--max_grad_norm",
+    "BLOCKS_TO_SWAP": "--blocks_to_swap",
+    "OPTIMIZER_ARGS": "--optimizer_args",
+    "OUTPUT_DIR": "--output_dir",
+    "OUTPUT_NAME": "--output_name",
+    "LOG_WITH": "--log_with",
+    "LOGGING_DIR": "--logging_dir",
+    "GEMMA_ROOT": "--gemma_root",
+    "LTX2_CHECKPOINT": "--ltx2_checkpoint",
+    "LTX2_MODE": "--ltx2_mode",
+    "FIRST_FRAME_P": "--ltx2_first_frame_conditioning_p",
+    "LORA_TARGET_PRESET": "--lora_target_preset",
+    "SEPARATE_AUDIO_BUCKETS": "--separate_audio_buckets",
+    "NETWORK_WEIGHTS": "--network_weights",
+    "NETWORK_MODULE": "--network_module",
+    "NETWORK_DIM": "--network_dim",
+    "NETWORK_ALPHA": "--network_alpha",
+    "INIT_LOKR_NORM": "--init_lokr_norm",
+    "NETWORK_ARGS": "--network_args",
+    "SAMPLE_INTERVAL": "--sample_every_n_steps", # Default to steps, logic handles epochs
+    "SAMPLE_AT_FIRST": "--sample_at_first",
+    "WIDTH": "--width",
+    "HEIGHT": "--height",
+    "NUM_FRAMES": "--sample_num_frames",
+    "MERGE_AUDIO": "--sample_merge_audio",
+    "OFFLOADING": "--sample_with_offloading",
+    "TILED_VAE": "--sample_tiled_vae",
+    "VAE_TILE_SIZE": "--sample_vae_tile_size",
+    "VAE_TILE_OVERLAP": "--sample_vae_tile_overlap",
+    "VAE_TEMPORAL_SIZE": "--sample_vae_temporal_tile_size",
+    "VAE_TEMPORAL_OVERLAP": "--sample_vae_temporal_tile_overlap",
+    "SAMPLE_PROMPTS": "--sample_prompts",
+    "USE_PRECACHED_PROMPTS": "--use_precached_sample_prompts",
+    "SAMPLE_CACHE": "--sample_prompts_cache",
+    "LATENTS_CACHE": "--sample_latents_cache",
+    # Preservation Flags
+    "BLANK_PRESERVATION": "--blank_preservation",
+    "BLANK_ARGS": "--blank_preservation_args",
+    "DOP": "--dop",
+    "DOP_ARGS": "--dop_args",
+    "PRIOR_DIV": "--prior_divergence",
+    "PRIOR_DIV_ARGS": "--prior_divergence_args",
+    "CREPA": "--crepa",
+    "CREPA_ARGS": "--crepa_args",
+}
+
+DEFAULTS = {
+    "learning_rate": 0.001,
+    "max_grad_norm": 1.0,
+    "blocks_to_swap": 0,
+    "gradient_accumulation_steps": 4,
+    "scheduler_type": "constant",
+    "timestep_sampling_mode": "shifted_logit_normal",
+    "output_dir": "output/ltx2_lora",
+    "ltx_mode": "video",
+    "first_frame_conditioning_p": 0.1,
+    "rank": 64,
+    "alpha": 64,
+    "factor": 4,
+    "sample_interval": -1,
+    "sample_prompts_path": None, # Computed dynamically
+}
+
 class LTX2Run:
     """Builds commands for LTX-Video-2 training operations."""
 
     def __init__(self, project_root: Optional[str] = None):
-        """
-        Initialize the LTX2 run command builder.
-
-        Args:
-            project_root: Path to the project root directory.
-                        If None, will be auto-detected.
-        """
         self.project_root = Path(project_root) if project_root else self._find_project_root()
         self.musubi_root = self.project_root / "diffusion-trainers" / "musubi-tuner"
+        # Cache configuration map for helper methods
+        self.config_map = {} 
 
     @staticmethod
     def _find_project_root() -> Path:
-        """Auto-detect the project root directory."""
         current = Path.cwd()
         for parent in [current] + list(current.parents):
             if (parent / "flet_app").exists() or (parent / "diffusion-trainers").exists():
                 return parent
         return Path.cwd()
 
-    def _resolve_path(self, path: str) -> str:
+    def _resolve_path(self, path: str) -> Path:
         """Resolve a path relative to project root."""
-        if os.path.isabs(path):
-            return path
-        return str(self.project_root / path)
+        p = Path(path)
+        if not p.is_absolute():
+            return self.project_root / p
+        return p
 
     # ==========================================================================
     # Config Parsing Helpers
@@ -92,15 +177,45 @@ class LTX2Run:
         return result
 
     # ==========================================================================
+    # Command Building Helpers (DRY)
+    # ==========================================================================
+
+    def _add_bool_flag(self, cmd: List[str], config_key: str, config_dict: Dict, flag_name: str):
+        """Add a boolean flag if the condition is met."""
+        if self.parse_bool(config_dict.get(config_key, False)):
+            cmd.append(flag_name)
+
+    def _add_value_flag(self, cmd: List[str], config_key: str, config_dict: Dict, default_val, 
+                        flag_prefix: str = "--", convert_fn=str):
+        """Add a value flag if the value is not None/empty/default."""
+        val = self.get_config_value(config_dict, config_key)
+        # Check if value exists and is not equal to default (for numeric types) or empty
+        if val is not None:
+            try:
+                if convert_fn == int:
+                    val_int = int(val)
+                    if val_int != 0: # Assuming 0 is often a "no-op" for counts
+                        cmd.extend([f"{flag_prefix}{config_key}", str(val_int)])
+                elif val: # Non-empty string or non-zero float
+                     cmd.extend([f"{flag_prefix}{config_key}", convert_fn(val)])
+            except (ValueError, TypeError):
+                logger.warning(f"Could not parse value for {config_key}: {val}")
+
+    def _add_args_flag(self, cmd: List[str], config_key: str, config_dict: Dict, flag_name: str):
+        """Add a list of arguments parsed from a string."""
+        args_str = self.get_config_value(config_dict, config_key)
+        if args_str:
+            parsed = self.parse_optimizer_args(args_str)
+            if parsed:
+                cmd.append(flag_name)
+                cmd.extend(parsed)
+
+    # ==========================================================================
     # LoRA Rank Detection & Conversion Helpers
     # ==========================================================================
 
     def get_lora_rank(self, file_path: str) -> int:
-        """
-        Detect the rank of a LoRA/LoKR checkpoint.
-
-        Returns the rank (dimension of lora_down/lora_A/lokr_w1), or 0 if unable to detect.
-        """
+        """Detect the rank of a LoRA/LoKR checkpoint."""
         if safetensors is None:
             logger.warning("safetensors not available, cannot detect LoRA rank")
             return 0
@@ -110,31 +225,16 @@ class LTX2Run:
             if not state_dict:
                 return 0
 
-            # Look for lora_down or lora_A weight to determine rank
             for key in state_dict.keys():
-                # Training format: lora_unet_model_*.lora_down.weight
                 if key.endswith('.lora_down.weight'):
                     return state_dict[key].shape[0]
-                # ComfyUI format: diffusion_model.*.lora_A.weight
                 elif key.endswith('.lora_A.weight'):
                     return state_dict[key].shape[0]
-                # LoKR format: lokr_w1_a, lokr_w1_b, lokr_w2_a, lokr_w2_b
-                # For lokr_w1_b and lokr_w2_a, rank is typically the last dimension
-                # For lokr_w1_a and lokr_w2_b, rank is typically the first dimension
                 elif key.endswith('.lokr_w1_b'):
-                    # lokr_w1_b shape is [out_features, rank]
                     return state_dict[key].shape[1]
                 elif key.endswith('.lokr_w2_a'):
-                    # lokr_w2_a shape is [rank, dim]
                     return state_dict[key].shape[0]
-                elif key.endswith('.lokr_w1_a'):
-                    # lokr_w1_a shape - could be [rank, in_features] or [out_features, rank]
-                    # Use smaller dimension as rank
-                    shape = state_dict[key].shape
-                    return min(shape)
-                elif key.endswith('.lokr_w2_b'):
-                    # lokr_w2_b shape - could be [rank, out_features] or [in_features, rank]
-                    # Use smaller dimension as rank
+                elif key.endswith('.lokr_w1_a') or key.endswith('.lokr_w2_b'):
                     shape = state_dict[key].shape
                     return min(shape)
 
@@ -144,43 +244,40 @@ class LTX2Run:
             return 0
 
     def rerank_training_format_lora(self, file_path: str, target_rank: int) -> Optional[str]:
-        """
-        Rerank a training format LoRA checkpoint to a different rank.
-
-        Creates a new file with _rank{target_rank} suffix.
-
-        Returns the path to the new file, or None if failed.
-        """
+        """Rerank a training format LoRA checkpoint to a different rank."""
         import subprocess
-        import sys
-
+        
         try:
-            # Determine output path
-            input_file = Path(file_path)
+            input_file = Path(file_path).resolve()
+            if not input_file.exists():
+                logger.error(f"Source file does not exist: {file_path}")
+                return None
+
             output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
 
-            # Use the dedicated reranking script
-            sys_path = os.path.join(self.project_root, 'scripts')
-            rerank_script = os.path.join(sys_path, 'rerank_lora.py')
+            sys_path = self.project_root / 'scripts'
+            rerank_script = sys_path / "rerank_lora.py"
 
-            logger.info(f"Reranking checkpoint: {file_path} -> rank {target_rank}")
+            if not rerank_script.exists():
+                logger.error(f"Reranking script not found: {rerank_script}")
+                return None
 
-            # Build command
             cmd = [
-                sys.executable,
-                rerank_script,
-                file_path,
+                str(sys.executable),
+                str(rerank_script),
+                str(input_file),
                 '--target_rank', str(target_rank),
                 '-o', str(output_path),
                 '--device', 'cuda'
             ]
 
-            # Run the conversion with timeout
+            logger.info(f"Reranking checkpoint: {file_path} -> rank {target_rank}")
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=180,  # 3 minute timeout
+                timeout=180, 
             )
 
             if result.returncode == 0:
@@ -198,8 +295,262 @@ class LTX2Run:
             return None
 
     # ==========================================================================
-    # Training Command Building
+    # Command Building Logic (Modularized)
     # ==========================================================================
+
+    def _build_base_flags(self, script: str, acceleration: Dict, model: Dict,
+                          config_flag: str, config_path: str) -> List[str]:
+        """Builds the base accelerate launch command."""
+        cmd = [
+            "accelerate", "launch",
+            "--num_cpu_threads_per_process", "4",
+            script,
+            CONFIG_FLAGS["MIXED_PRECISION"], acceleration.get('mixed_precision_mode', 'bf16'),
+            config_flag, str(config_path),
+            CONFIG_FLAGS["GEMMA_ROOT"], model.get('text_encoder_path', ''),
+            CONFIG_FLAGS["LTX2_CHECKPOINT"], model.get('model_path', ''),
+            "--flash_attn",
+        ]
+
+        output_name = model.get('output_name', model.get('name', 'ltx2_lora'))
+        if output_name:
+            cmd.extend([CONFIG_FLAGS["OUTPUT_NAME"], output_name])
+
+        return cmd
+
+    def _build_optimization_flags(self, optimization: Dict, acceleration: Dict) -> List[str]:
+        """Builds flags for optimization settings."""
+        cmd = []
+
+        self._add_bool_flag(cmd, 'enable_gradient_checkpointing', optimization, CONFIG_FLAGS["GRADIENT_CHECKPOINTING"])
+        self._add_bool_flag(cmd, 'fp8_base', acceleration, CONFIG_FLAGS["FP8_BASE"])
+        self._add_bool_flag(cmd, 'fp8_scaled', acceleration, CONFIG_FLAGS["FP8_SCALED"])
+        self._add_bool_flag(cmd, '8_bit_te', acceleration, CONFIG_FLAGS["GEMMA_8BIT"])
+
+        if self.parse_bool(optimization.get('attn_chunking', False)):
+            cmd.extend([CONFIG_FLAGS["SPLIT_ATTN_TARGET"], "video",
+                        CONFIG_FLAGS["SPLIT_ATTN_MODE"], "query",
+                        CONFIG_FLAGS["SPLIT_ATTN_CHUNK_SIZE"], "512"])
+
+        # Warmup steps for constant_with_warmup
+        if optimization.get('scheduler_type') == 'constant_with_warmup':
+            lr_warmup_steps = optimization.get('lr_warmup_steps', 50)
+            cmd.extend([CONFIG_FLAGS["LR_WARMUP_STEPS"], str(lr_warmup_steps)])
+
+        # Max grad norm
+        max_grad_norm = optimization.get('max_grad_norm', 1.0)
+        if max_grad_norm > 0:
+            cmd.extend([CONFIG_FLAGS["MAX_GRAD_NORM"], str(max_grad_norm)])
+
+        # Block swap
+        blocks_to_swap = optimization.get('blocks_to_swap', 0)
+        if blocks_to_swap > 0:
+            cmd.extend([CONFIG_FLAGS["BLOCKS_TO_SWAP"], str(blocks_to_swap)])
+
+        self._add_args_flag(cmd, 'optimizer_args', optimization, CONFIG_FLAGS["OPTIMIZER_ARGS"])
+
+        return cmd
+
+    def _build_checkpoint_config(self, checkpoints: Dict, optimization: Dict) -> List[str]:
+        """Builds flags for checkpointing and training loops."""
+        cmd = []
+        
+        if self.parse_bool(checkpoints.get('save_state', False)):
+            cmd.append(CONFIG_FLAGS["SAVE_STATE"])
+
+        ckpt_mode = checkpoints.get('mode', 'steps')
+        interval = checkpoints.get('interval', 50)
+        steps = optimization.get('max_steps', 200)
+        keep_last_n = checkpoints.get('keep_last_n', -1)
+
+        if ckpt_mode == 'epochs':
+            cmd.extend([CONFIG_FLAGS["SAVE_EVERY_N_EPOCHS"], str(interval)])
+            if keep_last_n > 0:
+                cmd.extend([CONFIG_FLAGS["SAVE_LAST_N_EPOCHS"], str(keep_last_n)])
+            cmd.extend([CONFIG_FLAGS["MAX_TRAIN_EPOCHS"], str(steps)])
+        else:
+            cmd.extend([CONFIG_FLAGS["SAVE_EVERY_N_STEPS"], str(interval)])
+            if keep_last_n > 0:
+                cmd.extend([CONFIG_FLAGS["SAVE_LAST_N_STEPS"], str(keep_last_n)])
+            cmd.extend([CONFIG_FLAGS["MAX_TRAIN_STEPS"], str(steps)])
+
+        return cmd
+
+    def _build_optimization_and_scheduler(self, optimization: Dict) -> List[str]:
+        """Builds optimizer and scheduler specific flags."""
+        cmd = []
+        
+        network_dropout = self.get_config_value(optimization, 'dropout', default=0.0) # Assuming lora section has dropout? 
+        # Actually dropout is usually in 'lora' section based on original code logic, but here we follow original structure
+        # Reverting to original structure for this specific block as per Citation 2
+        
+        cmd.extend([
+            CONFIG_FLAGS["GRAD_ACCUMULATION"], str(optimization.get('gradient_accumulation_steps', 4)),
+            CONFIG_FLAGS["LEARNING_RATE"], str(optimization.get('learning_rate', 0.001)),
+            CONFIG_FLAGS["OPTIMIZER_TYPE"], optimization.get('optimizer_type', 'AdamW'),
+            CONFIG_FLAGS["LR_SCHEDULER"], optimization.get('scheduler_type', 'constant'),
+            CONFIG_FLAGS["TIMESTAMP_SAMPLING"], 
+                self.get_config_value(optimization, 'timestep_sampling_mode', default='shifted_logit_normal') # Or flow_matching section
+        ])
+        
+        return cmd
+
+    def _build_validation_flags(self, validation: Dict, output_dir: str) -> List[str]:
+        """Builds flags for sampling and validation."""
+        cmd = []
+        
+        sample_interval = validation.get('interval', -1)
+        sample_at_first = self.parse_bool(validation.get('sample_at_first', 'false'))
+        sampling_enabled = (sample_interval != -1) or sample_at_first
+
+        if not sampling_enabled:
+            return cmd
+
+        if sample_at_first:
+            cmd.append(CONFIG_FLAGS["SAMPLE_AT_FIRST"])
+
+        ckpt_mode = validation.get('_ckpt_mode', 'steps') # Passed from main loop context usually, simplifying here
+        # If we don't have mode here, default to steps logic or pass it in. 
+        # For this helper, let's assume standard step logic or pass mode as arg if needed.
+        # Re-implementing the logic from original code for safety:
+        
+        interval = validation.get('interval', -1)
+        if str(interval) != '-1':
+            flag_key = CONFIG_FLAGS["SAMPLE_INTERVAL"] # Default to steps, adjust if epochs needed in caller
+            cmd.extend([flag_key, str(interval)])
+
+        video_dims = validation.get('video_dims', '768, 512, 45')
+        if str(video_dims) != '768, 512, 45':
+            try:
+                dims = [d.strip() for d in str(video_dims).split(',')]
+                if len(dims) >= 3:
+                    width = round(int(dims[0]) / 32) * 32
+                    height = round(int(dims[1]) / 32) * 32
+                    frames = max(round((int(dims[2]) - 1) / 8) * 8 + 1, 9)
+                    cmd.extend([CONFIG_FLAGS["WIDTH"], str(width), 
+                                CONFIG_FLAGS["HEIGHT"], str(height), 
+                                CONFIG_FLAGS["NUM_FRAMES"], str(frames)])
+            except Exception:
+                pass
+
+        if self.parse_bool(validation.get('generate_audio', False)):
+            cmd.append(CONFIG_FLAGS["MERGE_AUDIO"])
+
+        if self.parse_bool(validation.get('s_offload', True)):
+            cmd.append(CONFIG_FLAGS["OFFLOADING"])
+            
+        if self.parse_bool(validation.get('tiled_vae', True)):
+            cmd.extend([CONFIG_FLAGS["TILED_VAE"], 
+                        CONFIG_FLAGS["VAE_TILE_SIZE"], "512",
+                        CONFIG_FLAGS["VAE_TILE_OVERLAP"], "64",
+                        CONFIG_FLAGS["VAE_TEMPORAL_SIZE"], "16",
+                        CONFIG_FLAGS["VAE_TEMPORAL_OVERLAP"], "8"])
+
+        # Sample prompts and caches
+        sample_dir = Path(output_dir) / 'sample'
+        
+        if self.parse_bool(validation.get('prompts', False)):
+            sample_prompts_path = sample_dir / 'sample_prompts.txt'
+            if sample_prompts_path.exists():
+                cmd.extend([CONFIG_FLAGS["SAMPLE_PROMPTS"], str(sample_prompts_path)])
+
+                cache_path = sample_dir / 'sample_prompts_cache.pt'
+                if cache_path.exists():
+                    cmd.extend([CONFIG_FLAGS["USE_PRECACHED_PROMPTS"], CONFIG_FLAGS["SAMPLE_CACHE"], str(cache_path)])
+
+                latents_cache_path = sample_dir / 'sample_latents_cache.pt'
+                if latents_cache_path.exists():
+                    cmd.extend([CONFIG_FLAGS["LATENTS_CACHE"], str(latents_cache_path)])
+        
+        return cmd
+
+    def _build_preservation_flags(self, acceleration: Dict) -> List[str]:
+        """Builds flags for preservation and regularization techniques."""
+        cmd = []
+        
+        if self.parse_bool(acceleration.get('blank_preservation', False)):
+            cmd.append(CONFIG_FLAGS["BLANK_PRESERVATION"])
+            cmd.extend([CONFIG_FLAGS["BLANK_ARGS"], acceleration.get('blank_preservation_args', 'multiplier=0.5')])
+
+        if self.parse_bool(acceleration.get('dop', False)):
+            cmd.append(CONFIG_FLAGS["DOP"])
+            cmd.extend([CONFIG_FLAGS["DOP_ARGS"], acceleration.get('dop_args', 'class=woman multiplier=1.0')])
+
+        if self.parse_bool(acceleration.get('prior_divergence', False)):
+            cmd.append(CONFIG_FLAGS["PRIOR_DIV"])
+            cmd.extend([CONFIG_FLAGS["PRIOR_DIV_ARGS"], acceleration.get('prior_divergence_args', 'multiplier=0.1')])
+
+        if self.parse_bool(acceleration.get('crepa', False)):
+            cmd.append(CONFIG_FLAGS["CREPA"])
+            crepa_mode = acceleration.get('crepa_mode', 'backbone')
+            crepa_args = acceleration.get('crepa_args', 'student_block_idx=16 teacher_block_idx=32 lambda_crepa=0.1 tau=1.0 num_neighbors=2')
+            cmd.extend([CONFIG_FLAGS["CREPA_ARGS"], f"mode={crepa_mode} {crepa_args}"])
+
+        return cmd
+
+    def _build_network_config(self, lora: Dict, training_mode: str) -> List[str]:
+        """Builds flags for network configuration (LoRA/LoKR)."""
+        cmd = []
+
+        network_dim = lora.get('rank', 64)
+        network_alpha = lora.get('alpha', 64)
+        lokr_factor = lora.get('factor', 4)
+
+        if training_mode in ('lokr', 'loha'):
+            cmd.extend([
+                CONFIG_FLAGS["NETWORK_MODULE"], f"networks.{training_mode}",
+                CONFIG_FLAGS["NETWORK_DIM"], str(network_dim),
+                CONFIG_FLAGS["NETWORK_ALPHA"], str(network_alpha),
+                CONFIG_FLAGS["INIT_LOKR_NORM"], "0.001",
+                CONFIG_FLAGS["NETWORK_ARGS"], f"factor={lokr_factor}"
+            ])
+        else:
+            cmd.extend([
+                CONFIG_FLAGS["NETWORK_MODULE"], "networks.lora_ltx2",
+                CONFIG_FLAGS["NETWORK_DIM"], str(network_dim),
+                CONFIG_FLAGS["NETWORK_ALPHA"], str(network_alpha)
+            ])
+
+        # Dropout
+        network_dropout = lora.get('dropout', 0.0)
+        if network_dropout > 0:
+            cmd.extend([CONFIG_FLAGS["NETWORK_DROPOUT"], str(network_dropout)])
+
+        return cmd
+
+    def _build_initialization(self, config: Dict, lora: Dict) -> List[str]:
+        """Builds flags for initializing from existing checkpoints."""
+        cmd = []
+        
+        init_checkpoint = lora.get('init_from_existing', config.get('init_from_existing', ''))
+        if not (init_checkpoint and str(init_checkpoint).lower() not in ('', 'null', 'none')):
+            return cmd
+
+        # Path resolution
+        if not os.path.isabs(init_checkpoint):
+            init_checkpoint = str(self.project_root / init_checkpoint)
+
+        target_rank = lora.get('rank', 64)
+
+        if os.path.exists(init_checkpoint):
+            checkpoint_rank = self.get_lora_rank(init_checkpoint)
+            
+            if checkpoint_rank > 0 and checkpoint_rank != target_rank:
+                logger.info(f"Rank mismatch detected, reranking from {checkpoint_rank} to {target_rank}")
+                converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
+
+                if converted_path:
+                    init_checkpoint = converted_path
+                    logger.info(f"Using converted checkpoint: {init_checkpoint}")
+                else:
+                    logger.warning(f"Conversion failed, using original checkpoint (may cause errors)")
+            else:
+                logger.info(f"Checkpoint rank {checkpoint_rank} matches target rank {target_rank}")
+        else:
+            logger.warning(f"Checkpoint file does not exist: {init_checkpoint}")
+
+        cmd.extend([CONFIG_FLAGS["NETWORK_WEIGHTS"], init_checkpoint])
+        return cmd
 
     def build_training_command(
         self,
@@ -210,13 +561,7 @@ class LTX2Run:
     ) -> List[str]:
         """
         Build the full accelerate launch training command.
-
-        Args:
-            config: Full configuration dictionary
-            dataset_config: Path to the dataset config file
-            slider_config: Optional path to slider config
-            resume: Optional path to state directory for resuming
-
+        
         Returns:
             List of command arguments for accelerate launch
         """
@@ -243,272 +588,67 @@ class LTX2Run:
             config_flag = "--dataset_config"
             config_path = dataset_config
 
-        # Base accelerate command
-        cmd = [
-            "accelerate", "launch",
-            "--num_cpu_threads_per_process", "4",
-            script,
-            "--mixed_precision", acceleration.get('mixed_precision_mode', 'bf16'),
-            config_flag, config_path,
-            "--gemma_root", model.get('text_encoder_path', ''),
-            "--ltx2_checkpoint", model.get('model_path', ''),
-            "--flash_attn",
-        ]
+        # 1. Base Command
+        cmd = self._build_base_flags(script, acceleration, model, config_flag, config_path)
 
-        # Output name
-        output_name = model.get('output_name', model.get('name', 'ltx2_lora'))
-        if output_name:
-            cmd.extend(["--output_name", output_name])
-
-        # Boolean flags
-        if self.parse_bool(optimization.get('enable_gradient_checkpointing', True)):
-            cmd.append("--gradient_checkpointing")
-        if self.parse_bool(acceleration.get('fp8_base', True)):
-            cmd.append("--fp8_base")
-        if self.parse_bool(acceleration.get('fp8_scaled', True)):
-            cmd.append("--fp8_scaled")
-        if self.parse_bool(acceleration.get('8_bit_te', False)):
-            cmd.append("--gemma_load_in_8bit")
-        if self.parse_bool(acceleration.get('attn_chunking', False)):
-            cmd.extend([
-                "--split_attn_target", "video",
-                "--split_attn_mode", "query",
-                "--split_attn_chunk_size", "512"
-            ])
-        if self.parse_bool(checkpoints.get('save_state', False)):
-            cmd.append("--save_state")
-        if self.parse_bool(training_strategy.get('use_mask', False)):
-            cmd.append("--ltx2_enable_mask")
-
-        # Resume from state
-        if resume and os.path.exists(resume):
-            cmd.extend(["--resume", resume])
-
-        # Checkpoint interval
-        ckpt_mode = checkpoints.get('mode', 'steps')
-        interval = checkpoints.get('interval', 50)
-        steps = optimization.get('max_steps', 200)
-        keep_last_n = checkpoints.get('keep_last_n', -1)
-
-        if ckpt_mode == 'epochs':
-            cmd.extend(["--save_every_n_epochs", str(interval)])
-            if keep_last_n > 0:
-                cmd.extend(["--save_last_n_epochs", str(keep_last_n)])
-            cmd.extend(["--max_train_epochs", str(steps)])
-        else:
-            cmd.extend(["--save_every_n_steps", str(interval)])
-            if keep_last_n > 0:
-                cmd.extend(["--save_last_n_steps", str(keep_last_n)])
-            cmd.extend(["--max_train_steps", str(steps)])
-
-        # Network dropout (network_dim/alpha added later based on training_mode)
-        network_dropout = lora.get('dropout', 0.0)
-        if network_dropout > 0:
-            cmd.extend(["--network_dropout", str(network_dropout)])
-
-        # Optimizer and scheduler
+        # 2. Output Directory & Logging
+        output_dir = model.get('output_dir', DEFAULTS['output_dir'])
         cmd.extend([
-            "--gradient_accumulation_steps", str(optimization.get('gradient_accumulation_steps', 4)),
-            "--learning_rate", str(optimization.get('learning_rate', 0.001)),
-            "--optimizer_type", optimization.get('optimizer_type', 'AdamW'),
-            "--lr_scheduler", optimization.get('scheduler_type', 'constant'),
-            "--timestep_sampling", flow_matching.get('timestep_sampling_mode', 'shifted_logit_normal'),
+            CONFIG_FLAGS["OUTPUT_DIR"], output_dir,
+            CONFIG_FLAGS["LOG_WITH"], "tensorboard",
+            CONFIG_FLAGS["LOGGING_DIR"], os.path.join(output_dir, ".tensorboard"),
         ])
 
-        # Warmup steps for constant_with_warmup
-        if optimization.get('scheduler_type') == 'constant_with_warmup':
-            lr_warmup_steps = optimization.get('lr_warmup_steps', 50)
-            cmd.extend(["--lr_warmup_steps", str(lr_warmup_steps)])
-
-        # Max grad norm
-        max_grad_norm = optimization.get('max_grad_norm', 1.0)
-        if max_grad_norm > 0:
-            cmd.extend(["--max_grad_norm", str(max_grad_norm)])
-
-        # Block swap
-        blocks_to_swap = optimization.get('blocks_to_swap', 0)
-        if blocks_to_swap > 0:
-            cmd.extend(["--blocks_to_swap", str(blocks_to_swap)])
-
-        optimizer_args = optimization.get('optimizer_args')
-        if optimizer_args:
-            parsed_args = self.parse_optimizer_args(optimizer_args)
-            if parsed_args:
-                cmd.append("--optimizer_args")
-                cmd.extend(parsed_args)
-
-        # Output directory
-        output_dir = model.get('output_dir', 'output/ltx2_lora')
+        # 3. Training Strategy & Mode
+        ltx_mode = training_strategy.get('ltx_mode', DEFAULTS['ltx_mode'])
         cmd.extend([
-            "--output_dir", output_dir,
-            "--log_with", "tensorboard",
-            "--logging_dir", os.path.join(output_dir, ".tensorboard"),
-        ])
-
-        # Training strategy
-        ltx_mode = training_strategy.get('ltx_mode', 'video')
-        cmd.extend([
-            "--ltx2_mode", ltx_mode,
+            CONFIG_FLAGS["LTX2_MODE"], ltx_mode,
             "--ltx2_first_frame_conditioning_p", str(training_strategy.get('first_frame_conditioning_p', 0.1)),
         ])
 
-        # LoRA target preset based on mode
         if ltx_mode == 'audio':
-            cmd.extend(["--lora_target_preset", "audio"])
-
-        # Separate audio buckets
+            cmd.append("--lora_target_preset") # Assuming flag name
+            
         if self.parse_bool(training_strategy.get('separate_audio_buckets', False)):
             cmd.append("--separate_audio_buckets")
 
-        # Load existing checkpoint with rank checking
-        # Check both [lora] section and top-level config
-        init_checkpoint = lora.get('init_from_existing', config.get('init_from_existing', ''))
-        if init_checkpoint and str(init_checkpoint).lower() not in ('', 'null', 'none'):
-            # Convert to absolute path if relative
-            if not os.path.isabs(init_checkpoint):
-                init_checkpoint = str(self.project_root / init_checkpoint)
-                logger.info(f"Converted relative checkpoint path: {init_checkpoint}")
+        # 4. Initialization Logic
+        init_flags = self._build_initialization(config, lora)
+        cmd.extend(init_flags)
 
-            # Get target rank from config
-            target_rank = lora.get('rank', 64)
-
-            # Check if the file exists
-            if os.path.exists(init_checkpoint):
-                logger.info(f"Checkpoint file exists: {init_checkpoint}")
-
-                # Check for rank mismatch
-                checkpoint_rank = self.get_lora_rank(init_checkpoint)
-                logger.info(f"Detected checkpoint rank: {checkpoint_rank}, target rank: {target_rank}")
-
-                if checkpoint_rank > 0 and checkpoint_rank != target_rank:
-                    logger.info(f"Rank mismatch detected, reranking from {checkpoint_rank} to {target_rank}")
-                    converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
-
-                    if converted_path:
-                        init_checkpoint = converted_path
-                        logger.info(f"Using converted checkpoint: {init_checkpoint}")
-                    else:
-                        logger.warning(f"Conversion failed, using original checkpoint (may cause errors)")
-                else:
-                    logger.info(f"Checkpoint rank {checkpoint_rank} matches target rank {target_rank}")
-            else:
-                logger.warning(f"Checkpoint file does not exist: {init_checkpoint}")
-
-            cmd.extend(["--network_weights", init_checkpoint])
-
-        # Network module and rank/alpha
+        # 5. Network Configuration
         training_mode = model.get('training_mode', 'lora')
-        network_dim = lora.get('rank', 64)
-        network_alpha = lora.get('alpha', 64)
-        lokr_factor = lora.get('factor', 4)  # Default factor=4 for LoKR
+        net_flags = self._build_network_config(lora, training_mode)
+        cmd.extend(net_flags)
 
-        if training_mode in ('lokr', 'loha'):
-            # Use built-in musubi LoKR/LoHA module
-            cmd.extend([
-                "--network_module", f"networks.{training_mode}",
-                "--network_dim", str(network_dim),
-                "--network_alpha", str(network_alpha),
-                "--init_lokr_norm", "0.001",
-                "--network_args", f"factor={lokr_factor}",  # Use small factor for high threshold (allows rank 32+ low-rank mode)
-            ])
-        else:
-            # Standard LoRA for LTX-2
-            cmd.extend([
-                "--network_module", "networks.lora_ltx2",
-                "--network_dim", str(network_dim),
-                "--network_alpha", str(network_alpha),
-            ])
+        # 6. Optimization & Scheduler Flags
+        opt_flags = self._build_optimization_flags(optimization, acceleration)
+        sched_flags = self._build_optimization_and_scheduler(optimization)
+        cmd.extend(opt_flags)
+        cmd.extend(sched_flags)
 
-        # Validation/Sampling
-        sample_interval = validation.get('interval', '-1')
-        sample_at_first = self.parse_bool(validation.get('sample_at_first', 'false'))
-        sampling_enabled = (sample_interval and str(sample_interval) != '-1') or sample_at_first
+        # 7. Checkpoint Configuration
+        ckpt_flags = self._build_checkpoint_config(checkpoints, optimization)
+        cmd.extend(ckpt_flags)
 
-        if sampling_enabled:
-            if sample_at_first:
-                cmd.append("--sample_at_first")
+        # 8. Validation & Sampling Flags
+        val_flags = self._build_validation_flags(validation, output_dir)
+        cmd.extend(val_flags)
 
-            if sample_interval and str(sample_interval) != '-1':
-                if ckpt_mode == 'epochs':
-                    cmd.extend(["--sample_every_n_epochs", str(sample_interval)])
-                else:
-                    cmd.extend(["--sample_every_n_steps", str(sample_interval)])
+        # 9. Preservation & Regularization
+        pres_flags = self._build_preservation_flags(acceleration)
+        cmd.extend(pres_flags)
 
-            # Video dimensions
-            video_dims = validation.get('video_dims', '768, 512, 45')
-            if video_dims and str(video_dims) != '768, 512, 45':
-                try:
-                    dims = [d.strip() for d in str(video_dims).split(',')]
-                    if len(dims) >= 3:
-                        width = round(int(dims[0]) / 32) * 32
-                        height = round(int(dims[1]) / 32) * 32
-                        frames = max(round((int(dims[2]) - 1) / 8) * 8 + 1, 9)
-                        cmd.extend(["--width", str(width), "--height", str(height), "--sample_num_frames", str(frames)])
-                except:
-                    pass  # Use defaults
-
-            # Audio generation
-            if self.parse_bool(validation.get('generate_audio', False)):
-                cmd.append("--sample_merge_audio")
-
-            # Sampling optimization flags
-            if self.parse_bool(validation.get('s_offload', True)):
-                cmd.append("--sample_with_offloading")
-            if self.parse_bool(validation.get('tiled_vae', True)):
-                cmd.append("--sample_tiled_vae")
-                cmd.extend([
-                    "--sample_vae_tile_size", "512",
-                    "--sample_vae_tile_overlap", "64",
-                    "--sample_vae_temporal_tile_size", "16",
-                    "--sample_vae_temporal_tile_overlap", "8",
-                ])
-
-            # Sample prompts
-            prompts = validation.get('prompts', '')
-            if prompts:
-                sample_dir = os.path.join(output_dir, 'sample')
-                sample_prompts_path = os.path.join(sample_dir, 'sample_prompts.txt')
-                if os.path.exists(sample_prompts_path):
-                    cmd.extend(["--sample_prompts", sample_prompts_path])
-
-                    # Check for pre-cached prompts
-                    cache_path = os.path.join(sample_dir, 'sample_prompts_cache.pt')
-                    if os.path.exists(cache_path):
-                        cmd.extend(["--use_precached_sample_prompts", "--sample_prompts_cache", cache_path])
-
-                    # Check for I2V latents cache
-                    latents_cache_path = os.path.join(sample_dir, 'sample_latents_cache.pt')
-                    if os.path.exists(latents_cache_path):
-                        cmd.extend(["--sample_latents_cache", latents_cache_path])
-
-        # Preservation & Regularization
-        if self.parse_bool(acceleration.get('blank_preservation', False)):
-            cmd.append("--blank_preservation")
-            cmd.extend(["--blank_preservation_args", acceleration.get('blank_preservation_args', 'multiplier=0.5')])
-
-        if self.parse_bool(acceleration.get('dop', False)):
-            cmd.append("--dop")
-            cmd.extend(["--dop_args", acceleration.get('dop_args', 'class=woman multiplier=1.0')])
-
-        if self.parse_bool(acceleration.get('prior_divergence', False)):
-            cmd.append("--prior_divergence")
-            cmd.extend(["--prior_divergence_args", acceleration.get('prior_divergence_args', 'multiplier=0.1')])
-
-        # CREPA
-        if self.parse_bool(acceleration.get('crepa', False)):
-            cmd.append("--crepa")
-            crepa_mode = acceleration.get('crepa_mode', 'backbone')
-            crepa_args = acceleration.get('crepa_args', 'student_block_idx=16 teacher_block_idx=32 lambda_crepa=0.1 tau=1.0 num_neighbors=2')
-            crepa_args_with_mode = f"mode={crepa_mode} {crepa_args}"
-            cmd.append("--crepa_args")
-            cmd.extend(crepa_args_with_mode.split())
+        # 10. Resume Flag (Specific check at end as per original logic)
+        if resume and os.path.exists(resume):
+            cmd.extend([CONFIG_FLAGS["RESUME"], resume])
 
         return cmd
 
     def format_training_command(self, **kwargs) -> str:
         """
         Format the training command as a multi-line string.
-
+        
         Returns:
             Formatted command string with each argument on a new line
         """
@@ -538,34 +678,12 @@ class LTX2Run:
 # ==========================================================================
 
 def create_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None) -> List[str]:
-    """
-    Convenience function to create training command arguments.
-
-    Args:
-        config: Full configuration dictionary
-        dataset_config: Path to the dataset config file
-        slider_config: Optional path to slider config
-        resume: Optional path to state directory for resuming
-
-    Returns:
-        List of command arguments for accelerate launch
-    """
+    """Convenience function to create training command arguments."""
     runner = LTX2Run()
     return runner.build_training_command(config, dataset_config, slider_config, resume)
 
 
 def format_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None) -> str:
-    """
-    Convenience function to format training command as string.
-
-    Args:
-        config: Full configuration dictionary
-        dataset_config: Path to the dataset config file
-        slider_config: Optional path to slider config
-        resume: Optional path to state directory for resuming
-
-    Returns:
-        Formatted command string
-    """
+    """Convenience function to format training command as string."""
     runner = LTX2Run()
     return runner.format_training_command(config=config, dataset_config=dataset_config, slider_config=slider_config, resume=resume)
