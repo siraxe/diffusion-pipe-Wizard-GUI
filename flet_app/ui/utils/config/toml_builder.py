@@ -45,10 +45,18 @@ def extract_config_from_controls(control: Any) -> Dict:
             label = getattr(child, 'label', None)
             result_key = FIELD_TO_TOML_MAPPINGS.get(label, label)
             current_visible = getattr(child, 'visible', True)
+            # Extract the key from the dropdown Option object or use the string value directly
+            # (dropdown.value can be an Option object when set from UI, or a string when loaded from TOML)
+            if child.value is None:
+                dropdown_value = None
+            elif hasattr(child.value, 'key'):
+                dropdown_value = child.value.key  # Option object (fresh UI state)
+            else:
+                dropdown_value = child.value  # Already a string (loaded from TOML)
             if label in ALWAYS_INCLUDE_FIELDS:
-                result[result_key] = child.value
+                result[result_key] = dropdown_value
             elif current_visible:
-                result[result_key] = child.value
+                result[result_key] = dropdown_value
         elif isinstance(child, ft.Checkbox):
             if getattr(child, 'visible', True):
                 key = getattr(child, 'data', None) or child.label
@@ -226,7 +234,11 @@ def build_optimizer_section(lines: List[str], cfg: Dict, _get: callable) -> None
     else:
         lines.append("[optimizer]")
 
-    opt_type = _get('optimizer_type_m', _get('optimizer_type', 'adamw_optimi'))
+    # Use optimizer_type_m only for musubi trainer, otherwise use optimizer_type
+    if is_musubi:
+        opt_type = _get('optimizer_type_m', 'AdamW')
+    else:
+        opt_type = _get('optimizer_type', 'adamw_optimi')
     opt_type_lower = str(opt_type).lower()
 
     if is_musubi:
@@ -260,8 +272,12 @@ def build_optimizer_section(lines: List[str], cfg: Dict, _get: callable) -> None
         if schedulefree_c_val and float(schedulefree_c_val) != 0.0:
             lines.append(f"schedulefree_c = {schedulefree_c_val}")
 
-    # Automagic fields
+    # Automagic fields (diffusion-pipe: also write lr for starting lr)
     if is_automagic:
+        if not is_musubi:
+            # Write lr as starting lr for automagic
+            lr_val = _get('lr', 1e-6)
+            lines.append(f"lr = {lr_val}")
         if is_musubi:
             try:
                 from flet_app.ui.utils.config_utils_musubi import build_musubi_optimizer_args_line

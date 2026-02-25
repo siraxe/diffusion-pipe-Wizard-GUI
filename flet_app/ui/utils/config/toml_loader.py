@@ -336,6 +336,25 @@ def apply_all_values(container: Any, label_vals: dict, page: Any) -> None:
     except Exception:
         pass
 
+    # Handle optimizer_type dropdown - trigger visibility updates for automagic/prodigy rows
+    if 'optimizer_type' in label_vals:
+        try:
+            from flet_app.ui.pages.training_config import (
+                optimizer_type_dropdown_ref,
+                on_optimizer_type_change,
+            )
+            if optimizer_type_dropdown_ref and optimizer_type_dropdown_ref.current:
+                # Create a mock event object with the necessary attributes
+                class _E: pass
+                e = _E()
+                setattr(e, 'control', optimizer_type_dropdown_ref.current)
+                setattr(e, 'data', str(label_vals['optimizer_type']))
+                setattr(e, 'page', page)
+                # Call the change handler with from_toml_load=True to update visibility only
+                on_optimizer_type_change(e, from_toml_load=True)
+        except Exception:
+            pass
+
 
 def handle_dataset_selection(toml_data: dict, container: Any, page: Any) -> None:
     """Handle dataset selection based on TOML data."""
