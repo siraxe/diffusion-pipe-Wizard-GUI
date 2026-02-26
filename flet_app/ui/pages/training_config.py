@@ -377,9 +377,9 @@ def get_training_config_page_content():
             "crepa_mode": crepa_mode_dropdown_ref,
             "crepa_args": crepa_args_field_ref,
             # Flux2-specific fields
-            "flux2_vae": flux2_vae_field_ref,
-            "flux2_text_encoders": flux2_text_encoders_field_ref,
-            "flux2_shift": flux2_shift_field_ref,
+            "vae": flux2_vae_field_ref,
+            "text_encoders": flux2_text_encoders_field_ref,
+            "shift": flux2_shift_field_ref,
         }
 
         try:
@@ -436,10 +436,10 @@ def get_training_config_page_content():
             "z_image_vae": z_image_vae_field_ref,
             "z_image_text_encoders": z_image_text_encoders_field_ref,
             "z_image_merge_adapters": z_image_merge_adapters_field_ref,
-            "flux2_diffusion_model": flux2_diffusion_model_field_ref,
-            "flux2_vae": flux2_vae_field_ref,
-            "flux2_text_encoders": flux2_text_encoders_field_ref,
-            "flux2_shift": flux2_shift_field_ref,
+            "diffusion_model": flux2_diffusion_model_field_ref,
+            "vae": flux2_vae_field_ref,
+            "text_encoders": flux2_text_encoders_field_ref,
+            "shift": flux2_shift_field_ref,
         }
 
         # Boolean field mapping
@@ -627,7 +627,7 @@ def get_training_config_page_content():
             llama3_row_ref: "llama3_path",
             clip_row_ref: "clip_path",
             text_encoder_row_ref: "text_encoder_path",
-            flux2_row_ref: "flux2_diffusion_model",
+            flux2_row_ref: "diffusion_model",
             z_image_row_ref: "z_image_diffusion_model",
         }
 
@@ -669,10 +669,10 @@ def get_training_config_page_content():
                 "dropout": dropout_field_ref,
                 "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
                 # Flux2-specific fields
-                "flux2_diffusion_model": flux2_diffusion_model_field_ref,
-                "flux2_vae": flux2_vae_field_ref,
-                "flux2_text_encoders": flux2_text_encoders_field_ref,
-                "flux2_shift": flux2_shift_field_ref,
+                "diffusion_model": flux2_diffusion_model_field_ref,
+                "vae": flux2_vae_field_ref,
+                "text_encoders": flux2_text_encoders_field_ref,
+                "shift": flux2_shift_field_ref,
                 # Z_image-specific fields
                 "z_image_diffusion_model": z_image_diffusion_model_field_ref,
                 "z_image_vae": z_image_vae_field_ref,
@@ -1053,7 +1053,7 @@ def get_training_config_page_content():
                         ],
                         spacing=2,
                         ref=flux2_row_ref,
-                        visible=_should_show_field("flux2_diffusion_model")
+                        visible=_should_show_field("diffusion_model")
                     ),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
@@ -1758,25 +1758,37 @@ def update_z_image_fields_visibility(is_z_image: bool, diffusion_model_value=Non
 
     _update_field_refs_visibility(field_refs, is_z_image, field_values)
 
+    # Also update the row visibility
+    if z_image_row_ref and z_image_row_ref.current:
+        z_image_row_ref.current.visible = is_z_image
+        if z_image_row_ref.current.page:
+            z_image_row_ref.current.update()
+
 def update_flux2_fields_visibility(is_flux2: bool, diffusion_model_value=None, vae_value=None, text_encoders_value=None, shift_value=None):
     """Update visibility and values for flux2 specific fields."""
     field_refs = {
-        "flux2_diffusion_model": flux2_diffusion_model_field_ref,
-        "flux2_vae": flux2_vae_field_ref,
-        "flux2_text_encoders": flux2_text_encoders_field_ref,
-        "flux2_shift": flux2_shift_field_ref,
+        "diffusion_model": flux2_diffusion_model_field_ref,
+        "vae": flux2_vae_field_ref,
+        "text_encoders": flux2_text_encoders_field_ref,
+        "shift": flux2_shift_field_ref,
     }
     field_values = {}
     if diffusion_model_value is not None:
-        field_values["flux2_diffusion_model"] = str(diffusion_model_value)
+        field_values["diffusion_model"] = str(diffusion_model_value)
     if vae_value is not None:
-        field_values["flux2_vae"] = str(vae_value)
+        field_values["vae"] = str(vae_value)
     if text_encoders_value is not None:
-        field_values["flux2_text_encoders"] = str(text_encoders_value)
+        field_values["text_encoders"] = str(text_encoders_value)
     if shift_value is not None:
-        field_values["flux2_shift"] = str(shift_value)
+        field_values["shift"] = str(shift_value)
 
     _update_field_refs_visibility(field_refs, is_flux2, field_values)
+
+    # Also update the row visibility
+    if flux2_row_ref and flux2_row_ref.current:
+        flux2_row_ref.current.visible = is_flux2
+        if flux2_row_ref.current.page:
+            flux2_row_ref.current.update()
 
 def update_musubi_fields_visibility(
     is_musubi: bool,
