@@ -92,6 +92,8 @@ crepa_checkbox_ref = ft.Ref[ft.Checkbox]()
 crepa_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 crepa_args_field_ref = ft.Ref[ft.TextField]()
 sample_slider_range_field_ref = ft.Ref[ft.TextField]()
+i2v_type_dropdown_ref = ft.Ref[ft.Dropdown]()
+sample_each_field_ref = ft.Ref[ft.TextField]()
 adapter_dropdown_ref = ft.Ref[ft.Dropdown]()
 # z_image specific fields
 z_image_diffusion_model_field_ref = ft.Ref[ft.TextField]()
@@ -228,19 +230,34 @@ def sync_dependent_field_visibility():
     Centralized function to sync visibility of all dependent fields based on their checkbox states.
     Called from: on_change handlers, model type changes, and after TOML loading.
     """
-    # Handle sample_slider_range visibility (depends on slider checkbox + model type)
+    # Handle sample_slider_range, i2v_type, sample_each visibility (depends on slider checkbox + model type)
     try:
         slider_checked = slider_checkbox_ref.current.value if slider_checkbox_ref and slider_checkbox_ref.current else False
+        # Get the currently selected model from the dropdown
+        current_model = None
+        if model_type_dropdown_ref and model_type_dropdown_ref.current:
+            current_model = model_type_dropdown_ref.current.value
+        # Only show slider-related fields if slider is checked AND it's visible for this model
+        is_visible_for_model = _should_show_field("sample_slider_range", current_model)
+        should_show = is_visible_for_model and slider_checked
+
+        # sample_slider_range
         if sample_slider_range_field_ref and sample_slider_range_field_ref.current:
-            # Get the currently selected model from the dropdown
-            current_model = None
-            if model_type_dropdown_ref and model_type_dropdown_ref.current:
-                current_model = model_type_dropdown_ref.current.value
-            # Only show sample_slider_range if slider is checked AND it's visible for this model
-            is_visible_for_model = _should_show_field("sample_slider_range", current_model)
-            sample_slider_range_field_ref.current.visible = is_visible_for_model and slider_checked
+            sample_slider_range_field_ref.current.visible = should_show
             if sample_slider_range_field_ref.current.page:
                 sample_slider_range_field_ref.current.update()
+
+        # i2v_type
+        if i2v_type_dropdown_ref and i2v_type_dropdown_ref.current:
+            i2v_type_dropdown_ref.current.visible = should_show
+            if i2v_type_dropdown_ref.current.page:
+                i2v_type_dropdown_ref.current.update()
+
+        # sample_each
+        if sample_each_field_ref and sample_each_field_ref.current:
+            sample_each_field_ref.current.visible = should_show
+            if sample_each_field_ref.current.page:
+                sample_each_field_ref.current.update()
     except Exception:
         pass
 
@@ -352,6 +369,8 @@ def get_training_config_page_content():
             "slider": slider_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             "sample_slider_range": sample_slider_range_field_ref,
+            "i2v_type": i2v_type_dropdown_ref,
+            "sample_each": sample_each_field_ref,
             # Musubi-specific adapter fields
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
@@ -425,6 +444,8 @@ def get_training_config_page_content():
             "max_llama3_seq_len": max_llama3_seq_len_field_ref,
             # Musubi-specific fields
             "sample_slider_range": sample_slider_range_field_ref,
+            "i2v_type": i2v_type_dropdown_ref,
+            "sample_each": sample_each_field_ref,
             # Musubi-specific adapter fields
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
@@ -1193,8 +1214,22 @@ def get_training_config_page_content():
                         create_textfield(
                             "sample_slider_range", "0.0, 1.0, 2.0",
                             hint_text="Slider sample range",
-                            expand=True, col=5, scale=0.8,
+                            expand=True, col=2, scale=0.8,
                             ref=sample_slider_range_field_ref,
+                            visible=False  # Invisible by default (only visible when slider checkbox is checked)
+                        ),
+                        create_dropdown(
+                            "i2v_type",
+                            "jump",
+                            {"jump": "jump", "freeze": "freeze", "fade": "fade", "reverse": "reverse"},
+                            col=1.5, expand=True, scale=0.8, ref=i2v_type_dropdown_ref,
+                            visible=False  # Invisible by default (only visible when slider checkbox is checked)
+                        ),
+                        create_textfield(
+                            "sample_each", "3",
+                            hint_text="Sample each",
+                            expand=True, col=1.5, scale=0.8,
+                            ref=sample_each_field_ref,
                             visible=False  # Invisible by default (only visible when slider checkbox is checked)
                         ),
                     ], spacing=2),

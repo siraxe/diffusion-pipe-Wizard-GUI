@@ -572,6 +572,22 @@ def _build_ltx2_train_args(cfg: dict, musubi_config_path: str, slider_config_pat
             _safe_append(console, msg)
             logger.info(f"Converted relative checkpoint path: {original_path} -> {init_from_existing}")
 
+        # Check if path is a directory and try to find .safetensors file inside
+        if os.path.isdir(init_from_existing):
+            dir_path = init_from_existing
+            # Look for .safetensors files in the directory
+            safetensors_files = [f for f in os.listdir(dir_path) if f.endswith('.safetensors')]
+            if safetensors_files:
+                # Use the first .safetensors file found
+                init_from_existing = os.path.join(dir_path, safetensors_files[0])
+                msg = f"[Rank Check] Directory detected, using found safetensors file: {init_from_existing}\n"
+                _safe_append(console, msg, color='yellow')
+                logger.info(f"Directory detected, using found safetensors file: {init_from_existing}")
+            else:
+                msg = f"[Rank Check] Directory detected but no .safetensors file found inside\n"
+                _safe_append(console, msg, color='yellow')
+                logger.warning(f"Directory detected but no .safetensors file found inside: {dir_path}")
+
         # Check if the file exists
         if os.path.exists(init_from_existing):
             msg = f"[Rank Check] Checkpoint file exists: {init_from_existing}\n"

@@ -205,6 +205,10 @@ def open_unified_popup_dialog(
     overlay_current_rotate = {"rot": None}
     overlay_resize_state = {"pivot_local": (0.0, 0.0), "handle_local": (0.0, 0.0), "center_x": 0.0, "center_y": 0.0}
 
+    # Target overlay state
+    target_overlay_visible = {"val": False}
+    target_overlay_image = {"ref": None}
+
     def _on_overlay_pan_start(e: ft.DragStartEvent):
         nonlocal overlay_control, overlay_interaction_mode
         if not overlay_control:
@@ -644,6 +648,7 @@ def open_unified_popup_dialog(
         nonlocal index
         nonlocal caption_tf, neg_caption_tf, caption_timer, neg_caption_timer
         nonlocal overlay_visible, overlay_visual, overlay_control, overlay_hover_container, overlay_current_rotate
+        nonlocal target_overlay_visible, target_overlay_image
         nonlocal monitor_thread
         nonlocal video_is_playing
         video_is_playing = True  # Reset to playing when switching videos
@@ -1151,6 +1156,15 @@ def open_unified_popup_dialog(
             keyboard_type=ft.KeyboardType.NUMBER,
         )
 
+        # Create T_frames field
+        t_frames_field = create_textfield(
+            label="T_frames",
+            value="4",
+            expand=0,
+            width=100,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
+
         def apply_clean_from_overlay(e):
             if not is_img:
                 try:
@@ -1160,10 +1174,276 @@ def open_unified_popup_dialog(
                 if area_apply_clean(page, path, overlay_control, overlay_visible, viewer_w, viewer_h, padding_val):
                     refresh()
 
+        def on_target_click(e):
+            nonlocal overlay_visible, overlay_control
+            # Check if area editor zone is visible
+            if not overlay_control or not overlay_visible:
+                page.snack_bar = ft.SnackBar(ft.Text("Open Area Editor first."), open=True)
+                page.update()
+                return
+
+            if is_img:
+                page.snack_bar = ft.SnackBar(ft.Text("Target overlay only works for videos."), open=True)
+                page.update()
+                return
+
+            # Get T_frames value
+            try:
+                t_frames = int(t_frames_field.value or 4)
+            except:
+                t_frames = 4
+
+            # Get overlay dimensions and position
+            left = int(overlay_control.left or 0)
+            top = int(overlay_control.top or 0)
+            w = int(overlay_control.width or 0)
+            h = int(overlay_control.height or 0)
+
+            if w <= 0 or h <= 0:
+                page.snack_bar = ft.SnackBar(ft.Text("Invalid area dimensions."), open=True)
+                page.update()
+                return
+
+            # Create target directory and get paths
+            try:
+                import shutil
+                media_dir = os.path.dirname(path)
+                media_filename = os.path.basename(path)
+                target_dir = os.path.join(media_dir, 'target')
+                os.makedirs(target_dir, exist_ok=True)
+
+                # Get video metadata for dimensions
+                metadata = vpu.get_video_metadata(path) or {}
+                media_orig_w = int(metadata.get('width', 1920))
+                media_orig_h = int(metadata.get('height', 1080))
+
+                # Calculate actual displayed dimensions (accounting for aspect ratio)
+                video_aspect = media_orig_w / media_orig_h
+                viewer_aspect = viewer_w / viewer_h
+
+                if video_aspect > viewer_aspect:
+                    # Video is wider - fits to width
+                    eff_w = viewer_w
+                    eff_h = int(viewer_w / video_aspect)
+                else:
+                    # Video is taller - fits to height
+                    eff_h = viewer_h
+                    eff_w = int(viewer_h * video_aspect)
+
+                # Calculate padding (centering offset)
+                pad_x = (viewer_w - eff_w) / 2
+                pad_y = (viewer_h - eff_h) / 2
+
+                # Overlay coordinates are relative to container, subtract padding
+                overlay_x_relative = left - pad_x
+                overlay_y_relative = top - pad_y
+
+                # Calculate scale from displayed media to original media
+                scale = media_orig_w / eff_w
+
+                # Calculate actual rectangle in original media space
+                actual_left = int(overlay_x_relative * scale)
+                actual_top = int(overlay_y_relative * scale)
+                actual_w = int(w * scale)
+                actual_h = int(h * scale)
+
+                # Clamp to video bounds
+                actual_left = max(0, min(actual_left, media_orig_w - 1))
+                actual_top = max(0, min(actual_top, media_orig_h - 1))
+                actual_w = max(1, min(actual_w, media_orig_w - actual_left))
+                actual_h = max(1, min(actual_h, media_orig_h - actual_top))
+
+                # Paths
+                target_png_path = os.path.join(os.path.dirname(__file__), '..', 'target.png')
+                temp_video_path = os.path.join(target_dir, f"temp_{media_filename}")
+                target_video_path = os.path.join(target_dir, media_filename)
+
+                # First copy video to temp location
+                shutil.copy2(path, temp_video_path)
+
+                # Get video fps for duration calculations
+                video_fps = float(metadata.get('fps', 30.0))
+
+                # Use ffmpeg to:
+                # 1. Loop first frame (t_frames - 1) times
+                # 2. Concat with rest of video starting from frame 1
+                # 3. Apply target overlay to first T_frames
+                freeze_count = max(0, t_frames - 1)
+                if freeze_count > 0:
+                    # Calculate duration for freeze frames
+                    freeze_duration = freeze_count / video_fps
+
+                    # Use tpad to freeze first frame, then overlay target
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', temp_video_path,
+                        '-i', target_png_path,
+                        '-filter_complex',
+                        f'[0:v]tpad=start_mode=clone:start_duration={freeze_duration}[padded];'
+                        f'[1:v]scale={actual_w}:{actual_h}[scaled];'
+                        f'[padded][scaled]overlay={actual_left}:{actual_top}:enable=\'between(n,0,{t_frames-1})\'',
+                        '-c:a', 'copy',
+                        target_video_path
+                    ]
+                else:
+                    # No freezing, just overlay on first frame
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', temp_video_path,
+                        '-i', target_png_path,
+                        '-filter_complex',
+                        f'[1:v]scale={actual_w}:{actual_h}[scaled];[0:v][scaled]overlay={actual_left}:{actual_top}:enable=\'between(n,0,{t_frames-1})\'',
+                        '-c:a', 'copy',
+                        target_video_path
+                    ]
+
+                page.snack_bar = ft.SnackBar(ft.Text(f"Processing target overlay for {t_frames} frames..."), open=True)
+                page.update()
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+                # Clean up temp file
+                try:
+                    os.remove(temp_video_path)
+                except:
+                    pass
+
+                if result.returncode == 0:
+                    page.snack_bar = ft.SnackBar(ft.Text(f"Target video created: {target_video_path}"), open=True)
+                else:
+                    page.snack_bar = ft.SnackBar(ft.Text(f"FFmpeg error: {result.stderr[:500]}"), open=True, duration=5)
+                page.update()
+
+            except Exception as exc:
+                page.snack_bar = ft.SnackBar(ft.Text(f"Error: {exc}"), open=True)
+                page.update()
+
+        def on_x_click(e):
+            nonlocal overlay_visible, overlay_control
+            # Check if area editor zone is visible
+            if not overlay_control or not overlay_visible:
+                page.snack_bar = ft.SnackBar(ft.Text("Open Area Editor first."), open=True)
+                page.update()
+                return
+
+            if is_img:
+                page.snack_bar = ft.SnackBar(ft.Text("Target overlay only works for videos."), open=True)
+                page.update()
+                return
+
+            # Get T_frames value
+            try:
+                t_frames = int(t_frames_field.value or 4)
+            except:
+                t_frames = 4
+
+            # Get overlay dimensions and position
+            left = int(overlay_control.left or 0)
+            top = int(overlay_control.top or 0)
+            w = int(overlay_control.width or 0)
+            h = int(overlay_control.height or 0)
+
+            if w <= 0 or h <= 0:
+                page.snack_bar = ft.SnackBar(ft.Text("Invalid area dimensions."), open=True)
+                page.update()
+                return
+
+            # Create target directory and get paths
+            try:
+                import shutil
+                media_dir = os.path.dirname(path)
+                media_filename = os.path.basename(path)
+                target_dir = os.path.join(media_dir, 'target')
+                os.makedirs(target_dir, exist_ok=True)
+
+                # Get video metadata for dimensions
+                metadata = vpu.get_video_metadata(path) or {}
+                media_orig_w = int(metadata.get('width', 1920))
+                media_orig_h = int(metadata.get('height', 1080))
+
+                # Calculate actual displayed dimensions (accounting for aspect ratio)
+                video_aspect = media_orig_w / media_orig_h
+                viewer_aspect = viewer_w / viewer_h
+
+                if video_aspect > viewer_aspect:
+                    # Video is wider - fits to width
+                    eff_w = viewer_w
+                    eff_h = int(viewer_w / video_aspect)
+                else:
+                    # Video is taller - fits to height
+                    eff_h = viewer_h
+                    eff_w = int(viewer_h * video_aspect)
+
+                # Calculate padding (centering offset)
+                pad_x = (viewer_w - eff_w) / 2
+                pad_y = (viewer_h - eff_h) / 2
+
+                # Overlay coordinates are relative to container, subtract padding
+                overlay_x_relative = left - pad_x
+                overlay_y_relative = top - pad_y
+
+                # Calculate scale from displayed media to original media
+                scale = media_orig_w / eff_w
+
+                # Calculate actual rectangle in original media space
+                actual_left = int(overlay_x_relative * scale)
+                actual_top = int(overlay_y_relative * scale)
+                actual_w = int(w * scale)
+                actual_h = int(h * scale)
+
+                # Clamp to video bounds
+                actual_left = max(0, min(actual_left, media_orig_w - 1))
+                actual_top = max(0, min(actual_top, media_orig_h - 1))
+                actual_w = max(1, min(actual_w, media_orig_w - actual_left))
+                actual_h = max(1, min(actual_h, media_orig_h - actual_top))
+
+                # Paths
+                target_png_path = os.path.join(os.path.dirname(__file__), '..', 'target.png')
+                temp_video_path = os.path.join(target_dir, f"temp_{media_filename}")
+                target_video_path = os.path.join(target_dir, media_filename)
+
+                # First copy video to temp location
+                shutil.copy2(path, temp_video_path)
+
+                # Use ffmpeg to overlay target.png scaled to area editor zone, on first T_frames
+                # NO freezing - just overlay
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', temp_video_path,
+                    '-i', target_png_path,
+                    '-filter_complex',
+                    f'[1:v]scale={actual_w}:{actual_h}[scaled];[0:v][scaled]overlay={actual_left}:{actual_top}:enable=\'between(n,0,{t_frames-1})\'',
+                    '-c:a', 'copy',
+                    target_video_path
+                ]
+
+                page.snack_bar = ft.SnackBar(ft.Text(f"Processing X overlay for {t_frames} frames..."), open=True)
+                page.update()
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+
+                # Clean up temp file
+                try:
+                    os.remove(temp_video_path)
+                except:
+                    pass
+
+                if result.returncode == 0:
+                    page.snack_bar = ft.SnackBar(ft.Text(f"Target video created: {target_video_path}"), open=True)
+                else:
+                    page.snack_bar = ft.SnackBar(ft.Text(f"FFmpeg error: {result.stderr[:500]}"), open=True, duration=5)
+                page.update()
+
+            except Exception as exc:
+                page.snack_bar = ft.SnackBar(ft.Text(f"Error: {exc}"), open=True)
+                page.update()
+
         area_btn = ft.ElevatedButton("Area Editor", on_click=toggle_area_editor, style=BTN_STYLE2)
         apply_crop_btn = ft.ElevatedButton("Apply Crop", on_click=apply_crop_from_overlay, style=BTN_STYLE2)
         mask_it_btn = ft.ElevatedButton("Mask it", on_click=create_mask_from_overlay, style=BTN_STYLE2)
         apply_clean_btn = ft.ElevatedButton("Clear Area", on_click=apply_clean_from_overlay, disabled=is_img, style=BTN_STYLE2, tooltip=("Disabled for images" if is_img else None))
+        x_btn = ft.ElevatedButton("X", on_click=on_x_click, style=BTN_STYLE2)
+        create_target_btn = ft.ElevatedButton("Create target", on_click=on_target_click, style=BTN_STYLE2)
 
         # First row: fields stacked on the left, +/-/Closest stacked on right
         fields_stack_col = ft.Column([width_field, height_field], spacing=2, col=8)
@@ -1182,6 +1462,11 @@ def open_unified_popup_dialog(
             ft.ResponsiveRow([
                 ft.Container(padding_field, col=4),
                 ft.Container(apply_clean_btn, col=8),
+            ], spacing=3, expand=True),
+            ft.ResponsiveRow([
+                ft.Container(t_frames_field, col=4),
+                ft.Container(x_btn, col=2),
+                ft.Container(create_target_btn, col=6),
             ], spacing=3, expand=True),
         ], spacing=6, col={'md': 6, 'lg': 5, 'sm': 12})
 

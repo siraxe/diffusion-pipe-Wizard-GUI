@@ -1,6 +1,11 @@
 import os
+import toml
+import glob
 from typing import Dict, List, Optional
 from pathlib import Path
+
+# Use loguru for consistent logging
+from loguru import logger
 
 
 class LTX2Cache:
@@ -174,6 +179,7 @@ class LTX2Cache:
         self,
         config: Dict,
         dataset_config: str,
+        slider_config: Optional[str] = None,
         output_dir: Optional[str] = None
     ) -> Dict[str, List[str]]:
         model = config.get('model', {})
@@ -192,7 +198,7 @@ class LTX2Cache:
 
         commands = {}
 
-        # Latent caching
+        # Standard latent caching
         commands['latents'] = self.build_cache_latents_command(
             dataset_config=dataset_config,
             ltx2_checkpoint=ltx2_checkpoint,
@@ -228,8 +234,8 @@ class LTX2Cache:
 
         return commands
 
-    def format_all_cache_commands(self, config: Dict, dataset_config: str, output_dir: Optional[str] = None) -> Dict[str, str]:
-        commands = self.build_all_cache_commands(config, dataset_config, output_dir)
+    def format_all_cache_commands(self, config: Dict, dataset_config: str, slider_config: Optional[str] = None, output_dir: Optional[str] = None) -> Dict[str, str]:
+        commands = self.build_all_cache_commands(config, dataset_config, slider_config, output_dir)
 
         return {
             cmd_type: " ".join(cmd_args)
@@ -241,11 +247,11 @@ class LTX2Cache:
 # Convenience Functions
 # ==========================================================================
 
-def create_cache_commands(config: Dict, dataset_config: str, output_dir: Optional[str] = None) -> Dict[str, List[str]]:
+def create_cache_commands(config: Dict, dataset_config: str, slider_config: Optional[str] = None, output_dir: Optional[str] = None) -> Dict[str, List[str]]:
     cache = LTX2Cache()
-    return cache.build_all_cache_commands(config, dataset_config, output_dir)
+    return cache.build_all_cache_commands(config, dataset_config, slider_config, output_dir)
 
 
-def format_cache_commands(config: Dict, dataset_config: str, output_dir: Optional[str] = None) -> Dict[str, str]:
+def format_cache_commands(config: Dict, dataset_config: str, slider_config: Optional[str] = None, output_dir: Optional[str] = None) -> Dict[str, str]:
     cache = LTX2Cache()
-    return cache.format_all_cache_commands(config, dataset_config, output_dir)
+    return cache.format_all_cache_commands(config, dataset_config, slider_config, output_dir)

@@ -6,6 +6,7 @@ Refactored for maintainability, DRY compliance, and robustness.
 """
 
 import os
+import sys
 import logging
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -16,6 +17,102 @@ except ImportError:
     safetensors = None
 
 logger = logging.getLogger(__name__)
+
+
+# ==========================================================================
+# ComfyUI Format Detection and Conversion
+# ==========================================================================
+
+def is_comfy_format_lora(file_path: str) -> bool:
+    """
+    Check if a LoRA file is in ComfyUI format by examining the keys.
+
+    ComfyUI format keys start with 'diffusion_model.'
+    Training format keys start with 'lora_unet_model_'
+    """
+    if safetensors is None:
+        logger.warning("safetensors not available, cannot detect ComfyUI format")
+        return False
+
+    try:
+        state_dict = safetensors.torch.load_file(file_path)
+        if not state_dict:
+            return False
+
+        # Check first few keys
+        for key in list(state_dict.keys())[:5]:
+            if key.startswith('diffusion_model.'):
+                return True
+            if key.startswith('lora_unet_model_'):
+                return False
+
+        # If no clear prefix, check for other ComfyUI patterns
+        for key in state_dict.keys():
+            if '.lora_A.' in key or '.lora_B.' in key:
+                return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking LoRA format for {file_path}: {e}")
+        return False
+
+
+def convert_comfy_to_training_with_rank(file_path: str, target_rank: int) -> Optional[str]:
+    """
+    Convert ComfyUI format LoRA to training format with optional rank conversion.
+
+    Returns the path to the new file, or None if failed.
+    """
+    import subprocess
+    from pathlib import Path
+
+    try:
+        input_file = Path(file_path).resolve()
+        if not input_file.exists():
+            logger.error(f"Source file does not exist: {file_path}")
+            return None
+
+        output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
+
+        # Path to conversion script
+        # ltx2_run.py is at scripts/musubi_utils/ltx2_run.py
+        # convert script is at scripts/convert_comfy_to_training_lora.py
+        convert_script = Path(__file__).parent.parent.parent / 'scripts' / 'convert_comfy_to_training_lora.py'
+
+        if not convert_script.exists():
+            logger.error(f"Conversion script not found: {convert_script}")
+            return None
+
+        logger.info(f"Converting ComfyUI LoRA with rank conversion: {file_path} -> rank {target_rank}")
+
+        cmd = [
+            str(sys.executable),
+            str(convert_script),
+            str(input_file),
+            '--target_rank', str(target_rank),
+            '-o', str(output_path)
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=180,  # 3 minute timeout
+        )
+
+        if result.returncode == 0:
+            logger.info(f"Successfully created converted checkpoint: {output_path}")
+            return str(output_path)
+        else:
+            logger.error(f"Conversion failed: {result.stderr}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.error("Conversion timed out after 3 minutes")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to convert ComfyUI LoRA {file_path}: {e}")
+        return None
 
 
 # Constants for CLI flags to prevent typos and centralize configuration
@@ -521,7 +618,7 @@ class LTX2Run:
     def _build_initialization(self, config: Dict, lora: Dict) -> List[str]:
         """Builds flags for initializing from existing checkpoints."""
         cmd = []
-        
+
         init_checkpoint = lora.get('init_from_existing', config.get('init_from_existing', ''))
         if not (init_checkpoint and str(init_checkpoint).lower() not in ('', 'null', 'none')):
             return cmd
@@ -530,22 +627,46 @@ class LTX2Run:
         if not os.path.isabs(init_checkpoint):
             init_checkpoint = str(self.project_root / init_checkpoint)
 
+        # Check if path is a directory and try to find .safetensors file inside
+        if os.path.isdir(init_checkpoint):
+            dir_path = init_checkpoint
+            # Look for .safetensors files in the directory
+            safetensors_files = [f for f in os.listdir(dir_path) if f.endswith('.safetensors')]
+            if safetensors_files:
+                # Use the first .safetensors file found
+                init_checkpoint = str(Path(dir_path) / safetensors_files[0])
+                logger.info(f"Directory detected, using found safetensors file: {init_checkpoint}")
+            else:
+                logger.warning(f"Directory detected but no .safetensors file found inside: {dir_path}")
+
         target_rank = lora.get('rank', 64)
 
         if os.path.exists(init_checkpoint):
-            checkpoint_rank = self.get_lora_rank(init_checkpoint)
-            
-            if checkpoint_rank > 0 and checkpoint_rank != target_rank:
-                logger.info(f"Rank mismatch detected, reranking from {checkpoint_rank} to {target_rank}")
-                converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
+            # Check 1: ComfyUI format detection (convert regardless of rank)
+            if is_comfy_format_lora(init_checkpoint):
+                logger.info(f"Detected ComfyUI format checkpoint, converting to training format (rank {target_rank})")
+                converted_path = convert_comfy_to_training_with_rank(init_checkpoint, target_rank)
 
                 if converted_path:
                     init_checkpoint = converted_path
                     logger.info(f"Using converted checkpoint: {init_checkpoint}")
                 else:
-                    logger.warning(f"Conversion failed, using original checkpoint (may cause errors)")
+                    logger.warning(f"ComfyUI conversion failed, using original checkpoint (may cause errors)")
+            # Check 2: Rank mismatch (only for training format)
             else:
-                logger.info(f"Checkpoint rank {checkpoint_rank} matches target rank {target_rank}")
+                checkpoint_rank = self.get_lora_rank(init_checkpoint)
+
+                if checkpoint_rank > 0 and checkpoint_rank != target_rank:
+                    logger.info(f"Rank mismatch detected, reranking from {checkpoint_rank} to {target_rank}")
+                    converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
+
+                    if converted_path:
+                        init_checkpoint = converted_path
+                        logger.info(f"Using converted checkpoint: {init_checkpoint}")
+                    else:
+                        logger.warning(f"Reranking failed, using original checkpoint (may cause errors)")
+                else:
+                    logger.info(f"Checkpoint rank {checkpoint_rank} matches target rank {target_rank}")
         else:
             logger.warning(f"Checkpoint file does not exist: {init_checkpoint}")
 

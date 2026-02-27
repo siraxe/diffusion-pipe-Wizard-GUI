@@ -106,6 +106,7 @@ class MusubiRun:
     def get_cache_commands(
         self,
         dataset_config: str,
+        slider_config: Optional[str] = None,
         output_dir: Optional[str] = None
     ) -> Dict[str, List[str]]:
         if not self.cache_handler:
@@ -114,12 +115,14 @@ class MusubiRun:
         return self.cache_handler.build_all_cache_commands(
             self.config,
             dataset_config,
+            slider_config,
             output_dir or self.config.get('model', {}).get('output_dir')
         )
 
     def format_cache_commands(
         self,
         dataset_config: str,
+        slider_config: Optional[str] = None,
         output_dir: Optional[str] = None
     ) -> Dict[str, str]:
         if not self.cache_handler:
@@ -128,6 +131,7 @@ class MusubiRun:
         return self.cache_handler.format_all_cache_commands(
             self.config,
             dataset_config,
+            slider_config,
             output_dir or self.config.get('model', {}).get('output_dir')
         )
 
@@ -175,9 +179,10 @@ class MusubiRun:
         self,
         dataset_config: str,
         mode: Literal['latents', 'text_encoder', 'sample_prompts', 'all'] = 'all',
+        slider_config: Optional[str] = None,
         output_dir: Optional[str] = None
     ) -> subprocess.Popen:
-        commands = self.get_cache_commands(dataset_config, output_dir)
+        commands = self.get_cache_commands(dataset_config, slider_config, output_dir)
 
         if mode == 'all':
             # Run all in sequence
@@ -215,15 +220,24 @@ class MusubiRun:
         self,
         dataset_config: str,
         cache_type: str = 'latents',
+        slider_config: Optional[str] = None,
         output_dir: Optional[str] = None
     ) -> subprocess.Popen:
-        commands = self.get_cache_commands(dataset_config, output_dir)
+        commands = self.get_cache_commands(dataset_config, slider_config, output_dir)
 
         if cache_type not in commands:
             available = list(commands.keys())
             raise ValueError(f"Cache type '{cache_type}' not available. Available: {available}")
 
-        return self._run_command(commands[cache_type])
+        cmd = commands[cache_type]
+
+        # Handle list of lists (i2v_preprocess can have multiple commands for multiple video dirs)
+        # For now, run the first command only
+        if cmd and isinstance(cmd[0], list):
+            cmd = cmd[0]
+            logger.info(f"Running first of multiple {cache_type} commands")
+
+        return self._run_command(cmd)
 
     def _run_command(self, cmd: List[str]) -> subprocess.Popen:
         logger.info(f"Running command: {' '.join(cmd[:3])}...")
@@ -250,18 +264,18 @@ class MusubiRun:
         """Get the loaded configuration dictionary."""
         return self.config
 
-    def print_commands(self, dataset_config: str, output_dir: Optional[str] = None):
+    def print_commands(self, dataset_config: str, slider_config: Optional[str] = None, output_dir: Optional[str] = None):
         print(f"\n=== Musubi Runner - Model: {self.model_type} ===\n")
 
         print("Cache Commands:")
-        cache_cmds = self.format_cache_commands(dataset_config, output_dir)
+        cache_cmds = self.format_cache_commands(dataset_config, slider_config, output_dir)
         for cmd_type, cmd_str in cache_cmds.items():
             print(f"\n[{cmd_type.upper()}]")
             print(cmd_str)
 
         print("\n" + "="*60)
         print("\nTraining Command:")
-        train_cmd = self.format_training_command(dataset_config)
+        train_cmd = self.format_training_command(dataset_config, slider_config)
         print(train_cmd)
         print()
 

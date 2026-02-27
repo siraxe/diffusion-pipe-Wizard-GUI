@@ -143,7 +143,8 @@ async def run_cache_commands(
     main_container,
     training_tab_container,
     page,
-    training_console_text
+    training_console_text,
+    slider_config: str = None,
 ):
     """
     Execute cache commands sequentially (latents, then text_encoder).
@@ -156,14 +157,18 @@ async def run_cache_commands(
         training_tab_container: Training tab container
         page: Flet page
         training_console_text: Console output control
+        slider_config: Path to slider config (for i2v mode detection)
     """
     import subprocess
     import threading
 
     def run_cache_thread():
         try:
-            cache_cmds_dict = runner.get_cache_commands(dataset_config)
-            cache_order = ['latents', 'text_encoder']
+            cache_cmds_dict = runner.get_cache_commands(dataset_config, slider_config)
+            # Dynamic cache order based on what commands are available
+            # Priority: i2v_preprocess > latents > text_encoder > sample_prompts
+            cache_priority = ['i2v_preprocess', 'latents', 'text_encoder', 'sample_prompts']
+            cache_order = [ct for ct in cache_priority if ct in cache_cmds_dict]
 
             # Track overall success/failure state
             all_success = True
@@ -172,15 +177,22 @@ async def run_cache_commands(
             # Flag to track if current cache was cancelled
             cache_cancelled = False
 
-            for idx, cache_type in enumerate(cache_order):
-                if cache_type not in cache_cmds_dict:
-                    continue
+            for cache_type in cache_order:
 
                 # Print progress between caches
                 pass
 
-                # Get command string for display
-                cmd_list = cache_cmds_dict[cache_type]
+                # Get command(s) for this cache type
+                cmd_data = cache_cmds_dict[cache_type]
+
+                # Handle both single command (list) and multiple commands (list of lists)
+                # i2v_preprocess can have multiple commands for multiple video directories
+                if cmd_data and isinstance(cmd_data[0], list):
+                    # List of lists - multiple commands to run sequentially
+                    cmd_list = cmd_data[0]  # Use first command for display
+                else:
+                    cmd_list = cmd_data
+
                 cmd_str = " ".join(cmd_list)
 
                 # Capture current values for closures (avoid reference issues)
@@ -193,7 +205,7 @@ async def run_cache_commands(
                     page.run_task(show_start)
 
                 # Run the cache command using musubi_run
-                proc = runner.run_cache_async(dataset_config, cache_type=cache_type)
+                proc = runner.run_cache_async(dataset_config, cache_type=cache_type, slider_config=slider_config)
 
                 main_container.training_proc = proc
                 training_tab_container.training_proc = proc
@@ -259,8 +271,9 @@ async def run_cache_commands(
                 page.run_task(show_final_status)
 
         except Exception as e:
-            async def show_err():
-                add_error_message(training_console_text, f"\n[Error] Failed to run cache commands: {e}\n")
+            error_msg = str(e)  # Capture error message before async context
+            async def show_err(err_msg=error_msg):
+                add_error_message(training_console_text, f"\n[Error] Failed to run cache commands: {err_msg}\n")
             if page:
                 page.run_task(show_err)
             logger.error(f"Failed to run cache commands: {e}")
@@ -402,7 +415,7 @@ async def run_ltx2_training_flow(
         add_info_message(training_console_text, f"\n[Info] Running cache commands for {runner.model_type}...\n")
 
         # Run cache commands using the shared function
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text)
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
         return
 
     # Find resume path if needed
@@ -423,7 +436,7 @@ async def run_ltx2_training_flow(
         if training_console_text.page:
             training_console_text.update()
         # Run cache commands using the shared function
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text)
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
         return
 
     # Build training command

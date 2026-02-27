@@ -181,6 +181,16 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"use_mask = {'true' if use_mask_val else 'false'}")
     sample_slider_range_val = _get('sample_slider_range', '-2.0, -1.0, 0.0, 1.0, 2.0')
     lines.append(f"sample_slider_range = {_quote(sample_slider_range_val)}")
+    # Build control_args from i2v_type and sample_each
+    i2v_type_val = _get('i2v_type', 'jump')
+    sample_each_val = _get('sample_each', '3')
+    if i2v_type_val == 'reverse' or i2v_type_val == 'freeze':
+        # For reverse and freeze, only need single element (num not needed)
+        control_args_formatted = '["' + str(i2v_type_val) + '"]'
+    else:
+        # For jump and fade, need both type and num
+        control_args_formatted = '["' + str(i2v_type_val) + '", "' + str(sample_each_val) + '"]'
+    lines.append(f"control_args = {control_args_formatted}")
     ffc_val = _clean_value(_get('first_frame_conditioning_p', 0.1), is_numeric=True)
     lines.append(f"first_frame_conditioning_p = {ffc_val}")
     lines.append("")
@@ -567,6 +577,27 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
 
         sample_slider_range = training_strategy.get('sample_slider_range', '-2.0, -1.0, 0.0, 1.0, 2.0')
         _set_field_value('sample_slider_range', sample_slider_range)
+
+        # Parse control_args and set i2v_type and sample_each
+        control_args = training_strategy.get('control_args', None)
+        if control_args and isinstance(control_args, list):
+            if len(control_args) >= 1:
+                i2v_type_val = control_args[0]
+                _set_field_value('i2v_type', i2v_type_val)
+                if len(control_args) >= 2:
+                    sample_each_val = control_args[1]
+                    _set_field_value('sample_each', sample_each_val)
+                else:
+                    # For single-element modes (reverse, freeze), set default sample_each
+                    _set_field_value('sample_each', '3')
+            else:
+                # Empty list, set defaults
+                _set_field_value('i2v_type', 'jump')
+                _set_field_value('sample_each', '3')
+        else:
+            # No control_args, set defaults
+            _set_field_value('i2v_type', 'jump')
+            _set_field_value('sample_each', '3')
 
         # Optimization section
         optimization = toml_data.get('optimization', {})

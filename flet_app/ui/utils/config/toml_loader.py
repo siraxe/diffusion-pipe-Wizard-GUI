@@ -210,6 +210,29 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
         if k in ts:
             label_vals[k] = to_bool(ts.get(k, False))
 
+    # Handle sample_slider_range
+    if 'sample_slider_range' in ts:
+        label_vals['sample_slider_range'] = ts.get('sample_slider_range')
+
+    # Handle control_args - parse into i2v_type and sample_each
+    if 'control_args' in ts:
+        control_args = ts.get('control_args')
+        if isinstance(control_args, list) and len(control_args) >= 1:
+            label_vals['i2v_type'] = str(control_args[0])
+            if len(control_args) >= 2:
+                label_vals['sample_each'] = str(control_args[1])
+            else:
+                # For single-element modes (reverse, freeze), default sample_each to 3
+                label_vals['sample_each'] = '3'
+        else:
+            # Default values if control_args is invalid
+            label_vals['i2v_type'] = 'jump'
+            label_vals['sample_each'] = '3'
+    else:
+        # Default values if control_args not present
+        label_vals['i2v_type'] = 'jump'
+        label_vals['sample_each'] = '3'
+
 
 def populate_validation_section(toml_data: dict, label_vals: dict) -> None:
     """Populate label_vals from the [validation] section."""

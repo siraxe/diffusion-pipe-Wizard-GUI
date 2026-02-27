@@ -184,6 +184,27 @@ async def save_training_config_to_toml(training_tab_container):
             control_path_val = ds_config.get('control_path') or directory_config.get('control_path')
             negative_path_val = ds_config.get('negative_path') or directory_config.get('negative_path')
 
+            # Read control_args from last_config.toml if slider mode is enabled
+            control_args_val = None
+            try:
+                ws_dir, last_config_path, _ = _get_workspace_last_config_paths()
+                if os.path.exists(last_config_path):
+                    try:
+                        import tomllib as _toml_reader
+                    except Exception:
+                        import tomli as _toml_reader
+                    with open(last_config_path, 'rb') as f:
+                        config = _toml_reader.load(f)
+                    training_strategy = config.get('training_strategy', {})
+                    slider_enabled = training_strategy.get('slider', False)
+                    # Handle boolean conversion from string
+                    if not isinstance(slider_enabled, bool):
+                        slider_enabled = str(slider_enabled).lower() in ['true', '1', 'yes', 'on']
+                    if slider_enabled:
+                        control_args_val = training_strategy.get('control_args', None)
+            except Exception:
+                pass
+
             # Handle frame_buckets - check if commented/disabled
             frame_buckets_list = ds_config.get('frame_buckets', [])
             # Check if frame_buckets is disabled (commented in TOML or enable_frame_buckets is False)
@@ -240,6 +261,13 @@ async def save_training_config_to_toml(training_tab_container):
             frame_extraction_val = ds_info.get('frame_extraction')
             if frame_extraction_val:
                 lines.append(f"frame_extraction = \"{frame_extraction_val}\"")
+
+            # control_args (per-dataset, only if set and slider mode is enabled)
+            if control_args_val is not None:
+                # Format as TOML array
+                if isinstance(control_args_val, list):
+                    formatted_args = "[" + ", ".join(f'"{v}"' if isinstance(v, str) else str(v) for v in control_args_val) + "]"
+                    lines.append(f"control_args = {formatted_args}")
 
             # control_path and negative_path (per-dataset, only if set)
             if control_path_val:

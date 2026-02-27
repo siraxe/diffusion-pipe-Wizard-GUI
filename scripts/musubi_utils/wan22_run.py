@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 import logging
 from typing import Dict, List, Optional
@@ -438,6 +439,18 @@ class WAN22Run:
             if not os.path.isabs(init_checkpoint):
                 init_checkpoint = str(self.project_root / init_checkpoint)
                 logger.info(f"Converted relative checkpoint path: {init_checkpoint}")
+
+            # Check if path is a directory and try to find .safetensors file inside
+            if os.path.isdir(init_checkpoint):
+                dir_path = init_checkpoint
+                # Look for .safetensors files in the directory
+                safetensors_files = [f for f in os.listdir(dir_path) if f.endswith('.safetensors')]
+                if safetensors_files:
+                    # Use the first .safetensors file found
+                    init_checkpoint = str(Path(dir_path) / safetensors_files[0])
+                    logger.info(f"Directory detected, using found safetensors file: {init_checkpoint}")
+                else:
+                    logger.warning(f"Directory detected but no .safetensors file found inside: {dir_path}")
 
             # Check if the file exists
             if os.path.exists(init_checkpoint):

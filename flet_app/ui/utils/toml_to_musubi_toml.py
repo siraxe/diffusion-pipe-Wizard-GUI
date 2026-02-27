@@ -137,6 +137,19 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         except Exception:
             pass
 
+    # Check if slider mode is enabled (for cache directory naming)
+    slider_enabled = False
+    if last_config_path and os.path.exists(last_config_path):
+        try:
+            with open(last_config_path, 'r') as f:
+                last_config = toml.load(f)
+            training_strategy = last_config.get('training_strategy', {})
+            slider_enabled = training_strategy.get('slider', False)
+            if not isinstance(slider_enabled, bool):
+                slider_enabled = str(slider_enabled).lower() in ['true', '1', 'yes', 'on']
+        except Exception:
+            pass
+
     # Build the musubi config - create one dataset entry per directory
     datasets_list = []
 
@@ -154,6 +167,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         dir_frame_buckets = dir_info.get('frame_buckets', global_frame_buckets)
         # Get frame_extraction from per-dataset setting (only for LTX2 datasets)
         dir_frame_extraction = dir_info.get('frame_extraction', frame_extraction)
+        # Get control_args for i2v preprocessing
+        dir_control_args = dir_info.get('control_args', None)
 
         # Process resolutions (handle both flat list and list of lists)
         resolution_list = []
@@ -181,8 +196,11 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
         # For multiple resolutions, create a dataset entry for each resolution
         for resolution in resolution_list:
-            # cache_directory = path + /cache_musubi
-            cache_directory = os.path.join(dir_path, "cache_musubi") if dir_path else ""
+            # cache_directory = path + /cache_musubi (or musubi_cache_positive for slider mode)
+            if slider_enabled:
+                cache_directory = os.path.join(dir_path, "musubi_cache_positive") if dir_path else ""
+            else:
+                cache_directory = os.path.join(dir_path, "cache_musubi") if dir_path else ""
 
             # For multiple resolutions, append resolution to cache directory to make them unique
             if is_multi_resolution:
@@ -213,6 +231,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 dataset_config['video_directory'] = dir_path
                 dataset_config['target_frames'] = dir_frame_buckets
                 dataset_config['frame_extraction'] = dir_frame_extraction
+                # Add control_args if present (for i2v preprocessing)
+                if dir_control_args is not None:
+                    dataset_config['control_args'] = dir_control_args
                 # Add enable_mask if use_mask is true (only for video datasets)
                 if use_mask:
                     dataset_config['enable_mask'] = True
@@ -258,99 +279,74 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 # Parse the slider range values
                 slider_values = [float(x.strip()) for x in sample_slider_range_str.split(',') if x.strip()]
 
-                # Create the slider config with multi-dataset support
+                # Create the slider config
                 ws_dir = os.path.dirname(output_path)
                 slider_config_path = os.path.join(ws_dir, 'last_data_musubi_slider_config.toml')
 
-                # Extract cache directories from all datasets
-                # For slider training, we need both positive AND control directories
-                # Only include datasets that have a matching control directory
+                import glob
+                video_extensions = ['mp4', 'webm', 'mov', 'avi', 'mkv']
+                has_source_videos = False
 
-                pos_cache_dirs = []
-                neg_cache_dirs = []
-                text_cache_dirs = []
-
+                # Check if we have source videos (for i2v mode detection)
                 for ds in datasets_list:
-                    pos_cache_dir = ds['cache_directory']
                     pos_dir = ds.get('image_directory', ds.get('video_directory', ''))
+                    if pos_dir and os.path.exists(pos_dir):
+                        for ext in video_extensions:
+                            if glob.glob(os.path.join(pos_dir, f"*.{ext}")) or \
+                               glob.glob(os.path.join(pos_dir, f"*.{ext.upper()}")):
+                                has_source_videos = True
+                                break
+                    if has_source_videos:
+                        break
 
-                    # Determine the corresponding control directory
-                    # Priority:
-                    # 1. Check for a 'control' subdirectory within the dataset directory itself
-                    # 2. Check for a 'control' subdirectory in the parent directory
-                    neg_dir = None
+                # Build cache directory paths
+                # For slider mode: use musubi_cache_positive and musubi_cache_negative
+                # Determine the directory containing the datasets (parent of dataset dirs)
+                pos_cache_dir = None
+                neg_cache_dir = None
+                text_cache_dir = None
 
+                if datasets_list:
+                    first_ds = datasets_list[0]
+                    pos_dir = first_ds.get('image_directory', first_ds.get('video_directory', ''))
                     if pos_dir:
-                        # First, check if there's a 'control' subdirectory within the dataset directory
+                        # Positive cache is musubi_cache_positive in the dataset directory
+                        pos_cache_dir = os.path.join(pos_dir, 'musubi_cache_positive')
+                        # Text cache is same as positive cache
+                        text_cache_dir = pos_cache_dir
+
+                        # Negative cache is musubi_cache_negative
+                        # Check if there's a 'control' subdirectory within the dataset directory
                         potential_control = os.path.join(pos_dir, 'control')
                         if os.path.exists(potential_control) and os.path.isdir(potential_control):
-                            neg_dir = potential_control
+                            # Control exists as a subdirectory - put negative cache there
+                            neg_cache_dir = os.path.join(potential_control, 'musubi_cache_negative')
                         else:
-                            # Second, check if the dataset directory IS a subdirectory of a parent that has 'control'
-                            parent_dir = os.path.dirname(pos_dir)
-                            potential_control = os.path.join(parent_dir, 'control')
-                            if os.path.exists(potential_control) and os.path.isdir(potential_control):
-                                neg_dir = potential_control
+                            # No control subdirectory - put negative cache alongside positive
+                            neg_cache_dir = os.path.join(pos_dir, 'musubi_cache_negative')
 
-                    # Only include this dataset if a control directory was found
-                    if neg_dir:
-                        # For caching, the cache directory is usually inside the dataset directory
-                        # The cache_directory might be like: /path/to/dataset/cache_musubi
-                        # The control cache should be: /path/to/control/cache_musubi
-                        neg_cache_dir = os.path.join(neg_dir, os.path.basename(pos_cache_dir))
-
-                        pos_cache_dirs.append(pos_cache_dir)
-                        neg_cache_dirs.append(neg_cache_dir)
-                        text_cache_dirs.append(pos_cache_dir)  # Text cache is same as pos cache
-                    else:
-                        logger.warning(f"Dataset {pos_dir} does not have a matching control directory, skipping from slider config")
-
-                # Only create slider config if we have at least one valid dataset pair
-                if not pos_cache_dirs:
-                    logger.warning("No datasets with matching control directories found, skipping slider config creation")
-                    slider_config_path = None
-
-                # Write slider config with multi-dataset support
-                if pos_cache_dirs:
+                # Only create slider config if we have valid cache directories
+                if pos_cache_dir and neg_cache_dir:
                     slider_lines = [
                         'mode = "reference"',
-                    '',
-                    '# Multi-dataset support (all datasets will be used)',
-                    f'pos_cache_dirs = [',
-                    ]
-
-                    # Add each pos_cache_dir on a new line
-                    for d in pos_cache_dirs:
-                        slider_lines.append(f'    "{d}",')
-                    slider_lines.append(']')
-
-                    slider_lines.extend([
                         '',
-                        f'neg_cache_dirs = [',
-                    ])
-
-                    # Add each neg_cache_dir on a new line
-                    for d in neg_cache_dirs:
-                        slider_lines.append(f'    "{d}",')
-                    slider_lines.append(']')
-
-                    slider_lines.extend([
+                        '# Slider cache directories for reference mode training (list format)',
+                        f'pos_cache_dirs = [ "{pos_cache_dir}", ]',
+                        f'neg_cache_dirs = [ "{neg_cache_dir}", ]',
+                        f'text_cache_dirs = [ "{text_cache_dir}", ]',
                         '',
-                        f'text_cache_dirs = [',
-                    ])
-
-                    # Add each text_cache_dir on a new line
-                    for d in text_cache_dirs:
-                        slider_lines.append(f'    "{d}",')
-                    slider_lines.append(']')
-
-                    slider_lines.extend([
+                        f'batch_size = {batch_size}',
                         '',
                         f'sample_slider_range = [ {", ".join(str(v) for v in slider_values)},]',
-                    ])
+                    ]
 
                     with open(slider_config_path, 'w') as f:
                         f.write('\n'.join(slider_lines) + '\n')
+
+                    logger.info(f"Created slider config: {slider_config_path}")
+                else:
+                    logger.warning("Could not determine cache directories for slider config")
+                    slider_config_path = None
 
         except Exception as e:
             logger.error(f"Error creating slider config: {e}")
@@ -397,11 +393,6 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
     lines.append(f"caption_extension = \"{general['caption_extension']}\"")
     lines.append(f"batch_size = {general['batch_size']}")
     lines.append(f"enable_bucket = {str(general['enable_bucket']).lower()}")
-    if general.get('enable_ar_bucket', False):
-        lines.append(f"enable_ar_bucket = {str(general['enable_ar_bucket']).lower()}")
-        lines.append(f"min_ar = {general.get('min_ar', 0.5)}")
-        lines.append(f"max_ar = {general.get('max_ar', 2.0)}")
-        lines.append(f"num_ar_buckets = {general.get('num_ar_buckets', 7)}")
     lines.append(f"bucket_no_upscale = {str(general['bucket_no_upscale']).lower()}")
     lines.append("")
 
@@ -448,7 +439,14 @@ def _format_list(lst):
     """Format a list as TOML array."""
     if not lst:
         return "[]"
-    return "[ " + ", ".join(str(x) for x in lst) + " ]"
+    formatted_items = []
+    for item in lst:
+        if isinstance(item, str):
+            # String elements need to be quoted in TOML
+            formatted_items.append(f'"{item}"')
+        else:
+            formatted_items.append(str(item))
+    return "[ " + ", ".join(formatted_items) + " ]"
 
 
 def _format_list_of_lists(lst):
