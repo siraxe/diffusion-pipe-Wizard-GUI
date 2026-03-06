@@ -103,7 +103,7 @@ def populate_optimizer_section(toml_data: dict, label_vals: dict) -> None:
 
     # Musubi optimization fields
     for k in ('max_steps', 'batch_size', 'max_grad_norm', 'blocks_to_swap',
-              'scheduler_type', 'optimizer_args', 'enable_gradient_checkpointing'):
+              'caption_dropout_rate', 'scheduler_type', 'optimizer_args', 'enable_gradient_checkpointing'):
         if k in opt:
             label_vals[k] = opt.get(k)
 
@@ -111,6 +111,11 @@ def populate_optimizer_section(toml_data: dict, label_vals: dict) -> None:
     if 'gradient_accumulation_steps' in opt:
         label_vals['gradient_accumulation_steps'] = opt.get('gradient_accumulation_steps')
         label_vals['grad_accum_steps'] = opt.get('gradient_accumulation_steps')
+
+    # Handle caption_dropout_rate -> caption_dropout for UI
+    if 'caption_dropout_rate' in opt:
+        label_vals['caption_dropout_rate'] = opt.get('caption_dropout_rate')
+        label_vals['caption_dropout'] = opt.get('caption_dropout_rate')
 
     # Prodigy-specific fields
     for k in ('beta3', 'd0', 'd_coef', 'schedulefree_c'):

@@ -144,6 +144,7 @@ CONFIG_FLAGS = {
     "MAX_GRAD_NORM": "--max_grad_norm",
     "BLOCKS_TO_SWAP": "--blocks_to_swap",
     "OPTIMIZER_ARGS": "--optimizer_args",
+    "CAPTION_DROPOUT_RATE": "--caption_dropout_rate",
     "OUTPUT_DIR": "--output_dir",
     "OUTPUT_NAME": "--output_name",
     "LOG_WITH": "--log_with",
@@ -444,6 +445,11 @@ class LTX2Run:
         blocks_to_swap = optimization.get('blocks_to_swap', 0)
         if blocks_to_swap > 0:
             cmd.extend([CONFIG_FLAGS["BLOCKS_TO_SWAP"], str(blocks_to_swap)])
+
+        # Caption dropout
+        caption_dropout = optimization.get('caption_dropout_rate', 0.0)
+        if caption_dropout > 0:
+            cmd.extend([CONFIG_FLAGS["CAPTION_DROPOUT_RATE"], str(caption_dropout)])
 
         self._add_args_flag(cmd, 'optimizer_args', optimization, CONFIG_FLAGS["OPTIMIZER_ARGS"])
 

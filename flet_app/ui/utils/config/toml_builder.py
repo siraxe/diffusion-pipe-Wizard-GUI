@@ -224,6 +224,9 @@ def build_optimizer_section(lines: List[str], cfg: Dict, _get: callable) -> None
         lines.append(f"gradient_accumulation_steps = {_get('grad_accum_steps', _get('gradient_accumulation_steps', 1))}")
         lines.append(f"max_grad_norm = {_get('max_grad_norm', 1.0)}")
         lines.append(f"blocks_to_swap = {_get('blocks_to_swap', 0)}")
+        caption_dropout_val = _get('caption_dropout_rate', _get('caption_dropout', 0.0))
+        if caption_dropout_val and float(caption_dropout_val) > 0:
+            lines.append(f"caption_dropout_rate = {caption_dropout_val}")
         gc_val = _get('enable_gradient_checkpointing', _get('activation_checkpointing', 'false'))
         if isinstance(gc_val, bool):
             gc_bool = gc_val
