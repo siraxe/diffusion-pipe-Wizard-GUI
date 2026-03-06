@@ -116,6 +116,7 @@ MODEL_CONFIG = {
             "separate_audio_buckets": True,
             "gradient_checkpointing": True,
             "slider": True,
+            "ltx_2_3": True,
             "sample_slider_range": True,
             "rank": True,
             "alpha": True,
@@ -840,6 +841,8 @@ DEFAULT_FIELD_VISIBILITY = {
     # Slider training fields (LTX2 only)
     "slider": False,
     "sample_slider_range": False,
+    # LTX version selection (LTX2 only)
+    "ltx_2_3": False,
     # dtype and sampling fields (visible by default, hidden for LTX2)
     "dtype": True,
     "transformer_dtype": True,

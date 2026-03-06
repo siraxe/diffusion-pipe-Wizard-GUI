@@ -151,6 +151,7 @@ CONFIG_FLAGS = {
     "GEMMA_ROOT": "--gemma_root",
     "LTX2_CHECKPOINT": "--ltx2_checkpoint",
     "LTX2_MODE": "--ltx2_mode",
+    "LTX_VERSION": "--ltx_version",
     "FIRST_FRAME_P": "--ltx2_first_frame_conditioning_p",
     "LORA_TARGET_PRESET": "--lora_target_preset",
     "SEPARATE_AUDIO_BUCKETS": "--separate_audio_buckets",
@@ -726,6 +727,10 @@ class LTX2Run:
             CONFIG_FLAGS["LTX2_MODE"], ltx_mode,
             "--ltx2_first_frame_conditioning_p", str(training_strategy.get('first_frame_conditioning_p', 0.1)),
         ])
+
+        # LTX version flag (2.3 vs 2.0)
+        if self.parse_bool(training_strategy.get('ltx_2_3', False)):
+            cmd.extend([CONFIG_FLAGS["LTX_VERSION"], "2.3"])
 
         if ltx_mode == 'audio':
             cmd.append("--lora_target_preset") # Assuming flag name

@@ -54,6 +54,7 @@ single_file_path_field_ref = ft.Ref[ft.TextField]()
 first_frame_conditioning_p_field_ref = ft.Ref[ft.TextField]()
 t5_path_field_ref = ft.Ref[ft.TextField]()
 ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+ltx_2_3_checkbox_ref = ft.Ref[ft.Checkbox]()
 wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 wan_task_dropdown_ref = ft.Ref[ft.Dropdown]()
 separate_audio_buckets_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -365,6 +366,7 @@ def get_training_config_page_content():
             "wan_task": wan_task_dropdown_ref,
             "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
             "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
+            "ltx_2_3": ltx_2_3_checkbox_ref,
             "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
             "slider": slider_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
@@ -1132,13 +1134,24 @@ def get_training_config_page_content():
                     ft.ResponsiveRow(controls=[
                         #here
                         ft.Checkbox(
-                            label="separate_audio_buckets",
+                            label="ltx_2_3",
+                            value=False,
+                            scale=0.8,
+                            adaptive=True,
+                            data="ltx_2_3",
+                            ref=ltx_2_3_checkbox_ref,
+                            visible=_should_show_field("ltx_2_3"),
+                            col=2,
+                        ),
+                        ft.Checkbox(
+                            label="sab",
                             value=True,
                             scale=0.8,
+                            tooltip="Separate audio buckets",
                             ref=separate_audio_buckets_checkbox_ref,
                             visible=_should_show_field("separate_audio_buckets"),
                             data="separate_audio_buckets",
-                            col=3.0,
+                            col=1,
                         ),
                         ft.Checkbox(
                             label="gradient_checkpointing",

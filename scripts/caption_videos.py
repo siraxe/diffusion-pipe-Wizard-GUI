@@ -311,6 +311,76 @@ class OutputFormat(str, Enum):
     JSONL = "jsonl"  # JSON Lines file with one JSON object per line
 
 
+def _cleanup_temp_frames(input_path: Path, media_files: list[Path]) -> None:
+    """Clean up temporary frame files created by qwen_vl_utils.
+
+    The qwen_vl_utils.process_vision_info function creates temporary frame files
+    when processing videos. These files are typically named like 'video_frame_0.jpg',
+    'video_frame_1.jpg', etc. in the same directory as the input video.
+
+    Args:
+        input_path: Path to input directory or file
+        media_files: List of media files that were processed
+    """
+    import re
+
+    cleaned_count = 0
+    input_path = Path(input_path)
+
+    # Get the directory to clean (if input is a file, use its parent directory)
+    if input_path.is_file():
+        search_dir = input_path.parent
+    else:
+        search_dir = input_path
+
+    # Common patterns for temporary frame files created by qwen_vl_utils
+    # Pattern 1: <video_basename>_frame_<number>.<ext>
+    # Pattern 2: <video_basename>_frames_<number>.<ext>
+    # Pattern 3: video_frame_<number>.<ext> (generic pattern)
+    frame_patterns = [
+        re.compile(r'.+_frame_\d+\.(jpg|jpeg|png)$', re.IGNORECASE),
+        re.compile(r'.+_frames_\d+\.(jpg|jpeg|png)$', re.IGNORECASE),
+        re.compile(r'video_frame_\d+\.(jpg|jpeg|png)$', re.IGNORECASE),
+    ]
+
+    # Collect media basenames for checking
+    media_basenames = {mf.stem for mf in media_files}
+
+    try:
+        for file_path in search_dir.iterdir():
+            if not file_path.is_file():
+                continue
+
+            # Check if file matches any frame pattern
+            is_temp_frame = False
+            for pattern in frame_patterns:
+                if pattern.match(file_path.name):
+                    is_temp_frame = True
+                    break
+
+            if is_temp_frame:
+                # Additional check: verify it's related to a processed media file
+                # by checking if the base name matches
+                file_stem = file_path.stem
+                # Remove common suffixes to get the potential base name
+                potential_base = re.sub(r'_frame_\d+$', '', file_stem)
+                potential_base = re.sub(r'_frames_\d+$', '', potential_base)
+
+                # If it's clearly a temp frame (not a user file), delete it
+                # We're conservative: only delete if it has the _frame_ pattern
+                try:
+                    file_path.unlink()
+                    cleaned_count += 1
+                    console.print(f"[dim]Cleaned up temp frame: {file_path.name}[/]")
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not delete {file_path.name}: {e}[/]")
+
+        if cleaned_count > 0:
+            console.print(f"[green]✓[/] Cleaned up {cleaned_count} temporary frame file(s).")
+    except Exception as e:
+        console.print(f"[yellow]Warning: Error during cleanup: {e}[/]")
+
+
 def caption_media(
     input_path: Path,
     output_path: Path,
@@ -439,6 +509,9 @@ def caption_media(
 
             # Advance progress bar
             progress.advance(task)
+
+    # Clean up temporary frame files created by qwen_vl_utils
+    _cleanup_temp_frames(input_path, media_files)
 
     # Save captions to file
     _save_captions(captions, output_path, output_format)

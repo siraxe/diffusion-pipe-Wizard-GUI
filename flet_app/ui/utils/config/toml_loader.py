@@ -206,7 +206,7 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     for k in ('first_frame_conditioning_p', 'ltx_mode'):
         if k in ts:
             label_vals[k] = ts.get(k)
-    for k in ('separate_audio_buckets', 'slider', 'use_mask'):
+    for k in ('separate_audio_buckets', 'slider', 'use_mask', 'ltx_2_3'):
         if k in ts:
             label_vals[k] = to_bool(ts.get(k, False))
 

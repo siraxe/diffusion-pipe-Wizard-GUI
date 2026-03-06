@@ -177,6 +177,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"separate_audio_buckets = {'true' if separate_audio_buckets_val else 'false'}")
     slider_val = _as_bool(_get('slider', False))
     lines.append(f"slider = {'true' if slider_val else 'false'}")
+    ltx_2_3_val = _as_bool(_get('ltx_2_3', False))
+    lines.append(f"ltx_2_3 = {'true' if ltx_2_3_val else 'false'}")
     use_mask_val = _as_bool(_get('use_mask', False))
     lines.append(f"use_mask = {'true' if use_mask_val else 'false'}")
     sample_slider_range_val = _get('sample_slider_range', '-2.0, -1.0, 0.0, 1.0, 2.0')
@@ -548,6 +550,10 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if not isinstance(slider, bool):
             slider = str(slider).lower() in ['true', '1', 'yes', 'on']
         _set_field_value('slider', slider)
+        ltx_2_3 = training_strategy.get('ltx_2_3', False)
+        if not isinstance(ltx_2_3, bool):
+            ltx_2_3 = str(ltx_2_3).lower() in ['true', '1', 'yes', 'on']
+        _set_field_value('ltx_2_3', ltx_2_3)
         use_mask = training_strategy.get('use_mask', False)
         if not isinstance(use_mask, bool):
             use_mask = str(use_mask).lower() in ['true', '1', 'yes', 'on']

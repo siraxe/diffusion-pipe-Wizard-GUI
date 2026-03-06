@@ -1514,16 +1514,41 @@ async def on_caption_to_txt_click(e: ft.ControlEvent, selected_dataset_ref, DATA
             return
 
         created_count = 0
+        appended_count = 0
         for item in captions_data:
             if 'media_path' in item and 'caption' in item:
                 base_filename, _ = os.path.splitext(item['media_path'])
                 txt_path = os.path.join(dataset_folder_path, f"{base_filename}.txt")
-                with open(txt_path, 'w', encoding='utf-8') as f:
-                    f.write(item['caption'])
-                created_count += 1
+
+                # Check if .txt file already exists and has content
+                existing_caption = ""
+                if os.path.exists(txt_path):
+                    with open(txt_path, 'r', encoding='utf-8') as f:
+                        existing_caption = f.read().strip()
+
+                new_caption = item['caption'].strip()
+
+                # If existing caption exists, append the new one after it
+                if existing_caption:
+                    # Combine existing and new captions
+                    combined_caption = f"{existing_caption} {new_caption}"
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write(combined_caption)
+                    appended_count += 1
+                else:
+                    # No existing caption, just write the new one
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write(new_caption)
+                    created_count += 1
 
         if e.page:
-            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Created {created_count} .txt files from captions.json."), open=True)
+            message_parts = []
+            if created_count > 0:
+                message_parts.append(f"created {created_count}")
+            if appended_count > 0:
+                message_parts.append(f"appended to {appended_count}")
+            message = " and ".join(message_parts) + " .txt file(s)"
+            e.page.snack_bar = ft.SnackBar(content=ft.Text(f"Updated {message} from captions.json."), open=True)
             # Refresh thumbnails so the [cap - yes/no] indicator updates after video captioning
             try:
                 if update_thumbnails_func and thumbnails_grid_control is not None:
