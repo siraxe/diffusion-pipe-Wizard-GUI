@@ -137,6 +137,7 @@ CONFIG_FLAGS = {
     "NETWORK_DROPOUT": "--network_dropout",
     "GRAD_ACCUMULATION": "--gradient_accumulation_steps",
     "LEARNING_RATE": "--learning_rate",
+    "AUDIO_LR": "--audio_lr",
     "OPTIMIZER_TYPE": "--optimizer_type",
     "LR_SCHEDULER": "--lr_scheduler",
     "TIMESTAMP_SAMPLING": "--timestep_sampling",
@@ -739,7 +740,9 @@ class LTX2Run:
             cmd.extend([CONFIG_FLAGS["LTX_VERSION"], "2.3"])
 
         if ltx_mode == 'audio':
-            cmd.append("--lora_target_preset") # Assuming flag name
+            cmd.extend(["--lora_target_preset", "audio"])
+        elif ltx_mode == 'av':
+            cmd.extend(["--lora_target_preset", "full"])
             
         if self.parse_bool(training_strategy.get('separate_audio_buckets', False)):
             cmd.append("--separate_audio_buckets")
@@ -758,6 +761,11 @@ class LTX2Run:
         sched_flags = self._build_optimization_and_scheduler(optimization)
         cmd.extend(opt_flags)
         cmd.extend(sched_flags)
+
+        # Add audio_lr flag for av/full mode when audio_lr is not 0
+        audio_lr = optimization.get('audio_lr', 0.0)
+        if ltx_mode == 'av' and audio_lr != 0:
+            cmd.extend([CONFIG_FLAGS["AUDIO_LR"], str(audio_lr)])
 
         # 7. Checkpoint Configuration
         ckpt_flags = self._build_checkpoint_config(checkpoints, optimization)

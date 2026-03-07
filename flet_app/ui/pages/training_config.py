@@ -92,6 +92,7 @@ prior_divergence_args_field_ref = ft.Ref[ft.TextField]()
 crepa_checkbox_ref = ft.Ref[ft.Checkbox]()
 crepa_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 crepa_args_field_ref = ft.Ref[ft.TextField]()
+audio_lr_rate_ref = ft.Ref[ft.TextField]()
 sample_slider_range_field_ref = ft.Ref[ft.TextField]()
 i2v_type_dropdown_ref = ft.Ref[ft.Dropdown]()
 sample_each_field_ref = ft.Ref[ft.TextField]()
@@ -226,6 +227,17 @@ def _on_adapter_change(e):
     sync_dependent_field_visibility()
 
 
+def _on_ltx_mode_change(e):
+    """Handle ltx_mode dropdown change - show/hide audio_lr field for av mode."""
+    if audio_lr_rate_ref and audio_lr_rate_ref.current:
+        ltx_mode = e.control.value if e.control else None
+        # Show audio_lr field only when ltx_mode is "av"
+        should_show = ltx_mode == "av"
+        audio_lr_rate_ref.current.visible = should_show
+        if audio_lr_rate_ref.current.page:
+            audio_lr_rate_ref.current.page.update()
+
+
 def sync_dependent_field_visibility():
     """
     Centralized function to sync visibility of all dependent fields based on their checkbox states.
@@ -301,6 +313,13 @@ def sync_dependent_field_visibility():
             factor_field_ref.current.visible = _should_show_factor_field()
             if factor_field_ref.current.page:
                 factor_field_ref.current.update()
+
+        # audio_lr field (only for av ltx_mode)
+        ltx_mode = ltx_mode_dropdown_ref.current.value if ltx_mode_dropdown_ref and ltx_mode_dropdown_ref.current else None
+        if audio_lr_rate_ref and audio_lr_rate_ref.current:
+            audio_lr_rate_ref.current.visible = ltx_mode == "av"
+            if audio_lr_rate_ref.current.page:
+                audio_lr_rate_ref.current.update()
     except Exception:
         pass
 
@@ -1206,7 +1225,8 @@ def get_training_config_page_content():
                             "video",
                             {"video": "video", "av": "av", "audio": "audio"},
                             col=2, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
-                            visible=_should_show_field("ltx_mode")
+                            visible=_should_show_field("ltx_mode"),
+                            on_change=_on_ltx_mode_change
                         ),
                         # Wan2.2 mode dropdown
                         create_dropdown(
@@ -1584,6 +1604,7 @@ def get_training_config_page_content():
         crepa_ref=crepa_checkbox_ref,
         crepa_mode_ref=crepa_mode_dropdown_ref,
         crepa_args_ref=crepa_args_field_ref,
+        audio_lr_rate_ref=audio_lr_rate_ref,
         sync_visibility_func=sync_dependent_field_visibility,
     )
     musubi_custom_section.visible = uses_musubi_ui

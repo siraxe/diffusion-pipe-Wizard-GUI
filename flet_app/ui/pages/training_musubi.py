@@ -14,6 +14,7 @@ def get_musubi_training_settings(
     crepa_ref=None,
     crepa_mode_ref=None,
     crepa_args_ref=None,
+    audio_lr_rate_ref=None,
     sync_visibility_func=None,
 ):
     """
@@ -71,7 +72,8 @@ def get_musubi_training_settings(
                         ], spacing=6),
                         # Row 2: learning_rate, optimizer, scheduler_type, timestep_sampling
                         ft.ResponsiveRow(controls=[
-                            create_textfield("learning_rate", 0.0001, col=3, expand=True, ref=learning_rate_ref),
+                            create_textfield("learning_rate", 0.0001, col=1.8, expand=True, ref=learning_rate_ref),
+                            create_textfield("audio_lr", 0.0000, col=1.8, expand=True, ref=audio_lr_rate_ref, visible=False),
                             create_dropdown(
                                 "optimizer_type_m",
                                 "AdamW",
@@ -82,7 +84,7 @@ def get_musubi_training_settings(
                                     "Prodigy": "Prodigy",
                                     "Automagic": "Automagic",
                                 },
-                                col=3, expand=True, scale=0.8,
+                                col=2.4, expand=True, scale=0.8,
                                 on_change=on_optimizer_change, ref=optimizer_ref
                             ),
                             create_dropdown(

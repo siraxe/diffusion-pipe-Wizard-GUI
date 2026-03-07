@@ -13,7 +13,7 @@ COMMON_INPUT_STYLE = {
     "filled": True,
 }
 
-def create_textfield(label, value, hint_text=None, multiline=False, min_lines=1, max_lines=1, expand=None, col=None, on_change=None, tooltip=None, keyboard_type=None, ref=None, visible=None, **kwargs):
+def create_textfield(label, value, hint_text=None, multiline=False, min_lines=1, max_lines=1, expand=None, col=None, on_change=None, tooltip=None, keyboard_type=None, ref=None, visible=None, data=None, **kwargs):
     """Helper function to create a TextField with common styling, accepting expand and col.
     Allows per-call overrides (e.g., fill_color) without duplicate kw errors.
     """
@@ -33,6 +33,7 @@ def create_textfield(label, value, hint_text=None, multiline=False, min_lines=1,
         keyboard_type=keyboard_type,
         ref=ref,
         visible=visible,
+        data=data if data is not None else label,
         **merged_style,
     )
 

@@ -200,6 +200,7 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     # [optimization]
     lines.append("[optimization]")
     lines.append(f"learning_rate = {_clean_value(_get('learning_rate', 0.0001), is_numeric=True)}")
+    lines.append(f"audio_lr = {_clean_value(_get('audio_lr', 0.0000), is_numeric=True)}")
     lines.append(f"max_steps = {_clean_value(_get('max_steps', 2000), is_numeric=True)}")
     lines.append(f"batch_size = {_clean_value(_get('batch_size', 1), is_numeric=True)}")
     lines.append(f"gradient_accumulation_steps = {_clean_value(_get('grad_accum_steps', 1), is_numeric=True)}")
@@ -611,6 +612,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         optimization = toml_data.get('optimization', {})
         # Always load values (section may be empty dict)
         _set_field_value('learning_rate', optimization.get('learning_rate', 0.0001))
+        _set_field_value('audio_lr', optimization.get('audio_lr', 0.0000))
         # Backward compatibility: check for 'steps' if 'max_steps' not found
         max_steps_val = optimization.get('max_steps', optimization.get('steps', 2000))
         _set_field_value('max_steps', max_steps_val)

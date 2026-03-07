@@ -59,34 +59,41 @@ def convert_key_to_training(key):
     # Step 1: Handle transformer_blocks.N pattern FIRST
     converted = re.sub(r'transformer_blocks\.(\d+)', r'transformer_blocks_\1', converted)
 
-    # Step 2: Handle audio/video attention patterns (longest first to avoid partial matches)
+    # Step 2: Handle COMBINED patterns BEFORE individual replacements
+    # These must be done first to avoid breaking the sub-patterns
+    converted = re.sub(r'\.audio_ff\.net\.(\d+)', r'_audio_ff_net_\1', converted)
+    converted = re.sub(r'\.video_to_audio_attn\.to_out\.(\d+)', r'_video_to_audio_attn_to_out_\1', converted)
+
+    # Step 3: Handle remaining audio/video attention patterns (longest first to avoid partial matches)
     converted = converted.replace('.audio_to_video_attn.', '_audio_to_video_attn_')
     converted = converted.replace('.video_to_audio_attn.', '_video_to_audio_attn_')
     converted = converted.replace('.audio_attn1.', '_audio_attn1_')
     converted = converted.replace('.audio_attn2.', '_audio_attn2_')
+    # audio_ff.net.N already handled above, but handle any remaining .audio_ff. patterns
     converted = converted.replace('.audio_ff.', '_audio_ff_')
 
-    # Step 3: Handle regular (non-audio) attention patterns
+    # Step 4: Handle regular (non-audio) attention patterns
     converted = converted.replace('.attn1.', '_attn1_')
     converted = converted.replace('.attn2.', '_attn2_')
 
-    # Step 4: Handle to_out.N patterns (must come after attn replacements)
+    # Step 5: Handle to_out.N patterns (must come after attn replacements)
     # Match either .to_out.N or _to_out.N (after attn replacements)
+    # video_to_audio_attn.to_out.N already handled above
     converted = re.sub(r'[_\.]to_out\.(\d+)', r'_to_out_\1', converted)
 
-    # Step 5: Handle projection layers
+    # Step 6: Handle projection layers
     converted = converted.replace('.to_k.', '_to_k_')
     converted = converted.replace('.to_q.', '_to_q_')
     converted = converted.replace('.to_v.', '_to_v_')
     converted = re.sub(r'\.to_out\.', '_to_out_', converted)
 
-    # Step 6: Handle feedforward layers
+    # Step 7: Handle feedforward layers
     converted = converted.replace('.ff.net.', '_ff_net_')
     converted = converted.replace('.ff.', '_ff_')
     converted = converted.replace('.net.', '_net_')
     converted = converted.replace('.proj', '_proj')
 
-    # Step 7: Handle net.N patterns (ff.net.N)
+    # Step 8: Handle any remaining net.N patterns (ff.net.N not already handled)
     converted = re.sub(r'\.net\.(\d+)', r'_net_\1', converted)
 
     # Convert weight naming: lora_A -> lora_down, lora_B -> lora_up
@@ -127,34 +134,41 @@ def extract_lora_name_from_comfy_key(key):
     # Step 1: Handle transformer_blocks.N pattern FIRST
     converted = re.sub(r'transformer_blocks\.(\d+)', r'transformer_blocks_\1', converted)
 
-    # Step 2: Handle audio/video attention patterns (longest first to avoid partial matches)
+    # Step 2: Handle COMBINED patterns BEFORE individual replacements
+    # These must be done first to avoid breaking the sub-patterns
+    converted = re.sub(r'\.audio_ff\.net\.(\d+)', r'_audio_ff_net_\1', converted)
+    converted = re.sub(r'\.video_to_audio_attn\.to_out\.(\d+)', r'_video_to_audio_attn_to_out_\1', converted)
+
+    # Step 3: Handle remaining audio/video attention patterns (longest first to avoid partial matches)
     converted = converted.replace('.audio_to_video_attn.', '_audio_to_video_attn_')
     converted = converted.replace('.video_to_audio_attn.', '_video_to_audio_attn_')
     converted = converted.replace('.audio_attn1.', '_audio_attn1_')
     converted = converted.replace('.audio_attn2.', '_audio_attn2_')
+    # audio_ff.net.N already handled above, but handle any remaining .audio_ff. patterns
     converted = converted.replace('.audio_ff.', '_audio_ff_')
 
-    # Step 3: Handle regular (non-audio) attention patterns
+    # Step 4: Handle regular (non-audio) attention patterns
     converted = converted.replace('.attn1.', '_attn1_')
     converted = converted.replace('.attn2.', '_attn2_')
 
-    # Step 4: Handle to_out.N patterns (must come after attn replacements)
+    # Step 5: Handle to_out.N patterns (must come after attn replacements)
     # Match either .to_out.N or _to_out.N (after attn replacements)
+    # video_to_audio_attn.to_out.N already handled above
     converted = re.sub(r'[_\.]to_out\.(\d+)', r'_to_out_\1', converted)
 
-    # Step 5: Handle projection layers
+    # Step 6: Handle projection layers
     converted = converted.replace('.to_k.', '_to_k_')
     converted = converted.replace('.to_q.', '_to_q_')
     converted = converted.replace('.to_v.', '_to_v_')
     converted = re.sub(r'\.to_out\.', '_to_out_', converted)
 
-    # Step 6: Handle feedforward layers
+    # Step 7: Handle feedforward layers
     converted = converted.replace('.ff.net.', '_ff_net_')
     converted = converted.replace('.ff.', '_ff_')
     converted = converted.replace('.net.', '_net_')
     converted = converted.replace('.proj', '_proj')
 
-    # Step 7: Handle net.N patterns (ff.net.N)
+    # Step 8: Handle any remaining net.N patterns (ff.net.N not already handled)
     converted = re.sub(r'\.net\.(\d+)', r'_net_\1', converted)
 
     converted = re.sub(r'_+_', '_', converted)

@@ -97,7 +97,7 @@ def populate_optimizer_section(toml_data: dict, label_vals: dict) -> None:
             label_vals['optimizer_type_m'] = opt_type_str
 
     # Common fields
-    for k in ('lr', 'learning_rate', 'betas', 'weight_decay', 'eps'):
+    for k in ('lr', 'learning_rate', 'audio_lr', 'betas', 'weight_decay', 'eps'):
         if k in opt:
             label_vals[k] = opt.get(k)
 

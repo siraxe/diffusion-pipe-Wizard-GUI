@@ -124,6 +124,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     frame_extraction = 'head'  # default
     # use_mask from last_config.toml [training_strategy] section
     use_mask = False  # default
+    # ltx_mode from last_config.toml [training_strategy] section (for audio-only mode)
+    ltx_mode = 'video'  # default
     if last_config_path and os.path.exists(last_config_path):
         try:
             with open(last_config_path, 'r') as f:
@@ -131,6 +133,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 batch_size = config.get('optimization', {}).get('batch_size', 4)
                 frame_extraction = config.get('training_strategy', {}).get('frame_extraction', 'head')
                 use_mask = config.get('training_strategy', {}).get('use_mask', False)
+                ltx_mode = config.get('training_strategy', {}).get('ltx_mode', 'video')
                 # Handle boolean conversion from string
                 if not isinstance(use_mask, bool):
                     use_mask = str(use_mask).lower() in ['true', '1', 'yes', 'on']
@@ -193,6 +196,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
         # Detect dataset type for this specific directory
         dir_dataset_type = detect_dataset_type(dir_path)
+        # Override to audio if ltx_mode is audio
+        if ltx_mode == 'audio':
+            dir_dataset_type = 'audio'
 
         # For multiple resolutions, create a dataset entry for each resolution
         for resolution in resolution_list:
@@ -210,23 +216,32 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 unique_cache_dir = cache_directory
 
             # If AR bucketing is enabled, automatically enable bucketing
-            enable_bucket = dir_enable_ar_bucket
+            # Note: Audio datasets don't support AR bucketing
+            enable_bucket = dir_enable_ar_bucket if dir_dataset_type != 'audio' else False
 
+            # Base config - no AR bucketing for audio datasets
             dataset_config = {
                 'cache_directory': unique_cache_dir,
                 'num_repeats': dir_num_repeats,
                 'resolution': resolution,  # Each dataset has its own resolution
                 'enable_bucket': enable_bucket,
                 'bucket_no_upscale': False,
-                'enable_ar_bucket': dir_enable_ar_bucket,
-                'min_ar': dir_min_ar,
-                'max_ar': dir_max_ar,
-                'num_ar_buckets': dir_num_ar_buckets,
             }
+
+            # Only add AR bucketing parameters for non-audio datasets
+            if dir_dataset_type != 'audio':
+                dataset_config.update({
+                    'enable_ar_bucket': dir_enable_ar_bucket,
+                    'min_ar': dir_min_ar,
+                    'max_ar': dir_max_ar,
+                    'num_ar_buckets': dir_num_ar_buckets,
+                })
 
             # Set directory type based on detected content
             if dir_dataset_type == 'image':
                 dataset_config['image_directory'] = dir_path
+            elif dir_dataset_type == 'audio':
+                dataset_config['audio_directory'] = dir_path
             else:
                 dataset_config['video_directory'] = dir_path
                 dataset_config['target_frames'] = dir_frame_buckets
@@ -240,17 +255,25 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
             datasets_list.append(dataset_config)
 
-    musubi_config = {
-        'general': {
-            'caption_extension': '.txt',
-            'batch_size': batch_size,
-            'enable_bucket': global_enable_ar_bucket,
-            'bucket_no_upscale': False,
+    # Build general config - exclude AR bucketing for audio-only mode
+    general_config = {
+        'caption_extension': '.txt',
+        'batch_size': batch_size,
+        'enable_bucket': global_enable_ar_bucket if ltx_mode != 'audio' else False,
+        'bucket_no_upscale': False,
+    }
+
+    # Only add AR bucketing to general section if not audio-only mode
+    if ltx_mode != 'audio':
+        general_config.update({
             'enable_ar_bucket': global_enable_ar_bucket,
             'min_ar': global_min_ar,
             'max_ar': global_max_ar,
             'num_ar_buckets': global_num_ar_buckets,
-        },
+        })
+
+    musubi_config = {
+        'general': general_config,
         'datasets': datasets_list
     }
 
@@ -405,9 +428,11 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
         if 'resolution' in dataset:
             lines.append(f"resolution = {_format_list(dataset['resolution'])}")
 
-        # Check if this is an image or video dataset based on which directory key exists
+        # Check if this is an image, audio, or video dataset based on which directory key exists
         if 'image_directory' in dataset:
             lines.append(f"image_directory = \"{dataset['image_directory']}\"")
+        elif 'audio_directory' in dataset:
+            lines.append(f"audio_directory = \"{dataset['audio_directory']}\"")
         elif 'video_directory' in dataset:
             lines.append(f"video_directory = \"{dataset['video_directory']}\"")
             if 'target_frames' in dataset:
