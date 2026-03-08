@@ -64,11 +64,10 @@ def get_musubi_training_settings(
                     content=ft.Column(controls=[
                         # Row 1: batch_size, grad_accum_steps, max_grad_norm, blocks_to_swap
                         ft.ResponsiveRow(controls=[
-                            create_textfield("batch_size", 1, col=2.4, expand=True),
-                            create_textfield("grad_accum_steps", 1, col=2.4, expand=True),
-                            create_textfield("max_grad_norm", 1.0, col=2.4, expand=True),
-                            create_textfield("blocks_to_swap", 0, col=2.4, expand=True),
-                            create_textfield("caption_dropout", 0, col=2.4, expand=True, tooltip="Model learns to both follow and ignore captions , 0.1 = Light dropout (10% of samples)"),
+                            create_textfield("batch_size", 1, col=3, expand=True),
+                            create_textfield("grad_accum_steps", 1, col=3, expand=True),
+                            create_textfield("max_grad_norm", 1.0, col=3, expand=True),
+                            create_textfield("blocks_to_swap", 0, col=3, expand=True),
                         ], spacing=6),
                         # Row 2: learning_rate, optimizer, scheduler_type, timestep_sampling
                         ft.ResponsiveRow(controls=[

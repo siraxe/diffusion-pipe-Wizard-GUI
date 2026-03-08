@@ -151,9 +151,12 @@ def populate_lora_section(toml_data: dict, label_vals: dict) -> None:
     if not isinstance(lora, dict):
         return
 
-    for k in ('rank', 'alpha', 'factor', 'dropout'):
+    for k in ('rank', 'alpha', 'factor', 'network_dropout', 'caption_dropout_rate'):
         if k in lora:
             label_vals[k] = lora.get(k)
+    # Backward compatibility: old 'dropout' field
+    if 'dropout' in lora:
+        label_vals['network_dropout'] = lora.get('dropout')
 
 
 def populate_monitoring_section(toml_data: dict, label_vals: dict) -> None:

@@ -146,8 +146,12 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"alpha = {alpha_val}")
     factor_val = _clean_value(_get('factor', 4), is_numeric=True)
     lines.append(f"factor = {factor_val}")
-    dropout_val = _clean_value(_get('dropout', 0.0), is_numeric=True)
-    lines.append(f"dropout = {dropout_val}")
+    network_dropout_val = _clean_value(_get('network_dropout', 0.0), is_numeric=True)
+    if network_dropout_val and float(network_dropout_val) > 0:
+        lines.append(f"network_dropout = {network_dropout_val}")
+    caption_dropout_rate_val = _clean_value(_get('caption_dropout_rate', 0.0), is_numeric=True)
+    if caption_dropout_rate_val and float(caption_dropout_rate_val) > 0:
+        lines.append(f"caption_dropout_rate = {caption_dropout_rate_val}")
 
     # init_from_existing (optional - omit if empty)
     # First try to get from bottom bar field (if available), then fallback to config page
@@ -504,7 +508,8 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('rank', lora.get('rank', 32))
         _set_field_value('alpha', lora.get('alpha', 32))
         _set_field_value('factor', lora.get('factor', 4))
-        _set_field_value('dropout', lora.get('dropout', 0.0))
+        _set_field_value('network_dropout', lora.get('network_dropout', lora.get('dropout', 0.0)))
+        _set_field_value('caption_dropout_rate', lora.get('caption_dropout_rate', 0.0))
         _set_field_value('init_from_existing', lora.get('init_from_existing', ''))
 
         # Also set factor field directly via ref (in case _set_field_value didn't find it)

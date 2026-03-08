@@ -134,7 +134,6 @@ CONFIG_FLAGS = {
     "SAVE_LAST_N_EPOCHS": "--save_last_n_epochs",
     "MAX_TRAIN_STEPS": "--max_train_steps",
     "MAX_TRAIN_EPOCHS": "--max_train_epochs",
-    "NETWORK_DROPOUT": "--network_dropout",
     "GRAD_ACCUMULATION": "--gradient_accumulation_steps",
     "LEARNING_RATE": "--learning_rate",
     "AUDIO_LR": "--audio_lr",
@@ -447,11 +446,6 @@ class LTX2Run:
         if blocks_to_swap > 0:
             cmd.extend([CONFIG_FLAGS["BLOCKS_TO_SWAP"], str(blocks_to_swap)])
 
-        # Caption dropout
-        caption_dropout = optimization.get('caption_dropout_rate', 0.0)
-        if caption_dropout > 0:
-            cmd.extend([CONFIG_FLAGS["CAPTION_DROPOUT_RATE"], str(caption_dropout)])
-
         self._add_args_flag(cmd, 'optimizer_args', optimization, CONFIG_FLAGS["OPTIMIZER_ARGS"])
 
         return cmd
@@ -484,11 +478,7 @@ class LTX2Run:
     def _build_optimization_and_scheduler(self, optimization: Dict) -> List[str]:
         """Builds optimizer and scheduler specific flags."""
         cmd = []
-        
-        network_dropout = self.get_config_value(optimization, 'dropout', default=0.0) # Assuming lora section has dropout? 
-        # Actually dropout is usually in 'lora' section based on original code logic, but here we follow original structure
-        # Reverting to original structure for this specific block as per Citation 2
-        
+
         cmd.extend([
             CONFIG_FLAGS["GRAD_ACCUMULATION"], str(optimization.get('gradient_accumulation_steps', 4)),
             CONFIG_FLAGS["LEARNING_RATE"], str(optimization.get('learning_rate', 0.001)),
@@ -616,10 +606,16 @@ class LTX2Run:
                 CONFIG_FLAGS["NETWORK_ALPHA"], str(network_alpha)
             ])
 
-        # Dropout
-        network_dropout = lora.get('dropout', 0.0)
+        # Dropout (via network_args)
+        network_dropout = lora.get('network_dropout', lora.get('dropout', 0.0))
         if network_dropout > 0:
-            cmd.extend([CONFIG_FLAGS["NETWORK_DROPOUT"], str(network_dropout)])
+            cmd.append(f"--network_args")
+            cmd.append(f"dropout={network_dropout}")
+
+        # Caption dropout rate (from lora section)
+        caption_dropout_rate = lora.get('caption_dropout_rate', 0.0)
+        if caption_dropout_rate > 0:
+            cmd.extend([CONFIG_FLAGS["CAPTION_DROPOUT_RATE"], str(caption_dropout_rate)])
 
         return cmd
 

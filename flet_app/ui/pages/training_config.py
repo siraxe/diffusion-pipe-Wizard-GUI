@@ -29,7 +29,8 @@ model_path_field_ref = ft.Ref[ft.TextField]()
 rank_field_ref = ft.Ref[ft.TextField]()
 alpha_field_ref = ft.Ref[ft.TextField]()
 factor_field_ref = ft.Ref[ft.TextField]()
-dropout_field_ref = ft.Ref[ft.TextField]()
+network_dropout_field_ref = ft.Ref[ft.TextField]()
+caption_dropout_rate_field_ref = ft.Ref[ft.TextField]()
 first_frame_conditioning_p_ltx2_field_ref = ft.Ref[ft.TextField]()
 a_rank_field_ref = ft.Ref[ft.TextField]()
 a_dtype_field_ref = ft.Ref[ft.TextField]()
@@ -75,6 +76,7 @@ text_encoder_row_ref = ft.Ref[ft.ResponsiveRow]()
 dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
 timestep_sm_dropdown_ref = ft.Ref[ft.Dropdown]()
 transformer_dtype_dropdown_ref = ft.Ref[ft.Dropdown]()
+network_network_dropout_field_ref = ft.Ref[ft.TextField]()
 # Musubi-specific precision fields
 mixed_precision_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 fp8_base_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -396,7 +398,8 @@ def get_training_config_page_content():
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
             "factor": factor_field_ref,
-            "dropout": dropout_field_ref,
+            "network_dropout": network_dropout_field_ref,
+            "caption_dropout_rate": caption_dropout_rate_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
             # dtype, transformer_dtype, timestep_sm
             "dtype": dtype_dropdown_ref,
@@ -471,7 +474,8 @@ def get_training_config_page_content():
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
             "factor": factor_field_ref,
-            "dropout": dropout_field_ref,
+            "network_dropout": network_dropout_field_ref,
+            "caption_dropout_rate": caption_dropout_rate_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
             # Model-specific fields
             "z_image_diffusion_model": z_image_diffusion_model_field_ref,
@@ -708,7 +712,7 @@ def get_training_config_page_content():
                 # Musubi-specific adapter fields
                 "rank": rank_field_ref,
                 "alpha": alpha_field_ref,
-                "dropout": dropout_field_ref,
+                "network_dropout": network_dropout_field_ref,
                 "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
                 # Flux2-specific fields
                 "diffusion_model": flux2_diffusion_model_field_ref,
@@ -768,7 +772,8 @@ def get_training_config_page_content():
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
             "factor": factor_field_ref,
-            "dropout": dropout_field_ref,
+            "network_dropout": network_dropout_field_ref,
+            "caption_dropout_rate": caption_dropout_rate_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
         }
         old_adapter_fields = {
@@ -782,7 +787,7 @@ def get_training_config_page_content():
             # But hide dropout and first_frame_conditioning for wan/wan22
             for field_name, ref in musubi_adapter_fields.items():
                 if ref and ref.current:
-                    should_hide = (field_name in ["dropout", "first_frame_conditioning_p_ltx2"] and sel_norm in ["wan", "wan22"])
+                    should_hide = (field_name in ["network_dropout", "caption_dropout_rate", "first_frame_conditioning_p_ltx2"] and sel_norm in ["wan", "wan22"])
                     ref.current.visible = uses_musubi_ui and not should_hide
                     if ref.current.page:
                         ref.current.update()
@@ -1356,10 +1361,11 @@ def get_training_config_page_content():
                     ], spacing=2),
                     # Musubi-specific adapter row
                     ft.ResponsiveRow(controls=[
-                        create_textfield("rank", 32, col=2.5, expand=True, ref=rank_field_ref, visible=_should_show_field("rank")),
-                        create_textfield("alpha", 32, col=2.5, expand=True, ref=alpha_field_ref, visible=_should_show_field("alpha")),
+                        create_textfield("rank", 32, col=1.5, expand=True, ref=rank_field_ref, visible=_should_show_field("rank")),
+                        create_textfield("alpha", 32, col=1.5, expand=True, ref=alpha_field_ref, visible=_should_show_field("alpha")),
                         create_textfield("factor", 4, col=2, expand=True, ref=factor_field_ref, visible=_should_show_factor_field()),
-                        create_textfield("dropout", 0.0, col=2, expand=True, ref=dropout_field_ref, visible=_should_show_field("dropout")),
+                        create_textfield("network_dropout", 0.0, col=2, expand=True, ref=network_dropout_field_ref, visible=_should_show_field("network_dropout")),
+                        create_textfield("caption_dropout_rate", 0.0, col=2, expand=True, ref=caption_dropout_rate_field_ref, visible=_should_show_field("caption_dropout_rate")),
                         create_textfield("first_frame_conditioning_p", 0.5, col=3, expand=True, ref=first_frame_conditioning_p_ltx2_field_ref, visible=_should_show_field("first_frame_conditioning_p_ltx2")),
                     ], spacing=2),
                 ]),

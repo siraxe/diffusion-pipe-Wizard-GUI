@@ -121,6 +121,8 @@ MODEL_CONFIG = {
             "rank": True,
             "alpha": True,
             "dropout": True,
+            "network_dropout": True,
+            "caption_dropout_rate": True,
             "first_frame_conditioning_p_ltx2": True,
             "dtype": False,
             "transformer_dtype": False,
@@ -138,6 +140,8 @@ MODEL_CONFIG = {
             "rank": "32",
             "alpha": "32",
             "dropout": "0.0",
+            "network_dropout": "0.0",
+            "caption_dropout_rate": "0.0",
             "first_frame_conditioning_p_ltx2": "0.1",
             "load_text_encoder_in_8bit": True,
         },
@@ -831,6 +835,8 @@ DEFAULT_FIELD_VISIBILITY = {
     "rank": False,
     "alpha": False,
     "dropout": False,
+    "network_dropout": False,
+    "caption_dropout_rate": False,
     "first_frame_conditioning_p_ltx2": False,
     # LTX2-specific precision fields
     "mixed_precision_mode": False,
@@ -915,6 +921,8 @@ RESETTABLE_FIELDS = [
     "rank",
     "alpha",
     "dropout",
+    "network_dropout",
+    "caption_dropout",
     "first_frame_conditioning_p_ltx2",
 ]
 
