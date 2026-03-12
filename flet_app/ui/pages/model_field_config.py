@@ -114,6 +114,7 @@ MODEL_CONFIG = {
             "ltx_mode": True,
             "frame_extraction": True,
             "separate_audio_buckets": True,
+            "use_mask": True,
             "gradient_checkpointing": True,
             "slider": True,
             "ltx_2_3": True,
@@ -829,6 +830,7 @@ DEFAULT_FIELD_VISIBILITY = {
     "wan_task": False,
     "frame_extraction": False,
     "separate_audio_buckets": False,
+    "use_mask": False,
     "gradient_checkpointing": False,
     "first_frame_conditioning_p": False,
     # LTX2-specific adapter fields

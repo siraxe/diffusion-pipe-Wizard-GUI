@@ -185,6 +185,7 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"ltx_2_3 = {'true' if ltx_2_3_val else 'false'}")
     use_mask_val = _as_bool(_get('use_mask', False))
     lines.append(f"use_mask = {'true' if use_mask_val else 'false'}")
+    # use_stiefel is derived from optimizer_type in ltx2_run.py, no need to save here
     sample_slider_range_val = _get('sample_slider_range', '-2.0, -1.0, 0.0, 1.0, 2.0')
     lines.append(f"sample_slider_range = {_quote(sample_slider_range_val)}")
     # Build control_args from i2v_type and sample_each
@@ -212,8 +213,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"blocks_to_swap = {_clean_value(_get('blocks_to_swap', 0), is_numeric=True)}")
     caption_dropout_val = _clean_value(_get('caption_dropout', 0.0), is_numeric=True)
     lines.append(f"caption_dropout_rate = {caption_dropout_val}")
-    # Convert UI optimizer type to TOML format (lowercase)
-    opt_type_ui = _get('optimizer_type_m', _get('optimizer_type', 'AdamW'))
+    # Convert UI optimizer type to TOML format
+    opt_type_ui = _get('optimizer_type_m', 'AdamW')
     opt_type_toml = get_musubi_optimizer_type_for_toml(opt_type_ui)
     lines.append(f"optimizer_type = {_quote(opt_type_toml)}")
     lines.append(f"scheduler_type = {_quote(_get('scheduler_type', 'constant'))}")

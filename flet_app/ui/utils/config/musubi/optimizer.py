@@ -17,6 +17,7 @@ MUSUBI_OPTIMIZER_TYPE_MAP = {
     'adafactor': 'Adafactor',
     'prodigy': 'Prodigy',
     'automagic': 'Automagic',
+    'stiefel': 'Stiefel',
 }
 
 MUSUBI_OPTIMIZER_TYPE_MAP_REVERSE = {v: k for k, v in MUSUBI_OPTIMIZER_TYPE_MAP.items()}

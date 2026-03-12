@@ -82,6 +82,7 @@ def get_musubi_training_settings(
                                     "Adafactor": "Adafactor",
                                     "Prodigy": "Prodigy",
                                     "Automagic": "Automagic",
+                                    "Stiefel": "Stiefel",
                                 },
                                 col=2.4, expand=True, scale=0.8,
                                 on_change=on_optimizer_change, ref=optimizer_ref

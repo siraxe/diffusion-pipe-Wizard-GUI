@@ -1154,9 +1154,8 @@ def get_training_config_page_content():
                             col=3,
                         ),
                     ], spacing=2),
-                    # Musubi mode dropdown (ltx_mode)
+                    # Musubi checkboxes row 1: ltx_2_3, sab, gradient_checkpointing, 8_bit_te
                     ft.ResponsiveRow(controls=[
-                        #here
                         ft.Checkbox(
                             label="ltx_2_3",
                             value=False,
@@ -1168,14 +1167,14 @@ def get_training_config_page_content():
                             col=2,
                         ),
                         ft.Checkbox(
-                            label="sab",
+                            label="separate_audio_buckets",
                             value=True,
                             scale=0.8,
                             tooltip="Separate audio buckets",
                             ref=separate_audio_buckets_checkbox_ref,
                             visible=_should_show_field("separate_audio_buckets"),
                             data="separate_audio_buckets",
-                            col=1,
+                            col=3.5,
                         ),
                         ft.Checkbox(
                             label="gradient_checkpointing",
@@ -1184,8 +1183,20 @@ def get_training_config_page_content():
                             ref=gradient_checkpointing_checkbox_ref,
                             visible=_should_show_field("gradient_checkpointing"),
                             data="gradient_checkpointing",
-                            col=3.0,
+                            col=3.5,
                         ),
+                        ft.Checkbox(
+                            label="8_bit_te",
+                            value=True,
+                            scale=0.8,
+                            ref=load_text_encoder_in_8bit_checkbox_ref,
+                            visible=True,
+                            data="8_bit_te",
+                            col=3,
+                        ),
+                    ], spacing=2),
+                    # Musubi checkboxes row 2: use_mask, stiefel, slider
+                    ft.ResponsiveRow(controls=[
                         ft.Checkbox(
                             label="use_mask",
                             value=False,
@@ -1193,7 +1204,7 @@ def get_training_config_page_content():
                             ref=use_mask_checkbox_ref,
                             visible=_should_show_field("use_mask"),
                             data="use_mask",
-                            col=2,
+                            col=3,
                         ),
                         ft.Checkbox(
                             label="slider",
@@ -1202,17 +1213,8 @@ def get_training_config_page_content():
                             ref=slider_checkbox_ref,
                             visible=_should_show_field("slider"),
                             data="slider",
-                            col=2,
                             on_change=lambda e: _on_slider_change(e),
-                        ),
-                        ft.Checkbox(
-                            label="8_bit_te",
-                            value=True,
-                            scale=0.8,
-                            col=2,
-                            ref=load_text_encoder_in_8bit_checkbox_ref,
-                            visible=True,
-                            data="8_bit_te",
+                            col=3,
                         ),
                     ], spacing=2),
                     # Adapter row with sample_slider_range

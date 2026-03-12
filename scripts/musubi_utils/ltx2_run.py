@@ -448,8 +448,8 @@ class LTX2Run:
 
         # Add default prodigy args if using prodigy and no optimizer_args provided
         optimizer_type = optimization.get('optimizer_type', 'AdamW')
-        if optimizer_type.lower() == 'prodigy' and not optimization.get('optimizer_args'):
-            optimization['optimizer_args'] = 'd0=1e-5'
+        # if optimizer_type.lower() == 'prodigy' and not optimization.get('optimizer_args'):
+        #     optimization['optimizer_args'] = 'd0=1e-5'
 
         self._add_args_flag(cmd, 'optimizer_args', optimization, CONFIG_FLAGS["OPTIMIZER_ARGS"])
 
@@ -593,7 +593,7 @@ class LTX2Run:
 
         return cmd
 
-    def _build_network_config(self, lora: Dict, training_mode: str) -> List[str]:
+    def _build_network_config(self, lora: Dict, training_mode: str, training_strategy: Dict = None, optimization: Dict = None) -> List[str]:
         """Builds flags for network configuration (LoRA/LoKR)."""
         cmd = []
 
@@ -621,6 +621,12 @@ class LTX2Run:
         if network_dropout > 0:
             cmd.append(f"--network_args")
             cmd.append(f"dropout={network_dropout}")
+
+        # Stiefel-LoRA (via network_args) - derived from optimizer_type
+        optimizer_type = (optimization or {}).get('optimizer_type', '').lower() if optimization else ''
+        if optimizer_type == 'stiefel':
+            cmd.append(f"--network_args")
+            cmd.append(f"use_stiefel=True")
 
         # Caption dropout rate (from lora section)
         caption_dropout_rate = lora.get('caption_dropout_rate', 0.0)
@@ -759,7 +765,7 @@ class LTX2Run:
 
         # 5. Network Configuration
         training_mode = model.get('training_mode', 'lora')
-        net_flags = self._build_network_config(lora, training_mode)
+        net_flags = self._build_network_config(lora, training_mode, training_strategy, optimization)
         cmd.extend(net_flags)
 
         # 6. Optimization & Scheduler Flags
