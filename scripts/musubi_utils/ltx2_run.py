@@ -446,6 +446,11 @@ class LTX2Run:
         if blocks_to_swap > 0:
             cmd.extend([CONFIG_FLAGS["BLOCKS_TO_SWAP"], str(blocks_to_swap)])
 
+        # Add default prodigy args if using prodigy and no optimizer_args provided
+        optimizer_type = optimization.get('optimizer_type', 'AdamW')
+        if optimizer_type.lower() == 'prodigy' and not optimization.get('optimizer_args'):
+            optimization['optimizer_args'] = 'd0=1e-5'
+
         self._add_args_flag(cmd, 'optimizer_args', optimization, CONFIG_FLAGS["OPTIMIZER_ARGS"])
 
         return cmd
@@ -479,15 +484,20 @@ class LTX2Run:
         """Builds optimizer and scheduler specific flags."""
         cmd = []
 
+        # Map prodigy to prodigyopt.Prodigy for external optimizer
+        optimizer_type = optimization.get('optimizer_type', 'AdamW')
+        if optimizer_type.lower() == 'prodigy':
+            optimizer_type = 'prodigyopt.Prodigy'
+
         cmd.extend([
             CONFIG_FLAGS["GRAD_ACCUMULATION"], str(optimization.get('gradient_accumulation_steps', 4)),
             CONFIG_FLAGS["LEARNING_RATE"], str(optimization.get('learning_rate', 0.001)),
-            CONFIG_FLAGS["OPTIMIZER_TYPE"], optimization.get('optimizer_type', 'AdamW'),
+            CONFIG_FLAGS["OPTIMIZER_TYPE"], optimizer_type,
             CONFIG_FLAGS["LR_SCHEDULER"], optimization.get('scheduler_type', 'constant'),
-            CONFIG_FLAGS["TIMESTAMP_SAMPLING"], 
+            CONFIG_FLAGS["TIMESTAMP_SAMPLING"],
                 self.get_config_value(optimization, 'timestep_sampling_mode', default='shifted_logit_normal') # Or flow_matching section
         ])
-        
+
         return cmd
 
     def _build_validation_flags(self, validation: Dict, output_dir: str) -> List[str]:
