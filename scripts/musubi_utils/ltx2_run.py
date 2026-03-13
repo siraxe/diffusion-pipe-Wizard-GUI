@@ -189,6 +189,9 @@ CONFIG_FLAGS = {
     "PRIOR_DIV_ARGS": "--prior_divergence_args",
     "CREPA": "--crepa",
     "CREPA_ARGS": "--crepa_args",
+    "AUDIO_LOSS_BALANCE_MODE": "--audio_loss_balance_mode",
+    "AUDIO_LOSS_BALANCE_TARGET_RATIO": "--audio_loss_balance_target_ratio",
+    "AUDIO_LOSS_BALANCE_EMA_DECAY": "--audio_loss_balance_ema_decay",
 }
 
 DEFAULTS = {
@@ -848,7 +851,18 @@ class LTX2Run:
             cmd.extend(["--lora_target_preset", "audio"])
         elif ltx_mode == 'av':
             cmd.extend(["--lora_target_preset", "full"])
-            
+
+            # Add audio loss balance mode for AV training
+            audio_loss_balance_mode = training_strategy.get('audio_loss_balance_mode', 'ema_mag')
+            cmd.extend([CONFIG_FLAGS["AUDIO_LOSS_BALANCE_MODE"], audio_loss_balance_mode])
+
+            # Add EMA-specific settings if using ema_mag mode
+            if audio_loss_balance_mode == 'ema_mag':
+                target_ratio = training_strategy.get('audio_loss_balance_target_ratio', 0.33)
+                ema_decay = training_strategy.get('audio_loss_balance_ema_decay', 0.99)
+                cmd.extend([CONFIG_FLAGS["AUDIO_LOSS_BALANCE_TARGET_RATIO"], str(target_ratio)])
+                cmd.extend([CONFIG_FLAGS["AUDIO_LOSS_BALANCE_EMA_DECAY"], str(ema_decay)])
+
         if self.parse_bool(training_strategy.get('separate_audio_buckets', False)):
             cmd.append("--separate_audio_buckets")
 

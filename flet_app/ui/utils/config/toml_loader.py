@@ -331,26 +331,37 @@ def apply_values_recursive(control: Any, label_vals: dict, page: Any) -> None:
             apply_values_recursive(control.content, label_vals, page)
 
         label = getattr(control, 'label', None)
-        if not label or label == 'Trainer':
+        data = getattr(control, 'data', None)
+
+        # Skip if no identifier or it's the Trainer dropdown
+        if not (label or data) or label == 'Trainer':
             return
 
+        # Check both label and data attribute against label_vals keys
+        key = None
         if label in label_vals:
-            val = label_vals[label]
-            if isinstance(control, ft.TextField):
-                control.value = str(val) if val is not None else ''
-                if control.page:
-                    control.update()
-            elif isinstance(control, ft.Dropdown):
-                if val is None or str(val).strip() == '':
-                    control.value = None
-                else:
-                    control.value = str(val)
-                if control.page:
-                    control.update()
-            elif isinstance(control, ft.Checkbox):
-                control.value = to_bool(val) if val is not None else False
-                if control.page:
-                    control.update()
+            key = label
+        elif data in label_vals:
+            key = data
+        else:
+            return
+
+        val = label_vals[key]
+        if isinstance(control, ft.TextField):
+            control.value = str(val) if val is not None else ''
+            if control.page:
+                control.update()
+        elif isinstance(control, ft.Dropdown):
+            if val is None or str(val).strip() == '':
+                control.value = None
+            else:
+                control.value = str(val)
+            if control.page:
+                control.update()
+        elif isinstance(control, ft.Checkbox):
+            control.value = to_bool(val) if val is not None else False
+            if control.page:
+                control.update()
     except Exception:
         pass
 

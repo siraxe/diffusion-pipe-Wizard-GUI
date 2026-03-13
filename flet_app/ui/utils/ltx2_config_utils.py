@@ -56,8 +56,17 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
         s_str = str(s).replace('"""', '\\"\\"\\"')
         return f'"""{s_str}"""'
 
+    def _format_numeric(val):
+        """Format a numeric value for TOML, avoiding scientific notation."""
+        if isinstance(val, int):
+            return str(val)
+        # For floats, use decimal format instead of scientific notation
+        # Convert to string with enough precision, then strip trailing zeros
+        formatted = f"{val:.10f}".rstrip('0').rstrip('.')
+        return formatted
+
     def _clean_value(val, is_numeric=False):
-        """Clean value by removing type suffixes. If numeric fails, quote as string."""
+        """Clean value by removing type suffixes. If numeric fails, quote as string. Returns formatted string for numeric values."""
         s = str(val).strip()
         # Remove type suffixes (f, d, etc) only from the end
         if s and s[-1] in 'fd':
@@ -69,8 +78,9 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
                 f_val = float(s)
                 # Return as int if it's a whole number
                 if f_val == int(f_val):
-                    return int(f_val)
-                return f_val
+                    return str(int(f_val))
+                # For floats, format without scientific notation
+                return _format_numeric(f_val)
             except (ValueError, TypeError):
                 # If it's not numeric, quote it as a string
                 return _quote(s)
@@ -347,6 +357,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
 
 def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
     """Update UI controls from LTX2 TOML data."""
+    import sys
+    print(f"[DEBUG] update_ltx2_ui_from_toml called, toml_data keys: {list(toml_data.keys())}", file=sys.stderr, flush=True)
     from flet_app.ui.utils.config_utils import collapse_model_path
     import flet as ft
 
@@ -361,19 +373,21 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         """Helper to find and set a control's value by label or data attribute."""
         try:
             found = False
-            def _apply(control):
+            matched_controls = []
+            def _apply(control, depth=0):
                 nonlocal found
                 if hasattr(control, 'controls') and control.controls:
                     for c in control.controls:
-                        _apply(c)
+                        _apply(c, depth + 1)
                 if hasattr(control, 'content') and control.content:
-                    _apply(control.content)
+                    _apply(control.content, depth + 1)
 
                 ctrl_label = getattr(control, 'label', None)
                 ctrl_data = getattr(control, 'data', None)
                 # Match by label or data attribute
                 if ctrl_label == label or ctrl_data == label:
                     found = True
+                    matched_controls.append(f"{'  '*depth}{type(control).__name__}(label={ctrl_label}, data={ctrl_data})")
                     if isinstance(control, ft.TextField):
                         # Handle empty/None values - show as "null" string for specific fields
                         if value is None or value == '':
@@ -387,16 +401,29 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
                         else:
                             control.value = str(value) if value is not None else ""
                     elif isinstance(control, ft.Checkbox):
+                        logger.info(f"Setting checkbox '{label}' to {value} (current={control.value})")
                         if isinstance(value, bool):
                             control.value = value
                         else:
                             control.value = str(value).lower() in ['true', '1', 'yes', 'on']
+                        # Explicitly update the checkbox
+                        if hasattr(control, 'update'):
+                            try:
+                                control.update()
+                            except Exception:
+                                pass
                     if hasattr(control, 'page') and control.page:
                         control.update()
 
             config_content = getattr(training_tab_container, 'config_page_content', None)
             if config_content:
                 _apply(config_content)
+                # Log if generate_audio was not found
+                if label == 'generate_audio':
+                    if found:
+                        logger.info(f"generate_audio checkbox found and set. Matched controls: {matched_controls}")
+                    else:
+                        logger.warning(f"generate_audio checkbox NOT found in config_page_content")
         except Exception as e:
             logger.warning(f"Error setting field {label} to {value}: {e}")
 
@@ -749,11 +776,18 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
 
         # Validation section - always load values (section may be empty dict)
         validation = toml_data.get('validation', {})
+        import sys
+        print(f"[DEBUG] validation section: {validation}", file=sys.stderr, flush=True)
         # Always load validation values, even if section is empty (use defaults)
         # Don't use 'if validation:' as empty dict {} is falsy
         _set_field_value('sample_every_n_interval', validation.get('interval', '-1'))
         _set_field_value('sample_at_first', validation.get('sample_at_first', 'false'))
-        _set_field_value('generate_audio', validation.get('generate_audio', 'false'))
+        generate_audio = validation.get('generate_audio', False)
+        print(f"[DEBUG] generate_audio from TOML: {generate_audio} (type: {type(generate_audio)})", file=sys.stderr, flush=True)
+        if not isinstance(generate_audio, bool):
+            generate_audio = str(generate_audio).lower() in ['true', '1', 'yes', 'on']
+        print(f"[DEBUG] calling _set_field_value('generate_audio', {generate_audio})", file=sys.stderr, flush=True)
+        _set_field_value('generate_audio', generate_audio)
         _set_field_value('prompts', validation.get('prompts', 'Two women with long brown hair dancing on the dance floor'))
         _set_field_value('negative_prompt', validation.get('negative_prompt', 'worst quality, inconsistent motion, blurry, jittery, distorted'))
         _set_field_value('start_images', validation.get('start_images', 'none'))

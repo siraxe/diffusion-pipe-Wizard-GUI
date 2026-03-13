@@ -158,16 +158,7 @@ def get_musubi_training_settings(
                             ),
                             create_textfield("sample_every_n_interval", "-1", col=3, expand=True),
                             create_textfield("video_dims", "768, 512, 45", col=3, expand=True),
-                            ft.Container(
-                                content=ft.Checkbox(
-                                    label="Audio",
-                                    value=False,
-                                    data="generate_audio",
-                                    scale=0.8,
-                                ),
-                                col=3, expand=True,
-                                alignment=ft.alignment.center
-                            ),
+                            create_checkbox("Audio", False, "generate_audio", col=3, expand=True, scale=0.8),
                         ], spacing=6),
                         # Row 2: sample_steps, guidance_scale, seed, tiled_vae, s_offload, cache_te, cache_i2v
                         ft.ResponsiveRow(controls=[
