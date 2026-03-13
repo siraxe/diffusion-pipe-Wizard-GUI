@@ -73,6 +73,16 @@ def populate_optimizer_section(toml_data: dict, label_vals: dict) -> None:
     if not isinstance(opt, dict):
         return
 
+    # Check if this is a musubi model - if so, skip setting optimizer_type_m
+    # (will be handled by the musubi-specific loader)
+    model = toml_data.get('model', {})
+    is_musubi_model = False
+    if isinstance(model, dict):
+        model_type = str(model.get('type', '')).lower()
+        trainer = str(model.get('trainer', '')).lower()
+        is_musubi_model = (trainer == 'musubi' or 'ltx' in model_type or
+                          'ltx2' in model_type or 'wan' in model_type)
+
     # Check for optimizer_type (musubi) or type (diffusion-pipe)
     if 'optimizer_type' in opt:
         opt_type = opt.get('optimizer_type')
@@ -88,13 +98,16 @@ def populate_optimizer_section(toml_data: dict, label_vals: dict) -> None:
             mapped_key = get_optimizer_key(opt_type_str)
             if mapped_key:
                 label_vals['optimizer_type'] = mapped_key
-                label_vals['optimizer_type_m'] = mapped_key
+                if not is_musubi_model:
+                    label_vals['optimizer_type_m'] = mapped_key
             else:
                 label_vals['optimizer_type'] = opt_type_str
-                label_vals['optimizer_type_m'] = opt_type_str
+                if not is_musubi_model:
+                    label_vals['optimizer_type_m'] = opt_type_str
         except Exception:
             label_vals['optimizer_type'] = opt_type_str
-            label_vals['optimizer_type_m'] = opt_type_str
+            if not is_musubi_model:
+                label_vals['optimizer_type_m'] = opt_type_str
 
     # Common fields
     for k in ('lr', 'learning_rate', 'audio_lr', 'betas', 'weight_decay', 'eps'):
@@ -248,14 +261,30 @@ def populate_validation_section(toml_data: dict, label_vals: dict) -> None:
     if not isinstance(val, dict):
         return
 
-    bool_fields = ('sample_at_first', 'generate_audio', 's_offload', 'tiled_vae', 'cache_te')
-    for k in ('interval', 'sample_steps', 'guidance_scale', 'seed'):
+    # For sample_at_first, keep as lowercase string for dropdown compatibility
+    if 'sample_at_first' in val:
+        label_vals['sample_at_first'] = str(val.get('sample_at_first', 'false')).lower()
+
+    # For interval, check if this is an LTX2/musubi config by looking at the model section
+    # If so, use sample_every_n_interval as the key; otherwise use validation_interval
+    if 'interval' in val:
+        model = toml_data.get('model', {})
+        is_ltx2_or_musubi = False
+        if isinstance(model, dict):
+            model_type = str(model.get('type', '')).lower()
+            trainer = str(model.get('trainer', '')).lower()
+            is_ltx2_or_musubi = ('ltx' in model_type or 'ltx2' in model_type or
+                                'wan' in model_type or trainer == 'musubi')
+        interval_val = val.get('interval')
+        if is_ltx2_or_musubi:
+            label_vals['sample_every_n_interval'] = interval_val
+        else:
+            label_vals['validation_interval'] = interval_val
+
+    bool_fields = ('generate_audio', 's_offload', 'tiled_vae', 'cache_te')
+    for k in ('sample_steps', 'guidance_scale', 'seed'):
         if k in val:
-            v = val.get(k)
-            if k == 'interval':
-                label_vals['validation_interval'] = v
-            else:
-                label_vals[k] = v
+            label_vals[k] = val.get(k)
     for k in bool_fields:
         if k in val:
             label_vals[k] = to_bool(val.get(k))

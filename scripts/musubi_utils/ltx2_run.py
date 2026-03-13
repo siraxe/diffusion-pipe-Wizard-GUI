@@ -6,8 +6,10 @@ Refactored for maintainability, DRY compliance, and robustness.
 """
 
 import os
+import subprocess
 import sys
 import logging
+import hashlib
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -229,6 +231,83 @@ class LTX2Run:
         if not p.is_absolute():
             return self.project_root / p
         return p
+
+    # ==========================================================================
+    # Hash-based Cache Validation
+    # ==========================================================================
+
+    def _compute_sample_cache_hash(self, validation: Dict) -> str:
+        """Compute a hash of the sampling configuration to detect changes."""
+        hasher = hashlib.sha256()
+
+        # Hash all relevant validation parameters
+        hash_fields = [
+            'prompts', 'negative_prompt', 'video_dims', 'sample_steps',
+            'guidance_scale', 'seed', 'start_images', 'interval'
+        ]
+
+        for field in hash_fields:
+            value = validation.get(field)
+            if value is not None:
+                # For file paths, also hash the file contents
+                if field == 'start_images' and value:
+                    img_path = Path(value)
+                    if not img_path.is_absolute():
+                        img_path = self.project_root / img_path
+                    if img_path.exists():
+                        with open(img_path, 'rb') as f:
+                            hasher.update(f.read())
+                        hasher.update(str(img_path).encode())
+                    else:
+                        hasher.update(str(img_path).encode())
+                else:
+                    hasher.update(str(value).encode())
+
+        return hasher.hexdigest()
+
+    def _get_sample_cache_hash_file(self, output_dir: str) -> Path:
+        """Get the path to the hash file for sample cache validation."""
+        return Path(output_dir) / 'sample' / '.sample_cache_hash'
+
+    def _should_rebuild_sample_cache(self, validation: Dict, output_dir: str) -> bool:
+        """Check if sample cache needs to be rebuilt based on hash comparison."""
+        hash_file = self._get_sample_cache_hash_file(output_dir)
+        cache_path = Path(output_dir) / 'sample' / 'sample_prompts_cache.pt'
+
+        # If cache doesn't exist, need to build
+        if not cache_path.exists():
+            return True
+
+        # If hash file doesn't exist, need to build
+        if not hash_file.exists():
+            return True
+
+        # Read stored hash and compare
+        try:
+            current_hash = self._compute_sample_cache_hash(validation)
+            with open(hash_file, 'r') as f:
+                stored_hash = f.read().strip()
+
+            if current_hash != stored_hash:
+                logger.info(f"Sample config changed, cache will be rebuilt")
+                return True
+
+            logger.info(f"Sample config unchanged, using existing cache")
+            return False
+        except Exception as e:
+            logger.warning(f"Error reading cache hash file: {e}, rebuilding cache")
+            return True
+
+    def _save_sample_cache_hash(self, validation: Dict, output_dir: str) -> None:
+        """Save the hash of the current sampling configuration."""
+        hash_file = self._get_sample_cache_hash_file(output_dir)
+        hash_file.parent.mkdir(parents=True, exist_ok=True)
+
+        current_hash = self._compute_sample_cache_hash(validation)
+        with open(hash_file, 'w') as f:
+            f.write(current_hash)
+
+        logger.info(f"Saved sample cache hash: {current_hash[:16]}...")
 
     # ==========================================================================
     # Config Parsing Helpers
@@ -500,7 +579,7 @@ class LTX2Run:
 
         return cmd
 
-    def _build_validation_flags(self, validation: Dict, output_dir: str) -> List[str]:
+    def _build_validation_flags(self, validation: Dict, output_dir: str, config: Dict = None, ckpt_mode: str = 'steps', dataset_config: str = None) -> List[str]:
         """Builds flags for sampling and validation."""
         cmd = []
         
@@ -514,15 +593,16 @@ class LTX2Run:
         if sample_at_first:
             cmd.append(CONFIG_FLAGS["SAMPLE_AT_FIRST"])
 
-        ckpt_mode = validation.get('_ckpt_mode', 'steps') # Passed from main loop context usually, simplifying here
-        # If we don't have mode here, default to steps logic or pass it in. 
-        # For this helper, let's assume standard step logic or pass mode as arg if needed.
-        # Re-implementing the logic from original code for safety:
-        
+        # Use the ckpt_mode parameter (passed from checkpoints config)
+        # ckpt_mode is 'steps' or 'epochs' based on [checkpoints] mode setting
+
         interval = validation.get('interval', -1)
         if str(interval) != '-1':
-            flag_key = CONFIG_FLAGS["SAMPLE_INTERVAL"] # Default to steps, adjust if epochs needed in caller
-            cmd.extend([flag_key, str(interval)])
+            # Use the correct flag based on checkpoint mode
+            if ckpt_mode == 'epochs':
+                cmd.extend(["--sample_every_n_epochs", str(interval)])
+            else:
+                cmd.extend([CONFIG_FLAGS["SAMPLE_INTERVAL"], str(interval)])
 
         video_dims = validation.get('video_dims', '768, 512, 45')
         if str(video_dims) != '768, 512, 45':
@@ -553,20 +633,31 @@ class LTX2Run:
 
         # Sample prompts and caches
         sample_dir = Path(output_dir) / 'sample'
-        
-        if self.parse_bool(validation.get('prompts', False)):
-            sample_prompts_path = sample_dir / 'sample_prompts.txt'
-            if sample_prompts_path.exists():
-                cmd.extend([CONFIG_FLAGS["SAMPLE_PROMPTS"], str(sample_prompts_path)])
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        sample_prompts_path = sample_dir / 'sample_prompts.txt'
 
-                cache_path = sample_dir / 'sample_prompts_cache.pt'
-                if cache_path.exists():
-                    cmd.extend([CONFIG_FLAGS["USE_PRECACHED_PROMPTS"], CONFIG_FLAGS["SAMPLE_CACHE"], str(cache_path)])
+        # Check if we should use sample prompts (inline config or file-based)
+        use_prompts_file = self.parse_bool(validation.get('prompts_file', False))
+        inline_prompts = validation.get('prompts')
+        has_inline_config = bool(inline_prompts)
 
-                latents_cache_path = sample_dir / 'sample_latents_cache.pt'
-                if latents_cache_path.exists():
-                    cmd.extend([CONFIG_FLAGS["LATENTS_CACHE"], str(latents_cache_path)])
-        
+        # NOTE: Sample prompts caching is now handled by LTX2Cache.build_all_cache_commands
+        # and will be run during the cache phase (in background thread with streaming)
+        # Do NOT trigger caching here as it would block the UI
+
+        # Add --sample_prompts flag if file exists or will be created by caching
+        if sample_prompts_path.exists() or use_prompts_file or (has_inline_config and sampling_enabled):
+            cmd.extend([CONFIG_FLAGS["SAMPLE_PROMPTS"], str(sample_prompts_path)])
+
+            # Add cache flags if caches exist
+            cache_path = sample_dir / 'sample_prompts_cache.pt'
+            if cache_path.exists():
+                cmd.extend([CONFIG_FLAGS["USE_PRECACHED_PROMPTS"], CONFIG_FLAGS["SAMPLE_CACHE"], str(cache_path)])
+
+            latents_cache_path = sample_dir / 'sample_latents_cache.pt'
+            if latents_cache_path.exists():
+                cmd.extend([CONFIG_FLAGS["LATENTS_CACHE"], str(latents_cache_path)])
+
         return cmd
 
     def _build_preservation_flags(self, acceleration: Dict) -> List[str]:
@@ -784,7 +875,8 @@ class LTX2Run:
         cmd.extend(ckpt_flags)
 
         # 8. Validation & Sampling Flags
-        val_flags = self._build_validation_flags(validation, output_dir)
+        ckpt_mode = checkpoints.get('mode', 'steps')
+        val_flags = self._build_validation_flags(validation, output_dir, config, ckpt_mode, dataset_config)
         cmd.extend(val_flags)
 
         # 9. Preservation & Regularization
@@ -796,6 +888,27 @@ class LTX2Run:
             cmd.extend([CONFIG_FLAGS["RESUME"], resume])
 
         return cmd
+
+    # NOTE: Sample prompt caching is now handled by LTX2Cache.build_all_cache_commands
+    # and will be run during the cache phase (in background thread with streaming)
+    # The cache_sample_wrapper.py script handles:
+    # 1. Generating sample_prompts.txt from inline config
+    # 2. Checking hash to see if caching is needed
+    # 3. Running the actual caching subprocess if needed
+
+    def prepare_for_training(self, config: Dict, dataset_config: str, slider_config: Optional[str] = None) -> None:
+        """
+        Prepare for training by caching sample prompts.
+
+        This method delegates to LTX2CacheSample which:
+        1. Generates sample_prompts.txt from inline config
+        2. Caches text encoder outputs and image latents
+        3. Uses hash-based validation to avoid redundant work
+
+        Call this before starting training to ensure all prerequisites are ready.
+        """
+        # Just delegate to the caching method which handles everything
+        self._cache_sample_prompts_if_needed(config, dataset_config)
 
     def format_training_command(self, **kwargs) -> str:
         """

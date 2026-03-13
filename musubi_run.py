@@ -242,6 +242,10 @@ class MusubiRun:
     def _run_command(self, cmd: List[str]) -> subprocess.Popen:
         logger.info(f"Running command: {' '.join(cmd[:3])}...")
 
+        # Force unbuffered output for real-time streaming
+        env = os.environ.copy()
+        env['PYTHONUNBUFFERED'] = '1'
+
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -249,6 +253,7 @@ class MusubiRun:
             text=True,
             bufsize=1,
             cwd=str(self.project_root),
+            env=env,
         )
 
         return proc

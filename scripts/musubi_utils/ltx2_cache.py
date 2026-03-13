@@ -1,4 +1,5 @@
 import os
+import sys
 import toml
 import glob
 from typing import Dict, List, Optional
@@ -216,21 +217,20 @@ class LTX2Cache:
         )
 
         # Sample prompts caching (optional)
-        if validation.get('prompts') and validation.get('cache_te', True):
-            sample_prompts_path = os.path.join(sample_dir, 'sample_prompts.txt')
-            sample_prompts_cache = os.path.join(sample_dir, 'sample_prompts_cache.pt')
+        # Only cache if interval >= 1 to avoid caching for one-time sampling
+        sample_interval = validation.get('interval', -1)
+        if validation.get('prompts') and validation.get('cache_te', True) and sample_interval >= 1:
+            # Use the wrapper script in scripts/musubi_utils that generates sample_prompts.txt and handles hash validation
+            wrapper_script = str(self.project_root / "scripts" / "musubi_utils" / "ltx2_cache_sample.py")
+            config_path = str(self.project_root / "workspace" / "last_config.toml")
 
-            commands['sample_prompts'] = self.build_cache_sample_prompts_command(
-                dataset_config=dataset_config,
-                ltx2_checkpoint=ltx2_checkpoint,
-                gemma_root=gemma_root,
-                sample_prompts=sample_prompts_path,
-                sample_prompts_cache=sample_prompts_cache,
-                ltx2_mode=ltx2_mode,
-                mixed_precision=mixed_precision,
-                gemma_load_in_8bit=gemma_8bit,
-                cache_i2v=self.parse_bool(validation.get('cache_i2v', True))
-            )
+            commands['sample_prompts'] = [
+                "python",
+                wrapper_script,
+                "--config", config_path,
+                "--dataset_config", dataset_config,
+                "--project_root", str(self.project_root),
+            ]
 
         return commands
 

@@ -145,6 +145,7 @@ async def run_cache_commands(
     page,
     training_console_text,
     slider_config: str = None,
+    cache_types: list = None,
 ):
     """
     Execute cache commands sequentially (latents, then text_encoder).
@@ -158,6 +159,8 @@ async def run_cache_commands(
         page: Flet page
         training_console_text: Console output control
         slider_config: Path to slider config (for i2v mode detection)
+        cache_types: Optional list of cache types to run (e.g., ['sample_prompts'])
+                     If None, runs all available cache types
     """
     import subprocess
     import threading
@@ -168,7 +171,12 @@ async def run_cache_commands(
             # Dynamic cache order based on what commands are available
             # Priority: i2v_preprocess > latents > text_encoder > sample_prompts
             cache_priority = ['i2v_preprocess', 'latents', 'text_encoder', 'sample_prompts']
-            cache_order = [ct for ct in cache_priority if ct in cache_cmds_dict]
+
+            # Filter by cache_types if specified
+            if cache_types:
+                cache_order = [ct for ct in cache_priority if ct in cache_cmds_dict and ct in cache_types]
+            else:
+                cache_order = [ct for ct in cache_priority if ct in cache_cmds_dict]
 
             # Track overall success/failure state
             all_success = True
@@ -283,8 +291,13 @@ async def run_cache_commands(
             if page:
                 page.run_task(reset_btn)
 
-    cache_thread = threading.Thread(target=run_cache_thread, daemon=True)
+    # Start the cache thread and wait for it to complete without blocking event loop
+    cache_thread = threading.Thread(target=run_cache_thread, daemon=False)
     cache_thread.start()
+
+    # Wait for thread to complete while allowing event loop to process UI updates
+    while cache_thread.is_alive():
+        await asyncio.sleep(0.1)  # Yield control every 100ms to allow UI updates
 
 
 # =====================
@@ -430,14 +443,35 @@ async def run_ltx2_training_flow(
         else:
             add_warning_message(training_console_text, f"\n[Resume] No state found\n")
 
-    # Check if cache_only mode - run cache commands instead of training
-    if mode == 'cache_only':
-        add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running cache commands\n")
+    # Run cache commands before training
+    # In trust_cache mode: skip latents/text_encoder but still run sample_prompts caching
+    # In cache_only mode: run all caching then stop
+    # In full mode: run all caching then train
+
+    if mode == 'trust_cache':
+        add_info_message(training_console_text, f"\n[Info] Trust-cache mode: Skipping latents/text_encoder caching\n")
+        # Only run sample_prompts caching in trust_cache mode
+        add_info_message(training_console_text, f"\n[Info] Running sample prompts caching...\n")
         if training_console_text.page:
             training_console_text.update()
-        # Run cache commands using the shared function
+
+        # Run only sample_prompts cache
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'])
+    elif mode == 'cache_only':
+        add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running all cache commands\n")
+        if training_console_text.page:
+            training_console_text.update()
+
+        # Run all cache commands
         await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
-        return
+        return  # Stop after caching
+    else:  # full mode
+        add_info_message(training_console_text, f"\n[Info] Running cache commands before training...\n")
+        if training_console_text.page:
+            training_console_text.update()
+
+        # Run all cache commands
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
 
     # Build training command
     cmd = runner.get_training_command(dataset_config, slider_config_path, resume_path)
