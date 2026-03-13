@@ -789,11 +789,13 @@ class LTX2Run:
         config: Dict,
         dataset_config: str,
         slider_config: Optional[str] = None,
-        resume: Optional[str] = None
+        resume: Optional[str] = None,
+        reset_optimizer: bool = False,
+        reset_optimizer_params: bool = False
     ) -> List[str]:
         """
         Build the full accelerate launch training command.
-        
+
         Returns:
             List of command arguments for accelerate launch
         """
@@ -887,6 +889,9 @@ class LTX2Run:
         if resume and os.path.exists(resume):
             cmd.extend([CONFIG_FLAGS["RESUME"], resume])
 
+        # NOTE: Reset optimizer flags are not supported by musubi-trainer
+        # Users need to delete the state directory manually if they want to reset optimizer
+
         return cmd
 
     # NOTE: Sample prompt caching is now handled by LTX2Cache.build_all_cache_commands
@@ -942,13 +947,13 @@ class LTX2Run:
 # Convenience Functions
 # ==========================================================================
 
-def create_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None) -> List[str]:
+def create_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None, reset_optimizer: bool = False, reset_optimizer_params: bool = False) -> List[str]:
     """Convenience function to create training command arguments."""
     runner = LTX2Run()
-    return runner.build_training_command(config, dataset_config, slider_config, resume)
+    return runner.build_training_command(config, dataset_config, slider_config, resume, reset_optimizer, reset_optimizer_params)
 
 
-def format_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None) -> str:
+def format_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None, reset_optimizer: bool = False, reset_optimizer_params: bool = False) -> str:
     """Convenience function to format training command as string."""
     runner = LTX2Run()
-    return runner.format_training_command(config=config, dataset_config=dataset_config, slider_config=slider_config, resume=resume)
+    return runner.format_training_command(config=config, dataset_config=dataset_config, slider_config=slider_config, resume=resume, reset_optimizer=reset_optimizer, reset_optimizer_params=reset_optimizer_params)

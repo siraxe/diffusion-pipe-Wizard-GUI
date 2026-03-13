@@ -143,7 +143,9 @@ class MusubiRun:
         self,
         dataset_config: str,
         slider_config: Optional[str] = None,
-        resume: Optional[str] = None
+        resume: Optional[str] = None,
+        reset_optimizer: bool = False,
+        reset_optimizer_params: bool = False
     ) -> List[str]:
         if not self.run_handler:
             raise NotImplementedError(f"Training handler not implemented for {self.model_type} yet")
@@ -152,14 +154,18 @@ class MusubiRun:
             self.config,
             dataset_config,
             slider_config,
-            resume
+            resume,
+            reset_optimizer,
+            reset_optimizer_params
         )
 
     def format_training_command(
         self,
         dataset_config: str,
         slider_config: Optional[str] = None,
-        resume: Optional[str] = None
+        resume: Optional[str] = None,
+        reset_optimizer: bool = False,
+        reset_optimizer_params: bool = False
     ) -> str:
         if not self.run_handler:
             raise NotImplementedError(f"Training handler not implemented for {self.model_type} yet")
@@ -168,7 +174,9 @@ class MusubiRun:
             config=self.config,
             dataset_config=dataset_config,
             slider_config=slider_config,
-            resume=resume
+            resume=resume,
+            reset_optimizer=reset_optimizer,
+            reset_optimizer_params=reset_optimizer_params
         )
 
     # ==========================================================================
@@ -197,9 +205,11 @@ class MusubiRun:
         self,
         dataset_config: str,
         slider_config: Optional[str] = None,
-        resume: Optional[str] = None
+        resume: Optional[str] = None,
+        reset_optimizer: bool = False,
+        reset_optimizer_params: bool = False
     ) -> subprocess.Popen:
-        cmd = self.get_training_command(dataset_config, slider_config, resume)
+        cmd = self.get_training_command(dataset_config, slider_config, resume, reset_optimizer, reset_optimizer_params)
         return self._run_command(cmd)
 
     def _run_cache_sequence(self, commands: Dict[str, List[str]], dataset_config: str) -> None:

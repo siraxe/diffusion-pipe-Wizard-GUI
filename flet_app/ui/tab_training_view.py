@@ -984,6 +984,8 @@ def get_training_tab_content(page: ft.Page):
                     training_tab_container=training_tab_container,
                     page=page,
                     trust_cache_checkbox=trust_cache_checkbox,
+                    reset_optimizer=reset_opt_checkbox.value,
+                    reset_optimizer_params=reset_opt_params_checkbox.value,
                 )
                 return
             # Determine launch parameters

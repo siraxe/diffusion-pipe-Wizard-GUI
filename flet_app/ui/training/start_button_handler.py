@@ -39,8 +39,15 @@ def set_button_state(main_container, text: str, page=None):
         start_btn = getattr(main_container, 'start_btn', None)
         if start_btn is not None:
             start_btn.text = text
+            # Explicitly update the button itself
+            start_btn.update()
+            logger.info(f"Set button to '{text}', button now shows: '{start_btn.text if start_btn else 'N/A'}'")
+        else:
+            logger.warning("start_btn is None in main_container!")
         if page is not None:
             page.update()
+        else:
+            logger.warning("page is None in set_button_state!")
     except Exception as e:
         logger.error(f"Error setting button state: {e}")
 
@@ -347,7 +354,9 @@ async def run_ltx2_training_flow(
     main_container,
     training_tab_container,
     page,
-    trust_cache_checkbox
+    trust_cache_checkbox,
+    reset_optimizer=False,
+    reset_optimizer_params=False
 ):
     """
     Orchestrate the LTX2 training flow including cache creation and training.
@@ -474,7 +483,7 @@ async def run_ltx2_training_flow(
         await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
 
     # Build training command
-    cmd = runner.get_training_command(dataset_config, slider_config_path, resume_path)
+    cmd = runner.get_training_command(dataset_config, slider_config_path, resume_path, reset_optimizer, reset_optimizer_params)
 
     # Print the training command for reference (sorted and formatted)
     add_info_message(training_console_text, f"\n[Info] Training command:\n")
@@ -594,6 +603,11 @@ async def run_ltx2_training_flow(
             logger.error("Could not import output streamer")
 
         set_button_state(main_container, "Stop", page)
+
+        # Debug: verify button state was set
+        start_btn = getattr(main_container, 'start_btn', None)
+        logger.info(f"Set button to Stop. Button text: {start_btn.text if start_btn else 'None'}")
+
         return
     except Exception as e:
         add_error_message(training_console_text, f"\n[Error] Failed to start training: {e}\n")
