@@ -153,6 +153,7 @@ async def run_cache_commands(
     training_console_text,
     slider_config: str = None,
     cache_types: list = None,
+    reset_button_on_complete: bool = True,
 ):
     """
     Execute cache commands sequentially (latents, then text_encoder).
@@ -168,6 +169,8 @@ async def run_cache_commands(
         slider_config: Path to slider config (for i2v mode detection)
         cache_types: Optional list of cache types to run (e.g., ['sample_prompts'])
                      If None, runs all available cache types
+        reset_button_on_complete: If True, reset button to Start after caching completes.
+                                  If False, leave button state as-is (for when training follows).
     """
     import subprocess
     import threading
@@ -281,7 +284,9 @@ async def run_cache_commands(
                     add_success_message(training_console_text, f"\n[Success] All caching completed for {runner.model_type}.\n")
                 else:
                     add_warning_message(training_console_text, f"\n[Warning] Caching completed with errors for {runner.model_type}.\n")
-                reset_to_start_button(main_container, training_tab_container, page)
+                # Only reset button if requested (e.g., not when training will follow)
+                if reset_button_on_complete:
+                    reset_to_start_button(main_container, training_tab_container, page)
             if page:
                 page.run_task(show_final_status)
 
@@ -294,7 +299,9 @@ async def run_cache_commands(
             logger.error(f"Failed to run cache commands: {e}")
 
             async def reset_btn():
-                reset_to_start_button(main_container, training_tab_container, page)
+                # Only reset button if requested (e.g., not when training will follow)
+                if reset_button_on_complete:
+                    reset_to_start_button(main_container, training_tab_container, page)
             if page:
                 page.run_task(reset_btn)
 
@@ -465,14 +472,14 @@ async def run_ltx2_training_flow(
             training_console_text.update()
 
         # Run only sample_prompts cache
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'])
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'], reset_button_on_complete=False)
     elif mode == 'cache_only':
         add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running all cache commands\n")
         if training_console_text.page:
             training_console_text.update()
 
-        # Run all cache commands
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
+        # Run all cache commands (reset button after since no training follows)
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=True)
         return  # Stop after caching
     else:  # full mode
         add_info_message(training_console_text, f"\n[Info] Running cache commands before training...\n")
@@ -480,7 +487,7 @@ async def run_ltx2_training_flow(
             training_console_text.update()
 
         # Run all cache commands
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path)
+        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=False)
 
     # Build training command
     cmd = runner.get_training_command(dataset_config, slider_config_path, resume_path, reset_optimizer, reset_optimizer_params)

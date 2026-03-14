@@ -227,9 +227,13 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     for k in ('first_frame_conditioning_p', 'ltx_mode'):
         if k in ts:
             label_vals[k] = ts.get(k)
-    for k in ('separate_audio_buckets', 'slider', 'use_mask', 'ltx_2_3'):
+    for k in ('separate_audio_buckets', 'slider', 'ic_lora', 'use_mask', 'ltx_2_3'):
         if k in ts:
             label_vals[k] = to_bool(ts.get(k, False))
+
+    # Handle ref_downscale for IC-LoRA
+    if 'ref_downscale' in ts:
+        label_vals['ref_downscale'] = ts.get('ref_downscale')
 
     # Handle sample_slider_range
     if 'sample_slider_range' in ts:

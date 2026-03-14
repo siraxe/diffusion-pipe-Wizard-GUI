@@ -191,6 +191,11 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"separate_audio_buckets = {'true' if separate_audio_buckets_val else 'false'}")
     slider_val = _as_bool(_get('slider', False))
     lines.append(f"slider = {'true' if slider_val else 'false'}")
+    ic_lora_val = _as_bool(_get('ic_lora', False))
+    lines.append(f"ic_lora = {'true' if ic_lora_val else 'false'}")
+    # ref_downscale for IC-LoRA reference caching
+    ref_downscale_val = _clean_value(_get('ref_downscale', 1), is_numeric=True)
+    lines.append(f"ref_downscale = {ref_downscale_val}")
     ltx_2_3_val = _as_bool(_get('ltx_2_3', False))
     lines.append(f"ltx_2_3 = {'true' if ltx_2_3_val else 'false'}")
     use_mask_val = _as_bool(_get('use_mask', False))
@@ -594,26 +599,33 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if not isinstance(use_mask, bool):
             use_mask = str(use_mask).lower() in ['true', '1', 'yes', 'on']
         _set_field_value('use_mask', use_mask)
+        ic_lora = training_strategy.get('ic_lora', False)
+        if not isinstance(ic_lora, bool):
+            ic_lora = str(ic_lora).lower() in ['true', '1', 'yes', 'on']
+        _set_field_value('ic_lora', ic_lora)
+        ref_downscale = training_strategy.get('ref_downscale', 1)
+        _set_field_value('ref_downscale', ref_downscale)
 
         # Trigger slider on_change to update sample_slider_range visibility
+        # and ic_lora on_change to update ref_downscale visibility
         try:
-            def _trigger_slider_change(control):
+            def _trigger_checkbox_change(control):
                 ctrl_label = getattr(control, 'label', None)
-                if ctrl_label == 'slider' and isinstance(control, ft.Checkbox):
+                if ctrl_label in ('slider', 'ic_lora') and isinstance(control, ft.Checkbox):
                     if hasattr(control, 'on_change') and control.on_change:
                         control.on_change(ft.ControlEvent('change'))
                         return True
                 if hasattr(control, 'controls') and control.controls:
                     for c in control.controls:
-                        if _trigger_slider_change(c):
+                        if _trigger_checkbox_change(c):
                             return True
                 if hasattr(control, 'content') and control.content:
-                    return _trigger_slider_change(control.content)
+                    return _trigger_checkbox_change(control.content)
                 return False
 
             config_content = getattr(training_tab_container, 'config_page_content', None)
             if config_content:
-                _trigger_slider_change(config_content)
+                _trigger_checkbox_change(config_content)
         except Exception:
             pass
 

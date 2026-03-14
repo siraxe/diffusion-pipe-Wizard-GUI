@@ -200,11 +200,23 @@ class LTX2Cache:
         commands = {}
 
         # Standard latent caching
-        commands['latents'] = self.build_cache_latents_command(
+        latents_cmd = self.build_cache_latents_command(
             dataset_config=dataset_config,
             ltx2_checkpoint=ltx2_checkpoint,
             ltx2_mode=ltx2_mode
         )
+
+        # Add IC-LoRA reference caching arguments
+        ic_lora_enabled = self.parse_bool(training_strategy.get('ic_lora', False))
+        if ic_lora_enabled:
+            ref_downscale = training_strategy.get('ref_downscale', 1)
+            reference_frames = training_strategy.get('reference_frames', 1)
+            latents_cmd.extend([
+                "--reference_downscale", str(ref_downscale),
+                "--reference_frames", str(reference_frames)
+            ])
+
+        commands['latents'] = latents_cmd
 
         # Text encoder caching
         commands['text_encoder'] = self.build_cache_text_encoder_command(

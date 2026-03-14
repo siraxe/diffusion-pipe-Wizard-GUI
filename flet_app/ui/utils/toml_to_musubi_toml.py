@@ -142,14 +142,18 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
     # Check if slider mode is enabled (for cache directory naming)
     slider_enabled = False
+    ic_lora_enabled = False
     if last_config_path and os.path.exists(last_config_path):
         try:
             with open(last_config_path, 'r') as f:
                 last_config = toml.load(f)
             training_strategy = last_config.get('training_strategy', {})
             slider_enabled = training_strategy.get('slider', False)
+            ic_lora_enabled = training_strategy.get('ic_lora', False)
             if not isinstance(slider_enabled, bool):
                 slider_enabled = str(slider_enabled).lower() in ['true', '1', 'yes', 'on']
+            if not isinstance(ic_lora_enabled, bool):
+                ic_lora_enabled = str(ic_lora_enabled).lower() in ['true', '1', 'yes', 'on']
         except Exception:
             pass
 
@@ -202,9 +206,11 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
         # For multiple resolutions, create a dataset entry for each resolution
         for resolution in resolution_list:
-            # cache_directory = path + /cache_musubi (or musubi_cache_positive for slider mode)
+            # cache_directory = path + /cache_musubi (or musubi_cache_positive for slider mode, or cache_ic_lora for ic_lora mode)
             if slider_enabled:
                 cache_directory = os.path.join(dir_path, "musubi_cache_positive") if dir_path else ""
+            elif ic_lora_enabled:
+                cache_directory = os.path.join(dir_path, "cache_ic_lora") if dir_path else ""
             else:
                 cache_directory = os.path.join(dir_path, "cache_musubi") if dir_path else ""
 
@@ -252,6 +258,12 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 # Add enable_mask if use_mask is true (only for video datasets)
                 if use_mask:
                     dataset_config['enable_mask'] = True
+                # Add reference_directory for IC-LoRA mode
+                if ic_lora_enabled and dir_path:
+                    # Check if control subdirectory exists
+                    potential_control = os.path.join(dir_path, 'control')
+                    if os.path.exists(potential_control) and os.path.isdir(potential_control):
+                        dataset_config['reference_directory'] = potential_control
 
             datasets_list.append(dataset_config)
 
@@ -262,6 +274,16 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         'enable_bucket': global_enable_ar_bucket if ltx_mode != 'audio' else False,
         'bucket_no_upscale': False,
     }
+
+    # Add reference_cache_directory for IC-LoRA mode
+    if ic_lora_enabled and datasets_list:
+        first_ds = datasets_list[0]
+        main_dir = first_ds.get('image_directory', first_ds.get('video_directory', ''))
+        if main_dir:
+            # Reference cache is in the control subdirectory
+            potential_control = os.path.join(main_dir, 'control')
+            if os.path.exists(potential_control) and os.path.isdir(potential_control):
+                general_config['reference_cache_directory'] = os.path.join(potential_control, 'cache_ref')
 
     # Only add AR bucketing to general section if not audio-only mode
     if ltx_mode != 'audio':
@@ -417,6 +439,9 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
     lines.append(f"batch_size = {general['batch_size']}")
     lines.append(f"enable_bucket = {str(general['enable_bucket']).lower()}")
     lines.append(f"bucket_no_upscale = {str(general['bucket_no_upscale']).lower()}")
+    # Add reference_cache_directory for IC-LoRA if present
+    if 'reference_cache_directory' in general:
+        lines.append(f"reference_cache_directory = \"{general['reference_cache_directory']}\"")
     lines.append("")
 
     # [[datasets]] section - may have multiple datasets
@@ -439,6 +464,10 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
                 lines.append(f"target_frames = {_format_list(dataset['target_frames'])}")
             if 'frame_extraction' in dataset:
                 lines.append(f"frame_extraction = \"{dataset['frame_extraction']}\"")
+
+        # Add reference_directory for IC-LoRA if present
+        if 'reference_directory' in dataset:
+            lines.append(f"reference_directory = \"{dataset['reference_directory']}\"")
 
         lines.append(f"cache_directory = \"{dataset['cache_directory']}\"")
         lines.append(f"num_repeats = {dataset['num_repeats']}")

@@ -193,6 +193,75 @@ def main(page: ft.Page):
 
     # Keyboard event handler
     page.on_keyboard_event = lambda e: global_hotkey_handler(page, e)
+
+    # Window event handler - terminate training processes on window close
+    def on_window_event(e):
+        """Handle window events - terminate training processes when window is closing."""
+        if e.data == "close":
+            # Terminate any running training processes
+            try:
+                # Try to get training_proc from training_tab_container
+                training_proc = None
+                if hasattr(page, 'training_tab_container'):
+                    tab_container = page.training_tab_container
+                    if hasattr(tab_container, 'training_proc'):
+                        training_proc = tab_container.training_proc
+
+                # Also check main_container (if it exists)
+                if training_proc is None:
+                    # Find main_container by looking for start_btn
+                    main_tabs = page.controls[1] if len(page.controls) > 1 else None
+                    if main_tabs:
+                        # The Stack contains main_tabs
+                        tabs_control = main_tabs.controls[0] if hasattr(main_tabs, 'controls') else None
+                        if tabs_control and hasattr(tabs_control, 'tabs'):
+                            # Get the first tab (Training)
+                            training_tab = tabs_control.tabs[0].content if tabs_control.tabs else None
+                            if training_tab and hasattr(training_tab, 'training_proc'):
+                                training_proc = training_tab.training_proc
+
+                if training_proc is not None:
+                    try:
+                        alive = (training_proc.poll() is None)
+                    except Exception:
+                        alive = False
+
+                    if alive:
+                        import signal
+                        import os
+                        import time as _t
+                        # Terminate the process group
+                        if os.name == 'posix':
+                            try:
+                                os.killpg(training_proc.pid, signal.SIGTERM)
+                            except Exception:
+                                training_proc.terminate()
+                        else:
+                            try:
+                                training_proc.send_signal(getattr(signal, 'CTRL_BREAK_EVENT', signal.SIGTERM))
+                            except Exception:
+                                training_proc.terminate()
+
+                        # Brief wait and force kill if still alive
+                        try:
+                            for _ in range(10):
+                                if training_proc.poll() is not None:
+                                    break
+                                _t.sleep(0.1)
+                            if training_proc.poll() is None:
+                                if os.name == 'posix':
+                                    try:
+                                        os.killpg(training_proc.pid, signal.SIGKILL)
+                                    except Exception:
+                                        training_proc.kill()
+                                else:
+                                    training_proc.kill()
+                        except Exception:
+                            pass
+            except Exception as e:
+                print(f"Error terminating training process on window close: {e}")
+
+    page.on_window_event = on_window_event
     page.update()
 
 if __name__ == "__main__":

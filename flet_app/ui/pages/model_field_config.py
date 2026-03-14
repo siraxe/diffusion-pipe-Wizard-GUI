@@ -117,6 +117,7 @@ MODEL_CONFIG = {
             "use_mask": True,
             "gradient_checkpointing": True,
             "slider": True,
+            "ic_lora": True,
             "ltx_2_3": True,
             "sample_slider_range": True,
             "rank": True,
@@ -848,6 +849,7 @@ DEFAULT_FIELD_VISIBILITY = {
     "attn_chunking": False,
     # Slider training fields (LTX2 only)
     "slider": False,
+    "ic_lora": False,
     "sample_slider_range": False,
     # LTX version selection (LTX2 only)
     "ltx_2_3": False,

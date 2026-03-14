@@ -812,9 +812,13 @@ class LTX2Run:
         flow_matching = config.get('flow_matching', {})
         validation = config.get('validation', {})
 
-        # Determine script (slider vs regular)
+        # Determine script (slider vs regular vs ic_lora)
         slider_enabled = self.parse_bool(training_strategy.get('slider', False))
         use_slider = slider_enabled and slider_config and os.path.exists(slider_config)
+
+        # IC-LoRA uses standard script with v2v preset and reference_cache_directory
+        ic_lora_enabled = self.parse_bool(training_strategy.get('ic_lora', False))
+        use_ic_lora = ic_lora_enabled
 
         if use_slider:
             script = str(self.musubi_root / "ltx2_train_slider.py")
@@ -847,7 +851,10 @@ class LTX2Run:
         if self.parse_bool(training_strategy.get('ltx_2_3', False)):
             cmd.extend([CONFIG_FLAGS["LTX_VERSION"], "2.3"])
 
-        if ltx_mode == 'audio':
+        # LoRA target preset: ic_lora (v2v) > audio > av > default (t2v)
+        if use_ic_lora:
+            cmd.extend(["--lora_target_preset", "v2v"])
+        elif ltx_mode == 'audio':
             cmd.extend(["--lora_target_preset", "audio"])
         elif ltx_mode == 'av':
             cmd.extend(["--lora_target_preset", "full"])

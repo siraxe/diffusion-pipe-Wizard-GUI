@@ -61,6 +61,8 @@ wan_task_dropdown_ref = ft.Ref[ft.Dropdown]()
 separate_audio_buckets_checkbox_ref = ft.Ref[ft.Checkbox]()
 gradient_checkpointing_checkbox_ref = ft.Ref[ft.Checkbox]()
 slider_checkbox_ref = ft.Ref[ft.Checkbox]()
+ic_lora_checkbox_ref = ft.Ref[ft.Checkbox]()
+reference_downscale_field_ref = ft.Ref[ft.TextField]()
 use_mask_checkbox_ref = ft.Ref[ft.Checkbox]()
 checkpoint_row_ref = ft.Ref[ft.ResponsiveRow]()
 ckpt_path_row_ref = ft.Ref[ft.ResponsiveRow]()
@@ -224,6 +226,11 @@ def _on_slider_change(e):
     sync_dependent_field_visibility()
 
 
+def _on_ic_lora_change(e):
+    """Handle ic_lora checkbox change - show/hide reference_downscale field."""
+    sync_dependent_field_visibility()
+
+
 def _on_adapter_change(e):
     """Handle adapter dropdown change - show/hide factor field for lokr."""
     sync_dependent_field_visibility()
@@ -322,6 +329,13 @@ def sync_dependent_field_visibility():
             audio_lr_rate_ref.current.visible = ltx_mode == "av"
             if audio_lr_rate_ref.current.page:
                 audio_lr_rate_ref.current.update()
+
+        # reference_downscale field (only when ic_lora is checked)
+        ic_lora_checked = ic_lora_checkbox_ref.current.value if ic_lora_checkbox_ref and ic_lora_checkbox_ref.current else False
+        if reference_downscale_field_ref and reference_downscale_field_ref.current:
+            reference_downscale_field_ref.current.visible = ic_lora_checked
+            if reference_downscale_field_ref.current.page:
+                reference_downscale_field_ref.current.update()
     except Exception:
         pass
 
@@ -390,10 +404,12 @@ def get_training_config_page_content():
             "ltx_2_3": ltx_2_3_checkbox_ref,
             "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
             "slider": slider_checkbox_ref,
+            "ic_lora": ic_lora_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
             "sample_each": sample_each_field_ref,
+            "ref_downscale": reference_downscale_field_ref,
             # Musubi-specific adapter fields
             "rank": rank_field_ref,
             "alpha": alpha_field_ref,
@@ -477,6 +493,7 @@ def get_training_config_page_content():
             "network_dropout": network_dropout_field_ref,
             "caption_dropout_rate": caption_dropout_rate_field_ref,
             "first_frame_conditioning_p_ltx2": first_frame_conditioning_p_ltx2_field_ref,
+            "ref_downscale": reference_downscale_field_ref,
             # Model-specific fields
             "z_image_diffusion_model": z_image_diffusion_model_field_ref,
             "z_image_vae": z_image_vae_field_ref,
@@ -504,6 +521,7 @@ def get_training_config_page_content():
             "attn_chunking": attn_chunking_checkbox_ref,
             # LTX2 specific
             "slider": slider_checkbox_ref,
+            "ic_lora": ic_lora_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             # Preservation & regularization args
             "blank_preservation_args": blank_preservation_args_field_ref,
@@ -1215,6 +1233,24 @@ def get_training_config_page_content():
                             data="slider",
                             on_change=lambda e: _on_slider_change(e),
                             col=3,
+                        ),
+                        ft.Checkbox(
+                            label="ic_lora",
+                            value=False,
+                            scale=0.8,
+                            ref=ic_lora_checkbox_ref,
+                            visible=_should_show_field("ic_lora"),
+                            data="ic_lora",
+                            on_change=lambda e: _on_ic_lora_change(e),
+                            col=3,
+                        ),
+                        create_textfield(
+                            "ref_downscale", 1,
+                            hint_text="1=same, 2=half res",
+                            tooltip="Spatial downscale factor for IC-LoRA references: 1=same resolution, 2=half resolution",
+                            expand=True, col=3, scale=0.8,
+                            ref=reference_downscale_field_ref,
+                            visible=False  # Only visible when ic_lora is checked
                         ),
                     ], spacing=2),
                     # Adapter row with sample_slider_range
