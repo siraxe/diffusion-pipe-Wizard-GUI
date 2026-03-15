@@ -18,7 +18,7 @@ from flet_app.ui._styles import (
 )
 
 from .popup_dialog_base import PopupDialogBase
-from .unified_media_utils import is_image_path, make_image_control, make_video_control, _is_web_platform
+from .unified_media_utils import is_image_path, make_image_control, make_video_control, _is_web_platform, _build_video_media_resource
 from .image_editor_bridge import open_in_image_editor as _bridge_open_editor, open_in_photoshop_stacked as _bridge_open_stacked
 from . import image_player_utils as ipu
 from . import video_player_utils as vpu
@@ -656,7 +656,6 @@ def open_unified_popup_dialog(
         path = items[index]
         title = os.path.basename(path)
         is_img = is_image_path(path)
-        # Debug print removed
 
         # Build top controls
         prev_btn = ft.IconButton(ft.Icons.ARROW_LEFT, tooltip="Previous", on_click=lambda e: go(-1))
@@ -705,7 +704,7 @@ def open_unified_popup_dialog(
                 except Exception:
                     pass
             play_pause_btn.on_click = _toggle_play
-            prefix_controls = [prev_btn, next_btn, play_pause_btn]
+            prefix_controls = [prev_btn, next_btn, play_pause_btn, switch_top_btn]
 
         # Load video captions if needed (guarded)
         if not is_img and (not cap_text and not neg_text):
@@ -1606,6 +1605,129 @@ def open_unified_popup_dialog(
 
             slider_col.controls.append(row2)
             slider_col.controls.append(row3)
+
+            # ===== CONTROL DETECTION FOR VIDEOS =====
+            # Store switching state at function level to persist across refreshes
+            if not hasattr(refresh, '_switch_state'):
+                refresh._switch_state = {}
+
+            # Find the true original path (not a control file)
+            true_original_path = path
+            if "/control/" in path:
+                true_original_path = path.replace("/control/", "/").replace("//", "/")
+
+            base_image_path = true_original_path
+
+            def _set_video_src_for_switch(video_ctrl, target_path: str):
+                try:
+                    import flet_video as ftv
+                    resource = _build_video_media_resource(page, target_path)
+                    video_media = ftv.VideoMedia(resource)
+                    # Create a new Video player with the new video
+                    new_video = ftv.Video(
+                        playlist=[video_media],
+                        aspect_ratio=16 / 9,
+                        playlist_mode=ftv.PlaylistMode.SINGLE,
+                        autoplay=True,
+                        volume=100 if settings.get("enable_audio", False) else 0,
+                        width=viewer_w,
+                        height=viewer_h,
+                        expand=False,
+                        show_controls=False,
+                        fill_color=ft.Colors.BLACK,
+                    )
+                    # Replace the video in the container
+                    video_container.content = new_video
+                    if video_container.page:
+                        video_container.update()
+                    # Update the media_view reference and local_video_player
+                    nonlocal media_view, local_video_player
+                    media_view = new_video
+                    local_video_player = new_video if hasattr(new_video, 'seek') else None
+                except Exception:
+                    pass
+
+            if base_image_path in refresh._switch_state:
+                current_state = refresh._switch_state[base_image_path]
+                has_control = current_state['has_control']
+                is_showing_control = current_state.get('is_showing_control', False)
+                try:
+                    if is_showing_control and os.path.exists(current_state['control_image_path']):
+                        _set_video_src_for_switch(media_view, current_state['control_image_path'])
+                except Exception:
+                    pass
+            else:
+                original_path = true_original_path
+                control_image_path = os.path.join(os.path.dirname(true_original_path), "control", os.path.basename(true_original_path))
+                is_showing_control = False
+
+                has_control = False
+                try:
+                    image_dir = os.path.dirname(original_path)
+                    image_filename = os.path.basename(original_path)
+                    control_folder = os.path.join(image_dir, "control")
+
+                    if os.path.exists(control_folder) and os.path.isdir(control_folder):
+                        control_check_path = os.path.join(control_folder, image_filename)
+                        has_control = os.path.exists(control_check_path)
+                except Exception:
+                    has_control = False
+
+                control_status = "Yes" if has_control else "No"
+                control_color = ft.Colors.GREEN_600 if has_control else ft.Colors.RED_600
+
+                refresh._switch_state[base_image_path] = {
+                    'is_showing_control': is_showing_control,
+                    'original_path': original_path,
+                    'control_image_path': control_image_path,
+                    'has_control': has_control
+                }
+
+            if not hasattr(refresh, '_control_overlays'):
+                refresh._control_overlays = {}
+
+            def on_switch_click_video(e):
+                try:
+                    current_state = refresh._switch_state[base_image_path]
+                    if current_state['is_showing_control']:
+                        refresh._switch_state[base_image_path]['is_showing_control'] = False
+                        try:
+                            _set_video_src_for_switch(media_view, current_state['original_path'])
+                        except Exception:
+                            pass
+                    else:
+                        if os.path.exists(current_state['control_image_path']):
+                            refresh._switch_state[base_image_path]['is_showing_control'] = True
+                            try:
+                                _set_video_src_for_switch(media_view, current_state['control_image_path'])
+                            except Exception:
+                                pass
+                    try:
+                        is_showing_control_now = refresh._switch_state[base_image_path].get('is_showing_control', False)
+                        switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control_now else None
+                        switch_top_btn.style = None
+                        switch_top_btn.tooltip = "Showing control" if is_showing_control_now else "Show control"
+                        if switch_top_btn.page:
+                            switch_top_btn.update()
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"Error switching video: {ex}")
+
+            try:
+                state_entry = refresh._switch_state[base_image_path]
+                has_ctrl = state_entry['has_control']
+                is_showing_control = state_entry.get('is_showing_control', False)
+                switch_top_btn.visible = bool(has_ctrl)
+                switch_top_btn.on_click = on_switch_click_video
+                switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control else None
+                switch_top_btn.style = None
+                switch_top_btn.tooltip = "Showing control" if is_showing_control else "Show control"
+                if switch_top_btn.page:
+                    switch_top_btn.update()
+            except Exception:
+                pass
+            # ===== END CONTROL DETECTION FOR VIDEOS =====
         else:
             # Create image info panel for images
             # Control detection is now handled in the switch state logic below
@@ -1652,6 +1774,20 @@ def open_unified_popup_dialog(
                         img_ctrl.update()
                 except Exception:
                     pass
+
+            # Helper to set video control source by updating playlist
+            def _set_video_src(video_ctrl, target_path: str):
+                try:
+                    import flet_video as ftv
+                    resource = _build_video_media_resource(page, target_path)
+                    video_media = ftv.VideoMedia(resource)
+                    video_ctrl.playlist = [video_media]
+                    video_ctrl.autoplay = True  # Restart playback
+                    if video_ctrl.page:
+                        video_ctrl.update()
+                except Exception:
+                    pass
+
             if base_image_path in refresh._switch_state:
                 # If we already have state for this base image, retrieve it
                 current_state = refresh._switch_state[base_image_path]
@@ -1665,7 +1801,10 @@ def open_unified_popup_dialog(
                 # If state says we are showing control, ensure media shows it
                 try:
                     if is_showing_control and os.path.exists(control_image_path):
-                        _set_image_src(media_view, control_image_path)
+                        if is_img:
+                            _set_image_src(media_view, control_image_path)
+                        else:
+                            _set_video_src(media_view, control_image_path)
                 except Exception:
                     pass
             else:
@@ -1709,24 +1848,28 @@ def open_unified_popup_dialog(
                     # Debug logging removed
 
                     if current_state['is_showing_control']:
-                        # Switch back to original image (no overlay)
-                        # Swapping back to base image
+                        # Switch back to original media
                         refresh._switch_state[base_image_path]['is_showing_control'] = False
                         try:
-                            _set_image_src(media_view, current_state['original_path'])
+                            if is_img:
+                                _set_image_src(media_view, current_state['original_path'])
+                            else:
+                                _set_video_src(media_view, current_state['original_path'])
                         except Exception:
                             pass
                     else:
-                        # Switch to control image (replace base), not overlay
-                        # Swapping to control image
+                        # Switch to control media
                         if os.path.exists(current_state['control_image_path']):
                             refresh._switch_state[base_image_path]['is_showing_control'] = True
                             try:
-                                _set_image_src(media_view, current_state['control_image_path'])
+                                if is_img:
+                                    _set_image_src(media_view, current_state['control_image_path'])
+                                else:
+                                    _set_video_src(media_view, current_state['control_image_path'])
                             except Exception:
                                 pass
                         else:
-                            # Control image missing; nothing to swap
+                            # Control media missing; nothing to swap
                             pass
                     # Update visual indicator on top switch button immediately
                     try:
@@ -1739,14 +1882,14 @@ def open_unified_popup_dialog(
                     except Exception:
                         pass
                 except Exception as ex:
-                    print(f"Error switching image: {ex}")
+                    print(f"Error switching media: {ex}")
 
             # Update the top switch icon button visibility, handler and visual state
             try:
                 state_entry = refresh._switch_state[base_image_path]
                 has_ctrl = state_entry['has_control']
                 is_showing_control = state_entry.get('is_showing_control', False)
-                switch_top_btn.visible = bool(is_img and has_ctrl)
+                switch_top_btn.visible = bool(has_ctrl)  # Show for both images and videos
                 switch_top_btn.on_click = on_switch_click
                 # Visual indicator when control is active (color only) and clear any outline
                 switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control else None
