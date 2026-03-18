@@ -239,6 +239,71 @@ def cut_to_frames(page: ft.Page, current_video_path: str, start_frame: int, end_
     else:
         if page: page.snack_bar = ft.SnackBar(ft.Text(msg), open=True); page.update()
 
+def cut_to_frames_both(page: ft.Page, original_video_path: str, control_video_path: Optional[str], start_frame: int, end_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], refresh_dialog_callback: Optional[Callable] = None, thumbnail_update_callback: Optional[Callable] = None, force_reencode: bool = False):
+    """Cut both original and control videos to the specified frame range."""
+
+    def cut_single_video(video_path: str, video_label: str) -> bool:
+        """Helper to cut a single video."""
+        success, msg, temp_output_path = vpu.cut_video_by_frames(video_path, start_frame, end_frame, force_reencode)
+        if success and temp_output_path:
+            try:
+                shutil.move(temp_output_path, video_path)
+                if page: page.snack_bar = ft.SnackBar(ft.Text(f"Cut {video_label} to frames {start_frame}-{end_frame}."), duration=1500, open=True); page.update()
+                return True
+            except Exception as e:
+                if page: page.snack_bar = ft.SnackBar(ft.Text(f"Error moving {video_label}: {e}"), open=True); page.update()
+                if os.path.exists(temp_output_path): os.remove(temp_output_path)
+                return False
+        else:
+            if page: page.snack_bar = ft.SnackBar(ft.Text(f"Failed to cut {video_label}: {msg}"), open=True); page.update()
+            return False
+
+    # Cut original video
+    original_success = cut_single_video(original_video_path, "original video")
+
+    # Cut control video if it exists
+    control_success = False
+    if control_video_path and os.path.exists(control_video_path):
+        control_success = cut_single_video(control_video_path, "control video")
+
+    # Update UI after both cuts
+    if original_success or control_success:
+        _generic_video_operation_ui_update(page, original_video_path, video_list, on_caption_updated_callback,
+                                          f"Cut videos to frames {start_frame}-{end_frame}")
+
+        # Force regenerate thumbnails for both videos
+        def force_regenerate_cut_thumbnails():
+            try:
+                from flet_app.settings import settings
+
+                def remove_thumbnail_for_video(video_path: str):
+                    if video_path.startswith(settings.DATASETS_DIR):
+                        relative_path = os.path.relpath(video_path, settings.DATASETS_DIR)
+                        path_parts = relative_path.split(os.sep)
+                        dataset_name = path_parts[0] if path_parts else None
+                        if dataset_name:
+                            video_name = os.path.basename(video_path)
+                            thumbnail_name = f"{os.path.splitext(video_name)[0]}.jpg"
+                            old_thumbnail_path = os.path.join(settings.THUMBNAILS_BASE_DIR, dataset_name, thumbnail_name)
+                            if os.path.exists(old_thumbnail_path):
+                                os.remove(old_thumbnail_path)
+
+                # Remove thumbnails for both videos
+                remove_thumbnail_for_video(original_video_path)
+                if control_video_path:
+                    remove_thumbnail_for_video(control_video_path)
+
+                if thumbnail_update_callback:
+                    thumbnail_update_callback()
+            except Exception:
+                if thumbnail_update_callback:
+                    thumbnail_update_callback()
+
+        force_regenerate_cut_thumbnails()
+
+        if refresh_dialog_callback:
+            refresh_dialog_callback()
+
 def split_to_video(page: ft.Page, current_video_path: str, split_frame: int, video_list: Optional[List[str]], on_caption_updated_callback: Optional[Callable], video_player_instance_from_dialog_state: Optional[Video], refresh_dialog_callback: Optional[Callable] = None, thumbnail_update_callback: Optional[Callable] = None):
     if split_frame <= 0:
         if page: page.snack_bar = ft.SnackBar(ft.Text("Split frame must be greater than 0."), open=True); page.update()

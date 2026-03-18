@@ -907,34 +907,46 @@ def open_unified_popup_dialog(
                 gx = getattr(e, 'global_x', None)
                 gy = getattr(e, 'global_y', None)
                 # Debug print removed
+
+                # Get the currently displayed media path (control or original)
+                current_media_path = path  # default to original
+                try:
+                    st = getattr(refresh, '_switch_state', {}).get(base_image_path)
+                    if st and st.get('is_showing_control'):
+                        control_path = st.get('control_image_path')
+                        if control_path and os.path.exists(control_path):
+                            current_media_path = control_path
+                except Exception:
+                    pass
+
                 if context_menu_ctrl is None:
                     # Build menu content to match popup UI styling
                     def _action_flip(ev):
                         _hide_context_menu()
                         if is_img:
-                            page.run_thread(image_editor.handle_flip_image, page, path, items, None)
+                            page.run_thread(image_editor.handle_flip_image, page, current_media_path, items, None)
                         else:
-                            page.run_thread(video_editor.on_flip_horizontal, page, path, items, None)
+                            page.run_thread(video_editor.on_flip_horizontal, page, current_media_path, items, None)
                     def _action_rot_plus(ev):
                         _hide_context_menu()
                         if is_img:
-                            page.run_thread(image_editor.handle_rotate_image, page, path, items, None, 90)
+                            page.run_thread(image_editor.handle_rotate_image, page, current_media_path, items, None, 90)
                         else:
-                            page.run_thread(video_editor.on_rotate_90_video_action, page, path, 'plus', items, None)
+                            page.run_thread(video_editor.on_rotate_90_video_action, page, current_media_path, 'plus', items, None)
                     def _action_rot_minus(ev):
                         _hide_context_menu()
                         if is_img:
-                            page.run_thread(image_editor.handle_rotate_image, page, path, items, None, -90)
+                            page.run_thread(image_editor.handle_rotate_image, page, current_media_path, items, None, -90)
                         else:
-                            page.run_thread(video_editor.on_rotate_90_video_action, page, path, 'minus', items, None)
+                            page.run_thread(video_editor.on_rotate_90_video_action, page, current_media_path, 'minus', items, None)
                     def _action_reverse(ev):
                         _hide_context_menu()
                         if not is_img:
-                            page.run_thread(video_editor.on_reverse, page, path, items, None)
+                            page.run_thread(video_editor.on_reverse, page, current_media_path, items, None)
                     context_menu_ctrl = build_context_menu(
                         is_image=is_img,
                         page=page,
-                        media_path=path,
+                        media_path=current_media_path,
                         media_list=items,
                         on_close=_hide_context_menu, on_refresh=refresh)
                     # Insert into media stack later
@@ -1569,11 +1581,44 @@ def open_unified_popup_dialog(
 
             # Row 2: Split, Cut to Frames, Cut All Videos to, Num field
             num_to_cut_to = create_textfield(label="num", value=str(original_frames // 2 if original_frames > 1 else 150), keyboard_type=ft.KeyboardType.NUMBER)
-            split_btn = ft.ElevatedButton("Split", on_click=lambda e: page.run_thread(video_editor.split_to_video, page, path, int(frame_range_slider.start_value or 0), items, None, local_video_player, refresh, update_thumbnails_callback), style=BTN_STYLE2)
+
+            # Helper function to get the currently displayed video path (control or original)
+            def _get_current_video_path() -> str:
+                try:
+                    st = getattr(refresh, '_switch_state', {}).get(base_image_path)
+                    if st and st.get('is_showing_control'):
+                        control_path = st.get('control_image_path')
+                        if control_path and os.path.exists(control_path):
+                            return control_path
+                except Exception:
+                    pass
+                return path
+
+            def on_split_click(e):
+                current_path = _get_current_video_path()
+                page.run_thread(video_editor.split_to_video, page, current_path, int(frame_range_slider.start_value or 0), items, None, local_video_player, refresh, update_thumbnails_callback)
+
+            split_btn = ft.ElevatedButton("Split", on_click=on_split_click, style=BTN_STYLE2)
+
             def on_cut_to_frames_click(e):
                 start_val = int(frame_range_slider.start_value or 0)
                 end_val = int(frame_range_slider.end_value or original_frames)
-                page.run_thread(video_editor.cut_to_frames, page, path, start_val, end_val, items, None, refresh, update_thumbnails_callback, False)
+
+                # Get original and control paths
+                original_path = path
+                control_path = None
+                try:
+                    st = getattr(refresh, '_switch_state', {}).get(base_image_path)
+                    if st:
+                        ctrl = st.get('control_image_path')
+                        if ctrl and os.path.exists(ctrl):
+                            control_path = ctrl
+                except Exception:
+                    pass
+
+                # Cut both original and control videos
+                from flet_app.ui_popups import video_editor
+                video_editor.cut_to_frames_both(page, original_path, control_path, start_val, end_val, items, None, refresh, update_thumbnails_callback, False)
 
             cut_to_frames_btn = ft.ElevatedButton("Cut to Frames", on_click=on_cut_to_frames_click, style=BTN_STYLE2)
             cut_all_btn = ft.ElevatedButton("Cut All Videos to", on_click=lambda e: page.run_thread(video_editor.cut_all_videos_to_max, page, path, items, int(num_to_cut_to.value or 0), None), style=BTN_STYLE2)
@@ -1728,6 +1773,33 @@ def open_unified_popup_dialog(
             except Exception:
                 pass
             # ===== END CONTROL DETECTION FOR VIDEOS =====
+
+            # Update apply_crop_from_overlay to use the currently displayed video path (control or original)
+            def _current_video_to_edit() -> str:
+                try:
+                    st = getattr(refresh, '_switch_state', {}).get(base_image_path)
+                    if st:
+                        return st['control_image_path'] if st.get('is_showing_control') else st.get('original_path', path)
+                except Exception:
+                    pass
+                return path
+
+            def _apply_crop_with_current_video(e):
+                current_path = _current_video_to_edit()
+                nonlocal overlay_saved
+                if area_apply_crop(page, current_path, overlay_control, overlay_visible, viewer_w, viewer_h, overlay_angle):
+                    refresh()
+            apply_crop_btn.on_click = _apply_crop_with_current_video
+            if apply_crop_btn.page:
+                apply_crop_btn.update()
+
+            # Update crop button to use the currently displayed video path (control or original)
+            if crop_btn:
+                def _on_crop_click(e):
+                    video_editor.handle_crop_video_click(page, width_field, height_field, _current_video_to_edit(), items, None)
+                crop_btn.on_click = _on_crop_click
+                if crop_btn.page:
+                    crop_btn.update()
         else:
             # Create image info panel for images
             # Control detection is now handled in the switch state logic below

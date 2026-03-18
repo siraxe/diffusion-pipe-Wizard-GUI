@@ -381,6 +381,21 @@ def create_abc_action_container(show_config_button=None):
                                 txt_new_path = os.path.join(dataset_path, txt_new_name)
                                 shutil.copy2(txt_path, txt_new_path)
 
+                            # Also copy control file if it exists (in control/ subdirectory)
+                            item_dir = os.path.dirname(item_path)
+                            control_dir = os.path.join(item_dir, "control")
+                            control_file_path = os.path.join(control_dir, item_name)
+                            if os.path.exists(control_file_path):
+                                new_control_dir = os.path.join(dataset_path, "control")
+                                os.makedirs(new_control_dir, exist_ok=True)
+                                new_control_path = os.path.join(new_control_dir, new_name)
+                                shutil.copy2(control_file_path, new_control_path)
+                                # Also copy control .txt if it exists
+                                control_txt_path = os.path.splitext(control_file_path)[0] + '.txt'
+                                if os.path.exists(control_txt_path):
+                                    new_control_txt_path = os.path.join(new_control_dir, f"{new_basename}.txt")
+                                    shutil.copy2(control_txt_path, new_control_txt_path)
+
                             # Also copy the thumbnail if it exists (avoids regenerating)
                             thumbnail_name = f"{name}.jpg"
                             thumbnail_path = os.path.join(settings.THUMBNAILS_BASE_DIR, current_dataset, thumbnail_name)
@@ -465,11 +480,22 @@ def create_abc_action_container(show_config_button=None):
                             if os.path.exists(txt_path):
                                 os.remove(txt_path)
 
+                            # Also delete control file if it exists (in control/ subdirectory)
+                            item_dir = os.path.dirname(item_path)
+                            item_name = os.path.basename(item_path)
+                            control_dir = os.path.join(item_dir, "control")
+                            control_file_path = os.path.join(control_dir, item_name)
+                            if os.path.exists(control_file_path):
+                                os.remove(control_file_path)
+                                # Also delete control .txt if it exists
+                                control_txt_path = os.path.splitext(control_file_path)[0] + '.txt'
+                                if os.path.exists(control_txt_path):
+                                    os.remove(control_txt_path)
+
                             # Delete the associated thumbnail
                             # current_dataset already set above
                             if current_dataset:
                                 # Get thumbnail path using correct thumbnail directory
-                                item_name = os.path.basename(item_path)
                                 thumbnail_name = f"{os.path.splitext(item_name)[0]}.jpg"
                                 thumbnail_path = os.path.join(settings.THUMBNAILS_BASE_DIR, current_dataset, thumbnail_name)
 

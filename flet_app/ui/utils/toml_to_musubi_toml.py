@@ -252,6 +252,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 dataset_config['video_directory'] = dir_path
                 dataset_config['target_frames'] = dir_frame_buckets
                 dataset_config['frame_extraction'] = dir_frame_extraction
+                # Automatically set max_frames to the largest value in target_frames
+                if dir_frame_buckets:
+                    dataset_config['max_frames'] = max(dir_frame_buckets)
                 # Add control_args if present (for i2v preprocessing)
                 if dir_control_args is not None:
                     dataset_config['control_args'] = dir_control_args
@@ -464,6 +467,8 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
                 lines.append(f"target_frames = {_format_list(dataset['target_frames'])}")
             if 'frame_extraction' in dataset:
                 lines.append(f"frame_extraction = \"{dataset['frame_extraction']}\"")
+            if 'max_frames' in dataset:
+                lines.append(f"max_frames = {dataset['max_frames']}")
 
         # Add reference_directory for IC-LoRA if present
         if 'reference_directory' in dataset:
