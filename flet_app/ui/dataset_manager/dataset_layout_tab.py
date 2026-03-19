@@ -1312,6 +1312,28 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
         ft.Container(content=s_frames_textfield, col=4,),
     ], spacing=5)
 
+    return build_expansion_tile(
+        title="3. Edit files",
+        controls=[
+            change_fps_section,
+            ft.Divider(thickness=1),
+            slice_section,
+            ft.Divider(thickness=1),
+            blend_section,
+            ft.Divider(thickness=1),
+            rename_textfield,
+            rename_files_button,
+            ft.Divider(thickness=1),
+            ft.ResponsiveRow([
+                ft.Container(content=caption_to_txt_button, expand=True,col=6, alignment=ft.alignment.center),
+                ft.Container(content=caption_to_json_button, expand=True,col=6, alignment=ft.alignment.center)
+            ]),
+            fill_empty_txt_button,
+        ],
+        initially_expanded=False,
+    )
+
+def _build_misc_section():
     # Create frame count textfield, Cap button, and Get Frame button
     frame_count_tf = create_textfield(
         label="Frame count",
@@ -1353,25 +1375,25 @@ def _build_batch_section(change_fps_section: ft.ResponsiveRow, rename_textfield:
         ft.Container(content=frame_count_tf, col=4,),
     ], spacing=5)
 
+    # Create "Create 1st frame control" button
+    create_first_frame_button = create_styled_button(
+        "Create 1st frame control",
+        tooltip="Create frozen videos using first frame in control/ folder",
+        expand=True,
+        on_click=_on_create_first_frame_control_click,
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        height=30
+    )
+
     return build_expansion_tile(
-        title="3. Edit files",
+        title="4. Misc",
         controls=[
-            change_fps_section,
-            ft.Divider(thickness=1),
-            slice_section,
-            ft.Divider(thickness=1),
-            blend_section,
-            ft.Divider(thickness=1),
             get_frame_section,
             ft.Divider(thickness=1),
-            rename_textfield,
-            rename_files_button,
-            ft.Divider(thickness=1),
-            ft.ResponsiveRow([
-                ft.Container(content=caption_to_txt_button, expand=True,col=6, alignment=ft.alignment.center),
-                ft.Container(content=caption_to_json_button, expand=True,col=6, alignment=ft.alignment.center)
-            ]),
-            fill_empty_txt_button,
+            create_first_frame_button,
         ],
         initially_expanded=False,
     )
@@ -1847,6 +1869,191 @@ def _on_get_frame_click(e: ft.ControlEvent, frame_count_tf: ft.TextField, button
 
     thread = threading.Thread(target=run_extraction, daemon=True)
     thread.start()
+
+def _on_create_first_frame_control_click(e: ft.ControlEvent):
+    """Handle Create 1st frame control button click - creates frozen videos using first frame"""
+    print("Create 1st frame control button clicked!")
+
+    try:
+        import subprocess
+        import threading
+        from pathlib import Path
+
+        # Initialize page state and get selected videos
+        _initialize_page_state(e.page)
+
+        # Get selected videos directly from page state
+        selected_set = e.page.selected_thumbnails_set if hasattr(e.page, 'selected_thumbnails_set') else set()
+
+        # If no videos selected, use all videos from page
+        if not selected_set:
+            selected_videos = e.page.video_files_list if hasattr(e.page, 'video_files_list') else []
+            print(f"No videos selected, processing all {len(selected_videos)} videos")
+        else:
+            # Use the selected paths directly
+            selected_videos = list(selected_set)
+            print(f"Processing {len(selected_videos)} selected videos")
+
+        if not selected_videos:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("No videos found to process"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        print(f"Videos to process: {selected_videos[:3]}...")  # Debug: show first 3
+
+        # Get video directory and create control subdirectory
+        video_dir = Path(selected_videos[0]).parent
+        control_dir = video_dir / "control"
+        control_dir.mkdir(exist_ok=True)
+
+        # Get FFmpeg path
+        from flet_app.ui_popups import video_player_utils as vpu
+        ffmpeg_exe = vpu._get_ffmpeg_exe_path()
+        codec_flags = vpu._get_video_codec_and_flags()
+
+        def process_video(video_path):
+            """Process a single video to create frozen first frame version"""
+            try:
+                video_path = Path(video_path)
+                video_name = video_path.stem
+                video_ext = video_path.suffix
+                output_path = control_dir / f"{video_name}{video_ext}"
+
+                # Skip if output already exists
+                if output_path.exists():
+                    print(f"Skipping {video_name} - output already exists")
+                    return {"status": "skipped", "video": video_name}
+
+                # First, get video info using ffprobe
+                probe_cmd = [
+                    ffmpeg_exe.replace('ffmpeg', 'ffprobe'),
+                    '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=r_frame_rate,width,height',
+                    '-show_entries', 'format=duration',
+                    '-of', 'json',
+                    str(video_path)
+                ]
+
+                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                if probe_result.returncode != 0:
+                    return {"status": "error", "video": video_name, "error": "Failed to probe video"}
+
+                import json
+                video_info = json.loads(probe_result.stdout)
+
+                # Extract fps, width, height, and duration
+                stream = video_info.get('streams', [{}])[0]
+                fps_str = stream.get('r_frame_rate', '30/1')
+                width = stream.get('width', 512)
+                height = stream.get('height', 512)
+
+                # Parse fps (e.g., "30/1" -> 30.0)
+                if '/' in fps_str:
+                    num, den = fps_str.split('/')
+                    fps = float(num) / float(den)
+                else:
+                    fps = float(fps_str)
+
+                duration = float(video_info.get('format', {}).get('duration', 1.0))
+
+                # Extract first frame to temp file
+                temp_frame = video_dir / f"{video_name}_first_frame.png"
+
+                extract_cmd = [
+                    ffmpeg_exe, '-y',
+                    '-i', str(video_path),
+                    '-vframes', '1',
+                    '-q:v', '2',
+                    str(temp_frame)
+                ]
+
+                extract_result = subprocess.run(extract_cmd, capture_output=True, text=True)
+                if extract_result.returncode != 0:
+                    return {"status": "error", "video": video_name, "error": "Failed to extract first frame"}
+
+                # Create frozen video by looping the first frame for the original duration
+                # Use loop filter to repeat the frame
+                create_cmd = [
+                    ffmpeg_exe, '-y',
+                    '-loop', '1',
+                    '-i', str(temp_frame),
+                    '-t', str(duration),
+                    '-framerate', str(fps),
+                    *codec_flags,
+                    '-pix_fmt', 'yuv420p',
+                    str(output_path)
+                ]
+
+                print(f"Running FFmpeg command: {' '.join(create_cmd)}")
+                create_result = subprocess.run(create_cmd, capture_output=True, text=True)
+                if create_result.returncode != 0:
+                    print(f"FFmpeg error: {create_result.stderr}")
+
+                # Clean up temp frame
+                try:
+                    temp_frame.unlink()
+                except:
+                    pass
+
+                if create_result.returncode != 0:
+                    return {"status": "error", "video": video_name, "error": create_result.stderr[:200]}
+
+                return {"status": "success", "video": video_name, "output": str(output_path)}
+
+            except Exception as ex:
+                return {"status": "error", "video": Path(video_path).name, "error": str(ex)}
+
+        # Process all videos in a thread
+        results = []
+        total_videos = len(selected_videos)
+
+        def run_processing():
+            nonlocal results
+            print(f"Starting processing of {total_videos} videos...")
+            for i, video_path in enumerate(selected_videos):
+                print(f"Processing video {i+1}/{total_videos}: {video_path}")
+                result = process_video(video_path)
+                print(f"Result: {result}")
+                results.append(result)
+
+                # Update progress
+                progress = (i + 1) / total_videos
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Processing {i+1}/{total_videos}: {result.get('video', 'Unknown')} - {result.get('status', 'unknown')}"),
+                    open=True
+                )
+                e.page.update()
+
+            # Final summary
+            success_count = sum(1 for r in results if r['status'] == 'success')
+            skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+            error_count = sum(1 for r in results if r['status'] == 'error')
+            print(f"Processing complete: {success_count} success, {skipped_count} skipped, {error_count} errors")
+
+            summary = f"Done! Created: {success_count}, Skipped: {skipped_count}, Errors: {error_count}"
+            e.page.snack_bar = ft.SnackBar(ft.Text(summary), open=True)
+            e.page.update()
+
+            # Refresh thumbnails
+            if thumbnails_grid_ref and thumbnails_grid_ref.current:
+                e.page.run_task(update_thumbnails, page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+
+        thread = threading.Thread(target=run_processing, daemon=False)
+        thread.start()
+
+    except Exception as ex:
+        print(f"Error in create first frame control: {ex}")
+        import traceback
+        traceback.print_exc()
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text(f"Error: {str(ex)}"),
+            open=True
+        )
+        e.page.update()
 
 def _on_cap_click(e: ft.ControlEvent):
     """Handle Cap button click - copies video captions to matching frames in frames_export folder"""
@@ -2425,6 +2632,8 @@ def dataset_tab_layout(page=None):
     batch_section = _build_batch_section(change_fps_section, rename_textfield, rename_files_button,caption_to_txt_button,
         caption_to_json_button, fill_empty_txt_button)
 
+    misc_section = _build_misc_section()
+
     # Build dataset creation section
     dataset_creation_section = _build_dataset_creation_section(dataset_name_textfield, add_dataset_button)
 
@@ -2433,7 +2642,8 @@ def dataset_tab_layout(page=None):
         dataset_creation_section,  # Add the new dataset creation section right after selection
         captioning_section,
         latent_test_section,
-        batch_section
+        batch_section,
+        misc_section
     ], spacing=3, width=200, alignment=ft.MainAxisAlignment.START)
 
     bottom_app_bar = _build_bottom_status_bar()

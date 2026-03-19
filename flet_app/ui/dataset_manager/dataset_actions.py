@@ -646,6 +646,20 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
                     os.rename(old_txt, temp_txt)
                     print(f"[DEBUG] Renamed conflicting txt {conflict_base}.txt to temporary {os.path.basename(temp_txt)}")
 
+                # Also rename corresponding control file to temp if it exists
+                control_dir = os.path.join(source_dir, "control")
+                old_control = os.path.join(control_dir, conflict_name)
+                if os.path.exists(old_control):
+                    temp_control = os.path.join(control_dir, f"__temp_rename_{temp_offset + idx:04d}{os.path.splitext(conflict_name)[1]}")
+                    os.rename(old_control, temp_control)
+                    print(f"[DEBUG] Renamed conflicting control {conflict_name} to temporary {os.path.basename(temp_control)}")
+                    # Also rename control .txt if it exists
+                    old_control_txt = os.path.join(control_dir, f"{conflict_base}.txt")
+                    if os.path.exists(old_control_txt):
+                        temp_control_txt = os.path.join(control_dir, f"__temp_rename_{temp_offset + idx:04d}.txt")
+                        os.rename(old_control_txt, temp_control_txt)
+                        print(f"[DEBUG] Renamed conflicting control txt {conflict_base}.txt to temporary {os.path.basename(temp_control_txt)}")
+
                 # Also rename corresponding thumbnail to temp if it exists
                 if os.path.exists(thumbnails_dir):
                     for thumb_ext in ['.jpg', '.png']:
@@ -685,6 +699,20 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
             if os.path.exists(old_txt_path):
                 os.rename(old_txt_path, new_txt_path)
                 print(f"[DEBUG] Renamed {os.path.basename(old_txt_path)} to {os.path.basename(new_txt_path)}")
+
+            # Check for and rename corresponding control file if it exists
+            control_dir = os.path.join(source_dir, "control")
+            old_control_path = os.path.join(control_dir, old_name)
+            new_control_path = os.path.join(control_dir, new_name)
+            if os.path.exists(old_control_path):
+                os.rename(old_control_path, new_control_path)
+                print(f"[DEBUG] Renamed control {old_name} to {new_name}")
+                # Also rename control .txt if it exists
+                old_control_txt_path = os.path.join(control_dir, f"{old_base}.txt")
+                new_control_txt_path = os.path.join(control_dir, f"{new_base}.txt")
+                if os.path.exists(old_control_txt_path):
+                    os.rename(old_control_txt_path, new_control_txt_path)
+                    print(f"[DEBUG] Renamed control txt {old_base}.txt to {new_base}.txt")
 
             # Rename corresponding thumbnail if it exists
             if os.path.exists(thumbnails_dir):
@@ -745,6 +773,22 @@ async def on_rename_files_click(e: ft.ControlEvent, selected_dataset_ref, DATASE
                     os.rename(temp_txt, final_txt)
                     current_files.add(f"{final_base}.txt")  # Track txt too
                     print(f"[DEBUG] Renamed temp txt {temp_base}.txt to final {final_base}.txt")
+
+                # Also rename the corresponding control file if it exists
+                control_dir = os.path.join(source_dir, "control")
+                temp_control = os.path.join(control_dir, temp_name)
+                final_control = os.path.join(control_dir, final_name)
+                if os.path.exists(temp_control):
+                    os.rename(temp_control, final_control)
+                    current_files.add(final_name)  # Track control file too
+                    print(f"[DEBUG] Renamed temp control {temp_name} to final {final_name}")
+                    # Also rename control .txt if it exists
+                    temp_control_txt = os.path.join(control_dir, f"{temp_base}.txt")
+                    final_control_txt = os.path.join(control_dir, f"{final_base}.txt")
+                    if os.path.exists(temp_control_txt):
+                        os.rename(temp_control_txt, final_control_txt)
+                        current_files.add(f"{final_base}.txt")  # Track control txt too
+                        print(f"[DEBUG] Renamed temp control txt {temp_base}.txt to final {final_base}.txt")
 
                 # Also rename the corresponding thumbnail if it exists
                 if os.path.exists(thumbnails_dir):
