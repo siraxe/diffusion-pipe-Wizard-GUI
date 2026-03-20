@@ -79,7 +79,8 @@ class LTX2Cache:
             "--device", device,
             "--vae_dtype", vae_dtype,
             "--ltx2_mode", ltx2_mode,
-            "--batch_size", str(batch_size)
+            "--batch_size", str(batch_size),
+            "--vae_spatial_tile_size", "512"
         ]
 
     def format_cache_latents_command(self, **kwargs) -> str:
