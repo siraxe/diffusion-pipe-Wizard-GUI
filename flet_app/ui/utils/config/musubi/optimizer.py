@@ -18,6 +18,7 @@ MUSUBI_OPTIMIZER_TYPE_MAP = {
     'prodigy': 'Prodigy',
     'automagic': 'Automagic',
     'stiefel': 'Stiefel',
+    'came': 'CAME',
 }
 
 MUSUBI_OPTIMIZER_TYPE_MAP_REVERSE = {v: k for k, v in MUSUBI_OPTIMIZER_TYPE_MAP.items()}
@@ -65,8 +66,8 @@ def populate_musubi_optimization_section(toml_data: Dict, label_vals: Dict) -> N
 
     # Load all optimization fields
     for k in ('learning_rate', 'lr', 'max_steps', 'batch_size',
-              'max_grad_norm', 'blocks_to_swap', 'scheduler_type', 'optimizer_args',
-              'enable_gradient_checkpointing'):
+              'max_grad_norm', 'loraplus_ratio', 'blocks_to_swap', 'caption_dropout_rate',
+              'scheduler_type', 'optimizer_args', 'enable_gradient_checkpointing'):
         if k in optimization:
             label_vals[k] = optimization.get(k)
 

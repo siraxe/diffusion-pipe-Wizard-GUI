@@ -115,7 +115,7 @@ def populate_optimizer_section(toml_data: dict, label_vals: dict) -> None:
             label_vals[k] = opt.get(k)
 
     # Musubi optimization fields
-    for k in ('max_steps', 'batch_size', 'max_grad_norm', 'blocks_to_swap',
+    for k in ('max_steps', 'batch_size', 'max_grad_norm', 'loraplus_ratio', 'blocks_to_swap',
               'caption_dropout_rate', 'scheduler_type', 'optimizer_args', 'enable_gradient_checkpointing'):
         if k in opt:
             label_vals[k] = opt.get(k)

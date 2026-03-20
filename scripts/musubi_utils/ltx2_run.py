@@ -566,10 +566,12 @@ class LTX2Run:
         """Builds optimizer and scheduler specific flags."""
         cmd = []
 
-        # Map prodigy to prodigyopt.Prodigy for external optimizer
+        # Map optimizer names to module paths for external optimizers
         optimizer_type = optimization.get('optimizer_type', 'AdamW')
         if optimizer_type.lower() == 'prodigy':
             optimizer_type = 'prodigyopt.Prodigy'
+        elif optimizer_type.lower() == 'came':
+            optimizer_type = 'came_pytorch.CAME'
 
         cmd.extend([
             CONFIG_FLAGS["GRAD_ACCUMULATION"], str(optimization.get('gradient_accumulation_steps', 4)),
@@ -721,6 +723,12 @@ class LTX2Run:
         if optimizer_type == 'stiefel':
             cmd.append(f"--network_args")
             cmd.append(f"use_stiefel=True")
+
+        # LoRA+ (via network_args) - increases UP side learning rate
+        loraplus_ratio = (optimization or {}).get('loraplus_ratio', 0.0)
+        if loraplus_ratio and float(loraplus_ratio) > 0:
+            cmd.append(f"--network_args")
+            cmd.append(f"loraplus_lr_ratio={loraplus_ratio}")
 
         # Caption dropout rate (from lora section)
         caption_dropout_rate = lora.get('caption_dropout_rate', 0.0)
@@ -910,8 +918,11 @@ class LTX2Run:
         if resume and os.path.exists(resume):
             cmd.extend([CONFIG_FLAGS["RESUME"], resume])
 
-        # NOTE: Reset optimizer flags are not supported by musubi-trainer
-        # Users need to delete the state directory manually if they want to reset optimizer
+        # 11. Reset optimizer flags (for changing parameter groups like LoRA+)
+        if reset_optimizer:
+            cmd.append("--reset_optimizer")
+        if reset_optimizer_params:
+            cmd.append("--reset_optimizer_params")
 
         return cmd
 

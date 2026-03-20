@@ -64,10 +64,11 @@ def get_musubi_training_settings(
                     content=ft.Column(controls=[
                         # Row 1: batch_size, grad_accum_steps, max_grad_norm, blocks_to_swap
                         ft.ResponsiveRow(controls=[
-                            create_textfield("batch_size", 1, col=3, expand=True),
-                            create_textfield("grad_accum_steps", 1, col=3, expand=True),
-                            create_textfield("max_grad_norm", 1.0, col=3, expand=True),
-                            create_textfield("blocks_to_swap", 0, col=3, expand=True),
+                            create_textfield("batch_size", 1, col=2.4, expand=True),
+                            create_textfield("grad_accum_steps", 1, col=2.4, expand=True),
+                            create_textfield("max_grad_norm", 1.0, col=2.4, expand=True),
+                            create_textfield("loraplus_ratio", 0, col=2.4, expand=True,tooltip="Loraplus lr ratio , set to 4 or max 16 (experimental) "),
+                            create_textfield("blocks_to_swap", 0, col=2.4, expand=True),
                         ], spacing=6),
                         # Row 2: learning_rate, optimizer, scheduler_type, timestep_sampling
                         ft.ResponsiveRow(controls=[
@@ -83,6 +84,7 @@ def get_musubi_training_settings(
                                     "Prodigy": "Prodigy",
                                     "Automagic": "Automagic",
                                     "Stiefel": "Stiefel",
+                                    "CAME": "CAME",
                                 },
                                 col=2.4, expand=True, scale=0.8,
                                 on_change=on_optimizer_change, ref=optimizer_ref

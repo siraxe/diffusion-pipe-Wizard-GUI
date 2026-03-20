@@ -132,7 +132,7 @@ MODEL_CONFIG = {
             "load_text_encoder_in_8bit": True,
         },
         "defaults": {
-            "model_path": "models/ltx2/ltx-2-19b-dev.safetensors",
+            "model_path": "models/ltx2/ltx-2.3-22b-dev.safetensors",
             "text_encoder_path": "models/text_encoders/gemma3",
             "ltx_mode": "video",
             "frame_extraction": "head",

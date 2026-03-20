@@ -225,6 +225,7 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"batch_size = {_clean_value(_get('batch_size', 1), is_numeric=True)}")
     lines.append(f"gradient_accumulation_steps = {_clean_value(_get('grad_accum_steps', 1), is_numeric=True)}")
     lines.append(f"max_grad_norm = {_clean_value(_get('max_grad_norm', 1.0), is_numeric=True)}")
+    lines.append(f"loraplus_ratio = {_clean_value(_get('loraplus_ratio', 0.0), is_numeric=True)}")
     lines.append(f"blocks_to_swap = {_clean_value(_get('blocks_to_swap', 0), is_numeric=True)}")
     caption_dropout_val = _clean_value(_get('caption_dropout', 0.0), is_numeric=True)
     lines.append(f"caption_dropout_rate = {caption_dropout_val}")

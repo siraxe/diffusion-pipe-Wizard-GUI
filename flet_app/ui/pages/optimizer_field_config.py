@@ -92,6 +92,17 @@ OPTIMIZER_CONFIG = {
             "eps": "1e-8",
         },
     },
+    "came": {
+        "aliases": ["came", "came_pytorch"],
+        "show_prodigy_row": False,
+        "show_automagic_row": False,
+        "defaults": {
+            "lr": "2e-5",
+            "betas": "[0.9, 0.99]",
+            "weight_decay": "0.01",
+            "eps": "1e-8",
+        },
+    },
 }
 
 
@@ -200,4 +211,5 @@ OPTIMIZER_OPTIONS = {
     "adamw8bitkahan": "AdamW 8-bit Kahan",
     "adamw": "AdamW",
     "stableadamw": "StableAdamW",
+    "came": "CAME",
 }

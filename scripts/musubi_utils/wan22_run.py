@@ -305,7 +305,9 @@ class WAN22Run:
         config: Dict,
         dataset_config: str,
         slider_config: Optional[str] = None,
-        resume: Optional[str] = None
+        resume: Optional[str] = None,
+        reset_optimizer: bool = False,
+        reset_optimizer_params: bool = False
     ) -> List[str]:
         # Extract config sections
         model = config.get('model', {})
@@ -400,6 +402,7 @@ class WAN22Run:
             'adafactor': 'adafactor',
             'prodigy': 'prodigy',
             'automagic': 'automagic',
+            'came': 'came_pytorch.CAME',
         }
         mapped_optimizer = optimizer_map.get(optimizer_type.lower(), 'adamw')
         cmd.extend(["--optimizer_type", mapped_optimizer])
@@ -431,6 +434,11 @@ class WAN22Run:
             "--network_module", "networks.lora_wan",
             "--network_dim", str(target_rank),
         ])
+
+        # LoRA+ (via network_args) - increases UP side learning rate
+        loraplus_ratio = optimization.get('loraplus_ratio', 0.0) if optimization else 0.0
+        if loraplus_ratio and float(loraplus_ratio) > 0:
+            cmd.extend(["--network_args", f"loraplus_lr_ratio={loraplus_ratio}"])
 
         # Init from existing checkpoint - with rank checking and conversion
         init_checkpoint = adapter.get('init_from_existing', '')
@@ -552,6 +560,12 @@ class WAN22Run:
         if resume and os.path.exists(resume):
             cmd.extend(["--resume", resume])
 
+        # Reset optimizer flags (for changing parameter groups like LoRA+)
+        if reset_optimizer:
+            cmd.append("--reset_optimizer")
+        if reset_optimizer_params:
+            cmd.append("--reset_optimizer_params")
+
         # Block swap - check optimization first, then training
         blocks_to_swap = optimization.get('blocks_to_swap', training.get('blocks_to_swap', 0))
         if blocks_to_swap > 0:
@@ -585,14 +599,14 @@ class WAN22Run:
 # Convenience Functions
 # ==========================================================================
 
-def create_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None) -> List[str]:
+def create_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None, reset_optimizer: bool = False, reset_optimizer_params: bool = False) -> List[str]:
     runner = WAN22Run()
-    return runner.build_training_command(config, dataset_config, slider_config, resume)
+    return runner.build_training_command(config, dataset_config, slider_config, resume, reset_optimizer, reset_optimizer_params)
 
 
-def format_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None) -> str:
+def format_training_command(config: Dict, dataset_config: str, slider_config: Optional[str] = None, resume: Optional[str] = None, reset_optimizer: bool = False, reset_optimizer_params: bool = False) -> str:
     runner = WAN22Run()
-    return runner.format_training_command(config=config, dataset_config=dataset_config, slider_config=slider_config, resume=resume)
+    return runner.format_training_command(config=config, dataset_config=dataset_config, slider_config=slider_config, resume=resume, reset_optimizer=reset_optimizer, reset_optimizer_params=reset_optimizer_params)
 
 
 if __name__ == "__main__":

@@ -290,7 +290,7 @@ def save_images(original_tensor: torch.Tensor, decoded_tensor: torch.Tensor, out
 def main():
     parser = argparse.ArgumentParser(description="Test LTX-2 VAE encode/decode pipeline")
     parser.add_argument("image", help="Path to input image")
-    parser.add_argument("--vae", default="/home/e/Dpipe/models/ltx2/ltx-2-19b-dev.safetensors",
+    parser.add_argument("--vae", default="/home/e/Dpipe/models/ltx2/ltx-2.3-22b-dev.safetensors",
                        help="Path to LTX-2 checkpoint")
     parser.add_argument("--max_side", type=int, default=640,
                        help="Maximum side length (biggest side will be scaled to this)")

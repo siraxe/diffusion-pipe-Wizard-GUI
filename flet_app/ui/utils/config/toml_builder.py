@@ -223,6 +223,7 @@ def build_optimizer_section(lines: List[str], cfg: Dict, _get: callable) -> None
         lines.append(f"batch_size = {_get('batch_size', 1)}")
         lines.append(f"gradient_accumulation_steps = {_get('grad_accum_steps', _get('gradient_accumulation_steps', 1))}")
         lines.append(f"max_grad_norm = {_get('max_grad_norm', 1.0)}")
+        lines.append(f"loraplus_ratio = {_get('loraplus_ratio', 0.0)}")
         lines.append(f"blocks_to_swap = {_get('blocks_to_swap', 0)}")
         caption_dropout_val = _get('caption_dropout_rate', _get('caption_dropout', 0.0))
         if caption_dropout_val and float(caption_dropout_val) > 0:
