@@ -126,6 +126,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     use_mask = False  # default
     # ltx_mode from last_config.toml [training_strategy] section (for audio-only mode)
     ltx_mode = 'video'  # default
+    # target_fps from last_config.toml [training_strategy] section
+    target_fps = 25.0  # default
     if last_config_path and os.path.exists(last_config_path):
         try:
             with open(last_config_path, 'r') as f:
@@ -134,6 +136,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 frame_extraction = config.get('training_strategy', {}).get('frame_extraction', 'head')
                 use_mask = config.get('training_strategy', {}).get('use_mask', False)
                 ltx_mode = config.get('training_strategy', {}).get('ltx_mode', 'video')
+                target_fps = float(config.get('training_strategy', {}).get('target_fps', 25))
                 # Handle boolean conversion from string
                 if not isinstance(use_mask, bool):
                     use_mask = str(use_mask).lower() in ['true', '1', 'yes', 'on']
@@ -252,6 +255,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 dataset_config['video_directory'] = dir_path
                 dataset_config['target_frames'] = dir_frame_buckets
                 dataset_config['frame_extraction'] = dir_frame_extraction
+                dataset_config['target_fps'] = target_fps
                 # Automatically set max_frames to the largest value in target_frames
                 if dir_frame_buckets:
                     dataset_config['max_frames'] = max(dir_frame_buckets)
@@ -467,6 +471,8 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
                 lines.append(f"target_frames = {_format_list(dataset['target_frames'])}")
             if 'frame_extraction' in dataset:
                 lines.append(f"frame_extraction = \"{dataset['frame_extraction']}\"")
+            if 'target_fps' in dataset:
+                lines.append(f"target_fps = {float(dataset['target_fps'])}")
             if 'max_frames' in dataset:
                 lines.append(f"max_frames = {dataset['max_frames']}")
 

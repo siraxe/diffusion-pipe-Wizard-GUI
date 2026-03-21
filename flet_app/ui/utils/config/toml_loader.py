@@ -224,7 +224,7 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     if not isinstance(ts, dict):
         return
 
-    for k in ('first_frame_conditioning_p', 'ltx_mode'):
+    for k in ('first_frame_conditioning_p', 'ltx_mode', 'target_fps'):
         if k in ts:
             label_vals[k] = ts.get(k)
     for k in ('separate_audio_buckets', 'slider', 'ic_lora', 'use_mask', 'ltx_2_3'):
@@ -544,6 +544,12 @@ def update_ui_from_toml(container: Any, toml_data: dict) -> None:
 
     # Populate all sections
     populate_model_section(toml_data, label_vals)
+
+    # Store the original name from the model section for later use when saving
+    model = toml_data.get('model', {})
+    if isinstance(model, dict) and 'name' in model and page:
+        page.original_config_name = model.get('name', '')
+
     populate_optimizer_section(toml_data, label_vals)
     populate_adapter_section(toml_data, label_vals)
     populate_lora_section(toml_data, label_vals)

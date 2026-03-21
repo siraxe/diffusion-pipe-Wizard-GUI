@@ -319,7 +319,9 @@ def _create_save_as_content(page: ft.Page) -> ft.Column:
     try:
         # Use LTX2-specific config builder if LTX2 is selected
         if TopBarUtils._is_ltx2_selected(training_tab):
-            toml_text = build_ltx2_toml_from_ui(training_tab)
+            # Get the original config name if available
+            config_name = getattr(page, 'original_config_name', None)
+            toml_text = build_ltx2_toml_from_ui(training_tab, config_name=config_name)
         else:
             toml_text = build_toml_config_from_ui(training_tab)
     except Exception as e:

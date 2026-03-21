@@ -112,6 +112,7 @@ MODEL_CONFIG = {
             "te1_lr": False,
             "te2_lr": False,
             "ltx_mode": True,
+            "target_fps": True,
             "frame_extraction": True,
             "separate_audio_buckets": True,
             "use_mask": True,
@@ -135,6 +136,7 @@ MODEL_CONFIG = {
             "model_path": "models/ltx2/ltx-2.3-22b-dev.safetensors",
             "text_encoder_path": "models/text_encoders/gemma3",
             "ltx_mode": "video",
+            "target_fps": "25",
             "frame_extraction": "head",
             "gradient_checkpointing": True,
             "slider": False,
@@ -827,6 +829,7 @@ DEFAULT_FIELD_VISIBILITY = {
     "llm_adapter_lr": False,
     # LTX2-specific mode dropdown
     "ltx_mode": False,
+    "target_fps": False,
     "wan_mode": False,
     "wan_task": False,
     "frame_extraction": False,

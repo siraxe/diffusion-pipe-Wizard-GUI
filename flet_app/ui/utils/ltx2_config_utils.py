@@ -185,6 +185,9 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     ltx_mode_val = _get('ltx_mode', 'video')
     lines.append(f"ltx_mode = {_quote(ltx_mode_val)}")
 
+    target_fps_val = _get('target_fps', '25')
+    lines.append(f"target_fps = {_quote(target_fps_val)}")
+
     frame_extraction_val = _get('frame_extraction', 'head')
     lines.append(f"frame_extraction = {_quote(frame_extraction_val)}")
     separate_audio_buckets_val = _as_bool(_get('separate_audio_buckets', True))
@@ -400,12 +403,24 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
                             control.value = "null"
                         else:
                             control.value = str(value)
+                        # Explicitly update the textfield
+                        if hasattr(control, 'update'):
+                            try:
+                                control.update()
+                            except Exception:
+                                pass
                     elif isinstance(control, ft.Dropdown):
                         # Handle boolean values properly (convert to lowercase string)
                         if isinstance(value, bool):
                             control.value = 'true' if value else 'false'
                         else:
                             control.value = str(value) if value is not None else ""
+                        # Explicitly update the dropdown
+                        if hasattr(control, 'update'):
+                            try:
+                                control.update()
+                            except Exception:
+                                pass
                     elif isinstance(control, ft.Checkbox):
                         logger.info(f"Setting checkbox '{label}' to {value} (current={control.value})")
                         if isinstance(value, bool):
@@ -437,6 +452,12 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         # Model section - Set Trainer first (affects model type options)
         model = toml_data.get('model', {})
         if model:
+            # Store the original name from the config for later use when saving
+            original_name = model.get('name', '')
+            page = getattr(training_tab_container, 'page', None)
+            if page:
+                page.original_config_name = original_name
+
             trainer = model.get('trainer', 'musubi')  # LTX2 uses musubi by default
             _set_field_value('Trainer', trainer)
 
@@ -583,6 +604,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         # Always load values (section may be empty dict)
         _set_field_value('first_frame_conditioning_p', training_strategy.get('first_frame_conditioning_p', 0.1))
         _set_field_value('ltx_mode', training_strategy.get('ltx_mode', 'video'))
+        _set_field_value('target_fps', training_strategy.get('target_fps', '25'))
         _set_field_value('frame_extraction', training_strategy.get('frame_extraction', 'head'))
         separate_audio_buckets = training_strategy.get('separate_audio_buckets', True)
         if not isinstance(separate_audio_buckets, bool):

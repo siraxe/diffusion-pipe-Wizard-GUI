@@ -241,7 +241,8 @@ class TopBarUtils:
 
                 # Inject name field into TOML for LTX2 configs
                 from pathlib import Path as PathLib
-                config_name = PathLib(path).stem
+                # Use stored original name if available, otherwise fall back to filename stem
+                config_name = getattr(page, 'original_config_name', None) or PathLib(path).stem
                 if TopBarUtils._is_ltx2_selected(training_tab):
                     lines = toml_text.split('\n')
                     for i, line in enumerate(lines):
@@ -292,7 +293,8 @@ class TopBarUtils:
 
                     # Inject name field into TOML for LTX2 configs
                     from pathlib import Path as PathLib
-                    config_name = PathLib(path).stem
+                    # Use stored original name if available, otherwise fall back to filename stem
+                    config_name = getattr(page, 'original_config_name', None) or PathLib(path).stem
                     if TopBarUtils._is_ltx2_selected(training_tab):
                         lines = toml_text.split('\n')
                         for i, line in enumerate(lines):

@@ -325,7 +325,10 @@ async def save_training_config_to_toml(training_tab_container):
         # Use appropriate builder based on model type
         if model_type == 'ltx-video-2':
             from .utils.ltx2_config_utils import build_ltx2_toml_from_ui
-            train_toml_text = build_ltx2_toml_from_ui(training_tab_container)
+            # Get the original config name if available, otherwise None
+            page = getattr(training_tab_container, 'page', None)
+            config_name = getattr(page, 'original_config_name', None) if page else None
+            train_toml_text = build_ltx2_toml_from_ui(training_tab_container, config_name=config_name)
         else:
             train_toml_text = build_toml_config_from_ui(training_tab_container)
         data_toml_path_abs = os.path.abspath(data_toml_path).replace('\\', '/')

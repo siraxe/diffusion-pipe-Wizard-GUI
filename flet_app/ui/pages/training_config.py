@@ -55,6 +55,7 @@ single_file_path_field_ref = ft.Ref[ft.TextField]()
 first_frame_conditioning_p_field_ref = ft.Ref[ft.TextField]()
 t5_path_field_ref = ft.Ref[ft.TextField]()
 ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+target_fps_field_ref = ft.Ref[ft.TextField]()
 ltx_2_3_checkbox_ref = ft.Ref[ft.Checkbox]()
 wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 wan_task_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -397,6 +398,7 @@ def get_training_config_page_content():
             "llm_adapter_lr": llm_adapter_lr_field_ref,
             # Musubi-specific fields (ltx_mode dropdown)
             "ltx_mode": ltx_mode_dropdown_ref,
+            "target_fps": target_fps_field_ref,
             "wan_mode": wan_mode_dropdown_ref,
             "wan_task": wan_task_dropdown_ref,
             "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
@@ -483,6 +485,7 @@ def get_training_config_page_content():
             "llm_adapter_lr": llm_adapter_lr_field_ref,
             "max_llama3_seq_len": max_llama3_seq_len_field_ref,
             # Musubi-specific fields
+            "target_fps": target_fps_field_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
             "sample_each": sample_each_field_ref,
@@ -1261,15 +1264,24 @@ def get_training_config_page_content():
                             {
                                 "lora": "lora",
                                 "lokr": "lokr"
-                            }, col=3, expand=False, scale=0.8, ref=adapter_dropdown_ref, on_change=_on_adapter_change,
+                            }, col=1.8, expand=False, scale=0.8, ref=adapter_dropdown_ref, on_change=_on_adapter_change,
                         ),
                         create_dropdown(
                             "ltx_mode",
                             "video",
                             {"video": "video", "av": "av", "audio": "audio"},
-                            col=2, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
+                            col=1.7, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
                             visible=_should_show_field("ltx_mode"),
                             on_change=_on_ltx_mode_change
+                        ),
+                        create_textfield(
+                            "target_fps", "25",
+                            hint_text="Fps to cache and train at",
+                            expand=True,
+                            col=1.5,
+                            scale=0.8,
+                            ref=target_fps_field_ref,
+                            visible=_should_show_field("target_fps"),
                         ),
                         # Wan2.2 mode dropdown
                         create_dropdown(
