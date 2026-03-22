@@ -14,6 +14,10 @@ def get_musubi_training_settings(
     crepa_ref=None,
     crepa_mode_ref=None,
     crepa_args_ref=None,
+    self_flow_ref=None,
+    self_flow_args_ref=None,
+    cts_lambda_ref=None,
+    cts_lambda_args_ref=None,
     audio_lr_rate_ref=None,
     sync_visibility_func=None,
 ):
@@ -33,6 +37,12 @@ def get_musubi_training_settings(
     scheduler_ref = ft.Ref[ft.Dropdown]()
     lr_warmup_steps_ref = ft.Ref[ft.TextField]()
     optimizer_args_ref = ft.Ref[ft.TextField]()
+
+    # Use passed refs for self_flow and cts_lambda, or create local ones
+    if self_flow_args_ref is None:
+        self_flow_args_ref = ft.Ref[ft.TextField]()
+    if cts_lambda_args_ref is None:
+        cts_lambda_args_ref = ft.Ref[ft.TextField]()
 
     def on_optimizer_change(e):
         """Update learning rate when optimizer changes."""
@@ -289,6 +299,39 @@ def get_musubi_training_settings(
                                 col=2.4, expand=True,
                             ),
                         ], spacing=6),
+                        # Row 2: self_flow and cts_lambda checkboxes
+                        ft.ResponsiveRow(controls=[
+                            ft.Container(
+                                content=ft.Checkbox(
+                                    label="self_flow",
+                                    value=False,
+                                    scale=0.8,
+                                    ref=self_flow_ref,
+                                    data="self_flow",
+                                    tooltip="Enable self-flow training.",
+                                    on_change=lambda e: (
+                                        setattr(self_flow_args_ref.current, 'visible', e.control.value) if self_flow_args_ref.current else None,
+                                        self_flow_args_ref.current.update() if self_flow_args_ref.current else None
+                                    ),
+                                ),
+                                col=3, expand=True,
+                            ),
+                            ft.Container(
+                                content=ft.Checkbox(
+                                    label="cts_lambda",
+                                    value=False,
+                                    scale=0.8,
+                                    ref=cts_lambda_ref,
+                                    data="cts_lambda",
+                                    tooltip="Enable CTS lambda training.",
+                                    on_change=lambda e: (
+                                        setattr(cts_lambda_args_ref.current, 'visible', e.control.value) if cts_lambda_args_ref.current else None,
+                                        cts_lambda_args_ref.current.update() if cts_lambda_args_ref.current else None
+                                    ),
+                                ),
+                                col=3, expand=True,
+                            ),
+                        ], spacing=6),
                         # CREPA row: mode dropdown + args (hidden by default)
                         ft.ResponsiveRow(controls=[
                             ft.Container(
@@ -362,6 +405,36 @@ def get_musubi_training_settings(
                                     visible=False,
                                 ),
                                 col=4, expand=True,
+                            ),
+                        ], spacing=6),
+                        # Row 3: self_flow_args field (hidden by default)
+                        ft.ResponsiveRow(controls=[
+                            ft.Container(
+                                content=ft.TextField(
+                                    label="self_flow_args",
+                                    value="teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1",
+                                    scale=0.8,
+                                    ref=self_flow_args_ref,
+                                    data="self_flow_args",
+                                    visible=False,
+                                    expand=True,
+                                ),
+                                col=12, expand=True,
+                            ),
+                        ], spacing=6),
+                        # Row 4: cts_lambda_args field (hidden by default)
+                        ft.ResponsiveRow(controls=[
+                            ft.Container(
+                                content=ft.TextField(
+                                    label="cts_lambda_args",
+                                    value="video_driven=0.3 audio_driven=0.1",
+                                    scale=0.8,
+                                    ref=cts_lambda_args_ref,
+                                    data="cts_lambda_args",
+                                    visible=False,
+                                    expand=True,
+                                ),
+                                col=12, expand=True,
                             ),
                         ], spacing=6),
                         ft.Divider(height=1),

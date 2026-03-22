@@ -97,6 +97,11 @@ prior_divergence_args_field_ref = ft.Ref[ft.TextField]()
 crepa_checkbox_ref = ft.Ref[ft.Checkbox]()
 crepa_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 crepa_args_field_ref = ft.Ref[ft.TextField]()
+# self_flow and cts_lambda fields
+self_flow_checkbox_ref = ft.Ref[ft.Checkbox]()
+self_flow_args_field_ref = ft.Ref[ft.TextField]()
+cts_lambda_checkbox_ref = ft.Ref[ft.Checkbox]()
+cts_lambda_args_field_ref = ft.Ref[ft.TextField]()
 audio_lr_rate_ref = ft.Ref[ft.TextField]()
 sample_slider_range_field_ref = ft.Ref[ft.TextField]()
 i2v_type_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -307,6 +312,20 @@ def sync_dependent_field_visibility():
             if prior_divergence_args_field_ref.current.page:
                 prior_divergence_args_field_ref.current.update()
 
+        # self_flow_args
+        self_flow_checked = self_flow_checkbox_ref.current.value if self_flow_checkbox_ref and self_flow_checkbox_ref.current else False
+        if self_flow_args_field_ref and self_flow_args_field_ref.current:
+            self_flow_args_field_ref.current.visible = self_flow_checked
+            if self_flow_args_field_ref.current.page:
+                self_flow_args_field_ref.current.update()
+
+        # cts_lambda_args
+        cts_lambda_checked = cts_lambda_checkbox_ref.current.value if cts_lambda_checkbox_ref and cts_lambda_checkbox_ref.current else False
+        if cts_lambda_args_field_ref and cts_lambda_args_field_ref.current:
+            cts_lambda_args_field_ref.current.visible = cts_lambda_checked
+            if cts_lambda_args_field_ref.current.page:
+                cts_lambda_args_field_ref.current.update()
+
         # CREPA mode and args
         crepa_checked = crepa_checkbox_ref.current.value if crepa_checkbox_ref and crepa_checkbox_ref.current else False
         if crepa_mode_dropdown_ref and crepa_mode_dropdown_ref.current:
@@ -437,6 +456,9 @@ def get_training_config_page_content():
             "crepa": crepa_checkbox_ref,
             "crepa_mode": crepa_mode_dropdown_ref,
             "crepa_args": crepa_args_field_ref,
+            # self_flow and cts_lambda
+            "self_flow": self_flow_checkbox_ref,
+            "cts_lambda": cts_lambda_checkbox_ref,
             # Flux2-specific fields
             "vae": flux2_vae_field_ref,
             "text_encoders": flux2_text_encoders_field_ref,
@@ -533,6 +555,9 @@ def get_training_config_page_content():
             # CREPA
             "crepa_mode": crepa_mode_dropdown_ref,
             "crepa_args": crepa_args_field_ref,
+            # self_flow and cts_lambda
+            "self_flow_args": self_flow_args_field_ref,
+            "cts_lambda_args": cts_lambda_args_field_ref,
         }
 
         try:
@@ -1660,6 +1685,10 @@ def get_training_config_page_content():
         crepa_ref=crepa_checkbox_ref,
         crepa_mode_ref=crepa_mode_dropdown_ref,
         crepa_args_ref=crepa_args_field_ref,
+        self_flow_ref=self_flow_checkbox_ref,
+        self_flow_args_ref=self_flow_args_field_ref,
+        cts_lambda_ref=cts_lambda_checkbox_ref,
+        cts_lambda_args_ref=cts_lambda_args_field_ref,
         audio_lr_rate_ref=audio_lr_rate_ref,
         sync_visibility_func=sync_dependent_field_visibility,
     )

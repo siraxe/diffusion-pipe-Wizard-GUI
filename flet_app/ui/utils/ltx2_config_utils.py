@@ -282,6 +282,14 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"crepa_mode = {_quote(crepa_mode_val)}")
     crepa_args_val = _get('crepa_args', 'student_block_idx=16 teacher_block_idx=32 lambda_crepa=0.1 tau=1.0 num_neighbors=2')
     lines.append(f"crepa_args = {_quote(crepa_args_val)}")
+    self_flow_val = _as_bool(_get('self_flow', False))
+    lines.append(f"self_flow = {'true' if self_flow_val else 'false'}")
+    self_flow_args_val = _get('self_flow_args', 'teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1')
+    lines.append(f"self_flow_args = {_quote(self_flow_args_val)}")
+    cts_lambda_val = _as_bool(_get('cts_lambda', False))
+    lines.append(f"cts_lambda = {'true' if cts_lambda_val else 'false'}")
+    cts_lambda_args_val = _get('cts_lambda_args', 'video_driven=0.3 audio_driven=0.1')
+    lines.append(f"cts_lambda_args = {_quote(cts_lambda_args_val)}")
     lines.append("")
 
     # [data]
@@ -439,12 +447,12 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
             config_content = getattr(training_tab_container, 'config_page_content', None)
             if config_content:
                 _apply(config_content)
-                # Log if generate_audio was not found
-                if label == 'generate_audio':
+                # Log if specific fields were not found
+                if label in ['self_flow', 'cts_lambda', 'generate_audio']:
                     if found:
-                        logger.info(f"generate_audio checkbox found and set. Matched controls: {matched_controls}")
+                        logger.info(f"{label} found and set to {value}. Matched: {matched_controls}")
                     else:
-                        logger.warning(f"generate_audio checkbox NOT found in config_page_content")
+                        logger.warning(f"{label} NOT found in config_page_content")
         except Exception as e:
             logger.warning(f"Error setting field {label} to {value}: {e}")
 
@@ -793,6 +801,10 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('crepa', acceleration.get('crepa', False))
         _set_field_value('crepa_mode', acceleration.get('crepa_mode', 'backbone'))
         _set_field_value('crepa_args', acceleration.get('crepa_args', 'student_block_idx=16 teacher_block_idx=32 lambda_crepa=0.1 tau=1.0 num_neighbors=2'))
+        _set_field_value('self_flow', acceleration.get('self_flow', False))
+        _set_field_value('self_flow_args', acceleration.get('self_flow_args', 'teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1'))
+        _set_field_value('cts_lambda', acceleration.get('cts_lambda', False))
+        _set_field_value('cts_lambda_args', acceleration.get('cts_lambda_args', 'video_driven=0.3 audio_driven=0.1'))
 
         # Checkpoints section
         checkpoints = toml_data.get('checkpoints', {})
