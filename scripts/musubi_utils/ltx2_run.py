@@ -189,6 +189,10 @@ CONFIG_FLAGS = {
     "PRIOR_DIV_ARGS": "--prior_divergence_args",
     "CREPA": "--crepa",
     "CREPA_ARGS": "--crepa_args",
+    "SELF_FLOW": "--self_flow",
+    "SELF_FLOW_ARGS": "--self_flow_args",
+    "CTS_LAMBDA_VIDEO_DRIVEN": "--cts_lambda_video_driven",
+    "CTS_LAMBDA_AUDIO_DRIVEN": "--cts_lambda_audio_driven",
     "AUDIO_LOSS_BALANCE_MODE": "--audio_loss_balance_mode",
     "AUDIO_LOSS_BALANCE_TARGET_RATIO": "--audio_loss_balance_target_ratio",
     "AUDIO_LOSS_BALANCE_EMA_DECAY": "--audio_loss_balance_ema_decay",
@@ -686,6 +690,31 @@ class LTX2Run:
             crepa_mode = acceleration.get('crepa_mode', 'backbone')
             crepa_args = acceleration.get('crepa_args', 'student_block_idx=16 teacher_block_idx=32 lambda_crepa=0.1 tau=1.0 num_neighbors=2')
             cmd.extend([CONFIG_FLAGS["CREPA_ARGS"], f"mode={crepa_mode} {crepa_args}"])
+
+        if self.parse_bool(acceleration.get('self_flow', False)):
+            cmd.append(CONFIG_FLAGS["SELF_FLOW"])
+            self_flow_args = acceleration.get('self_flow_args', 'teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1')
+            # Parse args and pass each individually (like optimizer_args)
+            for arg in self_flow_args.split():
+                cmd.append(CONFIG_FLAGS["SELF_FLOW_ARGS"])
+                cmd.append(arg)
+
+        if self.parse_bool(acceleration.get('cts_lambda', False)):
+            cts_lambda_args = acceleration.get('cts_lambda_args', 'video_driven=0.3 audio_driven=0.1')
+            # Parse the args string to extract individual values
+            # Format: "video_driven=0.3 audio_driven=0.1"
+            for arg in cts_lambda_args.split():
+                if '=' in arg:
+                    key, value = arg.split('=', 1)
+                    try:
+                        val = float(value)
+                        if val != 0:
+                            if key == 'video_driven':
+                                cmd.extend([CONFIG_FLAGS["CTS_LAMBDA_VIDEO_DRIVEN"], str(val)])
+                            elif key == 'audio_driven':
+                                cmd.extend([CONFIG_FLAGS["CTS_LAMBDA_AUDIO_DRIVEN"], str(val)])
+                    except ValueError:
+                        logger.warning(f"Could not parse cts_lambda arg: {arg}")
 
         return cmd
 
