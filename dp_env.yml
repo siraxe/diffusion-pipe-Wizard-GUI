@@ -25,6 +25,7 @@ dependencies:
     - protobuf==6.31.1
     - peft==0.17.1
     - torch-optimi==0.2.1
+    - schedulefree==1.4.1
     - tensorboard==2.19.0
     - tqdm==4.67.1
     - safetensors==0.5.3

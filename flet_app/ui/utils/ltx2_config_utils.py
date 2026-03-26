@@ -196,6 +196,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"slider = {'true' if slider_val else 'false'}")
     ic_lora_val = _as_bool(_get('ic_lora', False))
     lines.append(f"ic_lora = {'true' if ic_lora_val else 'false'}")
+    vace_lora_val = _as_bool(_get('vace_lora', False))
+    lines.append(f"vace_lora = {'true' if vace_lora_val else 'false'}")
     # ref_downscale for IC-LoRA reference caching
     ref_downscale_val = _clean_value(_get('ref_downscale', 1), is_numeric=True)
     lines.append(f"ref_downscale = {ref_downscale_val}")
@@ -634,6 +636,10 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if not isinstance(ic_lora, bool):
             ic_lora = str(ic_lora).lower() in ['true', '1', 'yes', 'on']
         _set_field_value('ic_lora', ic_lora)
+        vace_lora = training_strategy.get('vace_lora', False)
+        if not isinstance(vace_lora, bool):
+            vace_lora = str(vace_lora).lower() in ['true', '1', 'yes', 'on']
+        _set_field_value('vace_lora', vace_lora)
         ref_downscale = training_strategy.get('ref_downscale', 1)
         _set_field_value('ref_downscale', ref_downscale)
 
@@ -642,7 +648,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         try:
             def _trigger_checkbox_change(control):
                 ctrl_label = getattr(control, 'label', None)
-                if ctrl_label in ('slider', 'ic_lora') and isinstance(control, ft.Checkbox):
+                if ctrl_label in ('slider', 'ic_lora', 'vace_lora') and isinstance(control, ft.Checkbox):
                     if hasattr(control, 'on_change') and control.on_change:
                         control.on_change(ft.ControlEvent('change'))
                         return True

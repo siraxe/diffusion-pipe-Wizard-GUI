@@ -63,6 +63,7 @@ separate_audio_buckets_checkbox_ref = ft.Ref[ft.Checkbox]()
 gradient_checkpointing_checkbox_ref = ft.Ref[ft.Checkbox]()
 slider_checkbox_ref = ft.Ref[ft.Checkbox]()
 ic_lora_checkbox_ref = ft.Ref[ft.Checkbox]()
+vace_lora_checkbox_ref = ft.Ref[ft.Checkbox]()
 reference_downscale_field_ref = ft.Ref[ft.TextField]()
 use_mask_checkbox_ref = ft.Ref[ft.Checkbox]()
 checkpoint_row_ref = ft.Ref[ft.ResponsiveRow]()
@@ -102,6 +103,7 @@ self_flow_checkbox_ref = ft.Ref[ft.Checkbox]()
 self_flow_args_field_ref = ft.Ref[ft.TextField]()
 cts_lambda_checkbox_ref = ft.Ref[ft.Checkbox]()
 cts_lambda_args_field_ref = ft.Ref[ft.TextField]()
+extra_flags_field_ref = ft.Ref[ft.TextField]()
 audio_lr_rate_ref = ft.Ref[ft.TextField]()
 sample_slider_range_field_ref = ft.Ref[ft.TextField]()
 i2v_type_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -229,11 +231,46 @@ def _should_show_factor_field():
 
 def _on_slider_change(e):
     """Handle slider checkbox change - show/hide sample_slider_range field."""
+    if e.control.value:
+        # Uncheck other options
+        if ic_lora_checkbox_ref and ic_lora_checkbox_ref.current:
+            ic_lora_checkbox_ref.current.value = False
+            if ic_lora_checkbox_ref.current.page:
+                ic_lora_checkbox_ref.current.update()
+        if vace_lora_checkbox_ref and vace_lora_checkbox_ref.current:
+            vace_lora_checkbox_ref.current.value = False
+            if vace_lora_checkbox_ref.current.page:
+                vace_lora_checkbox_ref.current.update()
     sync_dependent_field_visibility()
 
 
 def _on_ic_lora_change(e):
     """Handle ic_lora checkbox change - show/hide reference_downscale field."""
+    if e.control.value:
+        # Uncheck other options
+        if slider_checkbox_ref and slider_checkbox_ref.current:
+            slider_checkbox_ref.current.value = False
+            if slider_checkbox_ref.current.page:
+                slider_checkbox_ref.current.update()
+        if vace_lora_checkbox_ref and vace_lora_checkbox_ref.current:
+            vace_lora_checkbox_ref.current.value = False
+            if vace_lora_checkbox_ref.current.page:
+                vace_lora_checkbox_ref.current.update()
+    sync_dependent_field_visibility()
+
+
+def _on_vace_lora_change(e):
+    """Handle vace_lora checkbox change."""
+    if e.control.value:
+        # Uncheck other options
+        if slider_checkbox_ref and slider_checkbox_ref.current:
+            slider_checkbox_ref.current.value = False
+            if slider_checkbox_ref.current.page:
+                slider_checkbox_ref.current.update()
+        if ic_lora_checkbox_ref and ic_lora_checkbox_ref.current:
+            ic_lora_checkbox_ref.current.value = False
+            if ic_lora_checkbox_ref.current.page:
+                ic_lora_checkbox_ref.current.update()
     sync_dependent_field_visibility()
 
 
@@ -426,6 +463,7 @@ def get_training_config_page_content():
             "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
             "slider": slider_checkbox_ref,
             "ic_lora": ic_lora_checkbox_ref,
+            "vace_lora": vace_lora_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
@@ -547,6 +585,7 @@ def get_training_config_page_content():
             # LTX2 specific
             "slider": slider_checkbox_ref,
             "ic_lora": ic_lora_checkbox_ref,
+            "vace_lora": vace_lora_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             # Preservation & regularization args
             "blank_preservation_args": blank_preservation_args_field_ref,
@@ -1272,13 +1311,15 @@ def get_training_config_page_content():
                             on_change=lambda e: _on_ic_lora_change(e),
                             col=3,
                         ),
-                        create_textfield(
-                            "ref_downscale", 1,
-                            hint_text="1=same, 2=half res",
-                            tooltip="Spatial downscale factor for IC-LoRA references: 1=same resolution, 2=half resolution",
-                            expand=True, col=3, scale=0.8,
-                            ref=reference_downscale_field_ref,
-                            visible=False  # Only visible when ic_lora is checked
+                        ft.Checkbox(
+                            label="vace_lora",
+                            value=False,
+                            scale=0.8,
+                            ref=vace_lora_checkbox_ref,
+                            visible=_should_show_field("vace_lora"),
+                            data="vace_lora",
+                            on_change=lambda e: _on_vace_lora_change(e),
+                            col=3,
                         ),
                     ], spacing=2),
                     # Adapter row with sample_slider_range
@@ -1288,7 +1329,8 @@ def get_training_config_page_content():
                             "lora",
                             {
                                 "lora": "lora",
-                                "lokr": "lokr"
+                                "lokr": "lokr",
+                                "full": "full"
                             }, col=1.8, expand=False, scale=0.8, ref=adapter_dropdown_ref, on_change=_on_adapter_change,
                         ),
                         create_dropdown(
@@ -1344,6 +1386,14 @@ def get_training_config_page_content():
                             expand=True, col=1.5, scale=0.8,
                             ref=sample_each_field_ref,
                             visible=False  # Invisible by default (only visible when slider checkbox is checked)
+                        ),
+                        create_textfield(
+                            "ref_downscale", 1,
+                            hint_text="1=same, 2=half res",
+                            tooltip="Spatial downscale factor for IC-LoRA references: 1=same resolution, 2=half resolution",
+                            expand=True, col=1.5, scale=0.8,
+                            ref=reference_downscale_field_ref,
+                            visible=False  # Only visible when ic_lora is checked
                         ),
                     ], spacing=2),
                     ft.ResponsiveRow(controls=[
@@ -1689,6 +1739,7 @@ def get_training_config_page_content():
         self_flow_args_ref=self_flow_args_field_ref,
         cts_lambda_ref=cts_lambda_checkbox_ref,
         cts_lambda_args_ref=cts_lambda_args_field_ref,
+        extra_flags_ref=extra_flags_field_ref,
         audio_lr_rate_ref=audio_lr_rate_ref,
         sync_visibility_func=sync_dependent_field_visibility,
     )

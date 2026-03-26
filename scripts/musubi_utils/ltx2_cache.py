@@ -174,6 +174,112 @@ class LTX2Cache:
         return " ".join(cmd)
 
     # ==========================================================================
+    # Slider Mode Control Folder Caching
+    # ==========================================================================
+
+    def _create_control_dataset_config(
+        self,
+        dataset_config: str,
+        control_dir: str,
+        neg_cache_dir: str
+    ) -> str:
+        """Create a temporary dataset config for caching the control folder.
+
+        Args:
+            dataset_config: Path to the original dataset config
+            control_dir: Path to the control folder
+            neg_cache_dir: Path to the negative cache directory
+
+        Returns:
+            Path to the temporary dataset config file
+        """
+        # Read the original dataset config
+        with open(dataset_config, 'r') as f:
+            orig_config = toml.load(f)
+
+        # Get the general section (for caption extension, batch_size, etc.)
+        general = orig_config.get('general', {})
+
+        # For slider mode, control images don't need captions
+        # Create empty caption files so the dataset loader doesn't filter them out
+        if os.path.exists(control_dir):
+            # Track which images already have captions to avoid duplicates
+            existing_captions = set()
+            if os.path.exists(control_dir):
+                caption_files = glob.glob(os.path.join(control_dir, "*.txt"))
+                for cf in caption_files:
+                    existing_captions.add(os.path.splitext(os.path.basename(cf))[0])
+
+            # Create empty caption files for images that don't have them
+            for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.PNG', '.JPG', '.JPEG', '.WEBP', '.BMP']:
+                for img_file in glob.glob(os.path.join(control_dir, f"*{ext}")):
+                    img_base = os.path.splitext(os.path.basename(img_file))[0]
+                    if img_base not in existing_captions:
+                        caption_file = os.path.join(control_dir, img_base + ".txt")
+                        with open(caption_file, 'w') as f:
+                            f.write("")  # Empty caption file
+                        existing_captions.add(img_base)
+
+        # Create a minimal dataset config for the control folder
+        control_config = {
+            'general': general,
+            'datasets': []
+        }
+
+        # Check if the control directory has images or videos
+        has_images = False
+        if os.path.exists(control_dir):
+            for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.PNG', '.JPG', '.JPEG', '.WEBP', '.BMP']:
+                if glob.glob(os.path.join(control_dir, f"*{ext}")):
+                    has_images = True
+                    break
+
+        if has_images:
+            # Create dataset entry for images
+            control_dataset = {
+                'image_directory': control_dir,
+                'cache_directory': neg_cache_dir,
+                'num_repeats': 1,
+                'enable_bucket': general.get('enable_bucket', True),
+                'bucket_no_upscale': general.get('bucket_no_upscale', False),
+            }
+        else:
+            # Create dataset entry for videos
+            control_dataset = {
+                'video_directory': control_dir,
+                'cache_directory': neg_cache_dir,
+                'num_repeats': 1,
+                'enable_bucket': general.get('enable_bucket', True),
+                'bucket_no_upscale': general.get('bucket_no_upscale', False),
+            }
+            # Copy video-specific settings from the first dataset in original config
+            if 'datasets' in orig_config and len(orig_config['datasets']) > 0:
+                first_ds = orig_config['datasets'][0]
+                for key in ['target_frames', 'frame_extraction', 'target_fps', 'max_frames', 'enable_mask']:
+                    if key in first_ds:
+                        control_dataset[key] = first_ds[key]
+
+        # Copy resolution and AR bucketing settings from original dataset
+        if 'datasets' in orig_config and len(orig_config['datasets']) > 0:
+            first_ds = orig_config['datasets'][0]
+            if 'resolution' in first_ds:
+                control_dataset['resolution'] = first_ds['resolution']
+            # Copy AR bucketing settings to dataset level (needed even if in general)
+            for key in ['enable_ar_bucket', 'min_ar', 'max_ar', 'num_ar_buckets']:
+                if key in first_ds:
+                    control_dataset[key] = first_ds[key]
+
+        control_config['datasets'].append(control_dataset)
+
+        # Create temporary config file in the workspace
+        temp_config_path = dataset_config.replace('.toml', '_control.toml')
+        with open(temp_config_path, 'w') as f:
+            toml.dump(control_config, f)
+
+        logger.info(f"Created temporary control dataset config: {temp_config_path}")
+        return temp_config_path
+
+    # ==========================================================================
     # Batch Command Building
     # ==========================================================================
 
@@ -200,7 +306,7 @@ class LTX2Cache:
 
         commands = {}
 
-        # Standard latent caching
+        # Standard latent caching (main video dir)
         latents_cmd = self.build_cache_latents_command(
             dataset_config=dataset_config,
             ltx2_checkpoint=ltx2_checkpoint,
@@ -218,6 +324,107 @@ class LTX2Cache:
             ])
 
         commands['latents'] = latents_cmd
+
+        # ==========================================================================
+        # VACE Latent Caching (detects control/ directory with vid.mp4 + vid_mask.mp4)
+        # ==========================================================================
+
+        def _get_dataset_video_dir(ds_config: str) -> Optional[str]:
+            """Extract video_directory path from dataset config."""
+            try:
+                with open(ds_config, 'r') as f:
+                    cfg = toml.load(f)
+                if 'datasets' in cfg and len(cfg['datasets']) > 0:
+                    first_ds = cfg['datasets'][0]
+                    return first_ds.get('video_directory', None)
+            except Exception as e:
+                logger.warning(f"Failed to read dataset config for VACE detection: {e}")
+            return None
+
+        def _detect_vace_structure(video_dir: str) -> Optional[str]:
+            """
+            Detect if control/ subdirectory exists with VACE structure.
+
+            Expected structure:
+                video_dir/
+                    vid.mp4           # main training video
+                video_dir/control/
+                    vid.mp4           # control video (depth, pose, etc.)
+                    vid_mask.mp4      # mask video (white=reactive)
+
+            Returns path to control/ directory if VACE structure detected, None otherwise.
+            """
+            if not video_dir or not os.path.exists(video_dir):
+                return None
+
+            control_dir = os.path.join(video_dir, 'control')
+            if not os.path.exists(control_dir) or not os.path.isdir(control_dir):
+                return None
+
+            # Check for VACE files (control videos and masks)
+            has_vace_files = False
+            for fname in os.listdir(control_dir):
+                fpath = os.path.join(control_dir, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                # Check for control video or mask files
+                lower_fname = fname.lower()
+                if any(lower_fname.endswith(ext) for ext in ['.mp4', '.avi', '.mov', '.mkv', '.webm']):
+                    has_vace_files = True
+                    break
+
+            if has_vace_files:
+                logger.info(f"Detected VACE structure in control/ directory: {control_dir}")
+                return control_dir
+
+            return None
+
+        # Only process VACE if vace_lora is enabled
+        vace_lora_enabled = self.parse_bool(training_strategy.get('vace_lora', False))
+
+        # Detect VACE structure from dataset config
+        video_dir = _get_dataset_video_dir(dataset_config)
+        vace_control_dir = _detect_vace_structure(video_dir) if video_dir else None
+
+        if vace_lora_enabled and vace_control_dir:
+            logger.info(f"VACE-LoRA enabled - processing VACE structure")
+            # Determine cache directory (control/cache_vace)
+            vace_cache_dir = os.path.join(vace_control_dir, 'cache_vace')
+            vace_cache_dir = os.path.abspath(vace_cache_dir)
+
+            # Create a modified dataset config with VACE paths added
+            with open(dataset_config, 'r') as f:
+                vace_cfg = toml.load(f)
+
+            # Add VACE paths to the first dataset entry
+            if 'datasets' in vace_cfg and len(vace_cfg['datasets']) > 0:
+                vace_cfg['datasets'][0]['vace_directory'] = vace_control_dir
+                vace_cfg['datasets'][0]['vace_cache_directory'] = vace_cache_dir
+
+                # Save modified config
+                temp_vace_config = dataset_config.replace('.toml', '_vace.toml')
+                with open(temp_vace_config, 'w') as f:
+                    toml.dump(vace_cfg, f)
+                logger.info(f"Created VACE dataset config: {temp_vace_config}")
+
+            # Build VACE caching command using ltx2_cache_latents.py
+            # The VACE caching is automatically triggered when dataset config has
+            # vace_directory and vace_cache_directory set (which we added above)
+            vace_cmd = self.build_cache_latents_command(
+                dataset_config=temp_vace_config,
+                ltx2_checkpoint=ltx2_checkpoint,
+                ltx2_mode=ltx2_mode,
+                vae_dtype=mixed_precision,
+                batch_size=1,
+                device="cuda"
+            )
+
+            commands['vace_latents'] = vace_cmd
+            logger.info(f"Added VACE latent caching: {vace_control_dir} -> {vace_cache_dir}")
+        elif vace_control_dir and not vace_lora_enabled:
+            logger.info("VACE structure detected but vace_lora=false, skipping VACE caching")
+        else:
+            logger.debug("No VACE structure detected, skipping VACE caching")
 
         # Text encoder caching
         commands['text_encoder'] = self.build_cache_text_encoder_command(
@@ -244,6 +451,44 @@ class LTX2Cache:
                 "--dataset_config", dataset_config,
                 "--project_root", str(self.project_root),
             ]
+
+        # Slider mode: cache control folder to musubi_cache_negative
+        slider_enabled = self.parse_bool(training_strategy.get('slider', False))
+        if slider_enabled and slider_config:
+            # Read the slider config to get the negative cache directory
+            try:
+                with open(slider_config, 'r') as f:
+                    slider_cfg = toml.load(f)
+
+                neg_cache_dirs = slider_cfg.get('neg_cache_dirs', [])
+                if neg_cache_dirs:
+                    neg_cache_dir = neg_cache_dirs[0]  # Use first entry
+                    # Derive control folder path (parent of musubi_cache_negative)
+                    # neg_cache_dir is like: /path/to/dataset/control/musubi_cache_negative
+                    # control folder is: /path/to/dataset/control
+                    control_dir = os.path.dirname(neg_cache_dir)
+
+                    # Only cache if control directory exists
+                    if os.path.exists(control_dir) and os.path.isdir(control_dir):
+                        # Create temporary dataset config for control folder
+                        temp_control_config = self._create_control_dataset_config(
+                            dataset_config,
+                            control_dir,
+                            neg_cache_dir
+                        )
+
+                        # Build cache command for control folder
+                        latents_negative_cmd = self.build_cache_latents_command(
+                            dataset_config=temp_control_config,
+                            ltx2_checkpoint=ltx2_checkpoint,
+                            ltx2_mode=ltx2_mode
+                        )
+                        commands['latents_negative'] = latents_negative_cmd
+                        logger.info(f"Added latents_negative caching for slider mode: {control_dir} -> {neg_cache_dir}")
+                    else:
+                        logger.warning(f"Control directory does not exist, skipping negative caching: {control_dir}")
+            except Exception as e:
+                logger.error(f"Failed to add control folder caching for slider mode: {e}")
 
         return commands
 

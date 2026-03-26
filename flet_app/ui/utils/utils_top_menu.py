@@ -241,8 +241,16 @@ class TopBarUtils:
 
                 # Inject name field into TOML for LTX2 configs
                 from pathlib import Path as PathLib
-                # Use stored original name if available, otherwise fall back to filename stem
-                config_name = getattr(page, 'original_config_name', None) or PathLib(path).stem
+                import re
+                # Try to extract name from output_dir (last directory name), fall back to original behavior
+                output_dir_match = re.search(r"output_dir\s*=\s*['\"]([^'\"]+)['\"]", toml_text)
+                if output_dir_match:
+                    output_dir_path = output_dir_match.group(1)
+                    # Get the last directory name from the path
+                    config_name = os.path.basename(os.path.normpath(output_dir_path))
+                else:
+                    # Fallback: use stored original name or filename stem
+                    config_name = getattr(page, 'original_config_name', None) or PathLib(path).stem
                 if TopBarUtils._is_ltx2_selected(training_tab):
                     lines = toml_text.split('\n')
                     for i, line in enumerate(lines):
@@ -293,8 +301,16 @@ class TopBarUtils:
 
                     # Inject name field into TOML for LTX2 configs
                     from pathlib import Path as PathLib
-                    # Use stored original name if available, otherwise fall back to filename stem
-                    config_name = getattr(page, 'original_config_name', None) or PathLib(path).stem
+                    import re
+                    # Try to extract name from output_dir (last directory name), fall back to original behavior
+                    output_dir_match = re.search(r"output_dir\s*=\s*['\"]([^'\"]+)['\"]", toml_text)
+                    if output_dir_match:
+                        output_dir_path = output_dir_match.group(1)
+                        # Get the last directory name from the path
+                        config_name = os.path.basename(os.path.normpath(output_dir_path))
+                    else:
+                        # Fallback: use stored original name or filename stem
+                        config_name = getattr(page, 'original_config_name', None) or PathLib(path).stem
                     if TopBarUtils._is_ltx2_selected(training_tab):
                         lines = toml_text.split('\n')
                         for i, line in enumerate(lines):

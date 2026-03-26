@@ -220,7 +220,7 @@ class LTX2Run:
 
     def __init__(self, project_root: Optional[str] = None):
         self.project_root = Path(project_root) if project_root else self._find_project_root()
-        self.musubi_root = self.project_root / "diffusion-trainers" / "musubi-tuner"
+        self.musubi_root = self.project_root / "diffusion-trainers" / "musubi-tuner" / "src" / "musubi_tuner"
         # Cache configuration map for helper methods
         self.config_map = {} 
 
@@ -576,6 +576,8 @@ class LTX2Run:
             optimizer_type = 'prodigyopt.Prodigy'
         elif optimizer_type.lower() == 'came':
             optimizer_type = 'came_pytorch.CAME'
+        elif optimizer_type.lower() == 'adamwschedulefree':
+            optimizer_type = 'schedulefree.AdamWScheduleFree'
 
         cmd.extend([
             CONFIG_FLAGS["GRAD_ACCUMULATION"], str(optimization.get('gradient_accumulation_steps', 4)),
@@ -849,7 +851,7 @@ class LTX2Run:
         flow_matching = config.get('flow_matching', {})
         validation = config.get('validation', {})
 
-        # Determine script (slider vs regular vs ic_lora)
+        # Determine script (slider vs regular vs ic_lora vs vace)
         slider_enabled = self.parse_bool(training_strategy.get('slider', False))
         use_slider = slider_enabled and slider_config and os.path.exists(slider_config)
 
@@ -857,10 +859,31 @@ class LTX2Run:
         ic_lora_enabled = self.parse_bool(training_strategy.get('ic_lora', False))
         use_ic_lora = ic_lora_enabled
 
+        # VACE training detection: check if vace_lora is enabled in last_config.toml
+        use_vace = False
+        vace_dataset_config = None
+        vace_lora_enabled = self.parse_bool(training_strategy.get('vace_lora', False))
+        if vace_lora_enabled and dataset_config:
+            # Check if dataset_config already points to _vace.toml (passed from start_button_handler)
+            if dataset_config.endswith('_vace.toml'):
+                use_vace = True
+                vace_dataset_config = dataset_config
+            else:
+                # Otherwise, check for VACE-specific config file (_vace.toml)
+                vace_config_path = dataset_config.replace('.toml', '_vace.toml')
+                if os.path.exists(vace_config_path):
+                    use_vace = True
+                    vace_dataset_config = vace_config_path
+
         if use_slider:
             script = str(self.musubi_root / "ltx2_train_slider.py")
             config_flag = "--slider_config"
             config_path = slider_config
+        elif use_vace:
+            # VACE training uses ltx2_vace_train.py with the _vace.toml config
+            script = str(self.musubi_root / "ltx2_vace_train.py")
+            config_flag = "--dataset_config"
+            config_path = vace_dataset_config or dataset_config
         else:
             script = str(self.musubi_root / "ltx2_train_network.py")
             config_flag = "--dataset_config"
@@ -910,14 +933,73 @@ class LTX2Run:
         if self.parse_bool(training_strategy.get('separate_audio_buckets', False)):
             cmd.append("--separate_audio_buckets")
 
+        # VACE-specific flags (only for VACE training)
+        if use_vace:
+            vace_config = training_strategy.get('vace', {})
+
+            # VACE trainer inherits from hv_train_network which requires --dit flag
+            cmd.extend(["--dit", model.get('model_path', '')])
+
+            # --vace_scale: hint injection scale (default 1.0)
+            vace_scale = vace_config.get('scale', 1.0)
+            if vace_scale != 1.0 or 'scale' in vace_config:
+                cmd.extend(["--vace_scale", str(vace_scale)])
+
+            # --vace_layers: comma-separated DiT block indices (default every 4th)
+            vace_layers = vace_config.get('layers', [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44])
+            if isinstance(vace_layers, list):
+                layers_str = ",".join(map(str, vace_layers))
+            else:
+                layers_str = str(vace_layers)
+            cmd.extend(["--vace_layers", layers_str])
+
+            # --vace_freeze_dit: freeze base DiT during training (default true)
+            if self.parse_bool(vace_config.get('freeze_dit', True)):
+                cmd.append("--vace_freeze_dit")
+
+            # --vace_model_path: path to pre-trained VACE weights
+            vace_model_path = vace_config.get('model_path')
+            if vace_model_path and os.path.exists(vace_model_path):
+                cmd.extend(["--vace_model_path", vace_model_path])
+
+            # --enable_audio_xattn_in_vace: add audio cross-attention to video VACE
+            if self.parse_bool(vace_config.get('enable_audio_xattn', False)):
+                cmd.append("--enable_audio_xattn_in_vace")
+
+            # Audio VACE scale (for joint AV training)
+            audio_vace_scale = vace_config.get('audio_scale')
+            if audio_vace_scale is not None:
+                cmd.extend(["--audio_vace_scale", str(audio_vace_scale)])
+
+            # VACE LoRA mode: train adapters instead of full VACE model
+            # Enabled when training_mode is 'lora' (default) or when vace.lora is explicitly True
+            training_mode = model.get('training_mode', 'lora')
+            vace_lora_explicit = vace_config.get('lora', None)
+            # LoRA mode enabled if: training_mode='lora' OR vace.lora=True
+            # Full training when: training_mode='full' AND vace.lora not explicitly True
+            if vace_lora_explicit is not None:
+                vace_lora_mode = self.parse_bool(vace_lora_explicit)
+            else:
+                vace_lora_mode = (training_mode == 'lora')
+
+            if vace_lora_mode:
+                vace_lora_dim = vace_config.get('lora_dim', lora.get('rank', 32))
+                vace_lora_alpha = vace_config.get('lora_alpha', lora.get('alpha', 32))
+                cmd.extend([
+                    "--network_module", "networks.lora_ltx2",
+                    "--network_dim", str(vace_lora_dim),
+                    "--network_alpha", str(vace_lora_alpha)
+                ])
+
         # 4. Initialization Logic
         init_flags = self._build_initialization(config, lora)
         cmd.extend(init_flags)
 
-        # 5. Network Configuration
-        training_mode = model.get('training_mode', 'lora')
-        net_flags = self._build_network_config(lora, training_mode, training_strategy, optimization)
-        cmd.extend(net_flags)
+        # 5. Network Configuration (skip for VACE - it trains its own parameters, not LoRA)
+        if not use_vace:
+            training_mode = model.get('training_mode', 'lora')
+            net_flags = self._build_network_config(lora, training_mode, training_strategy, optimization)
+            cmd.extend(net_flags)
 
         # 6. Optimization & Scheduler Flags
         opt_flags = self._build_optimization_flags(optimization, acceleration)

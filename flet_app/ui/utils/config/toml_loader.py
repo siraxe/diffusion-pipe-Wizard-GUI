@@ -227,7 +227,7 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     for k in ('first_frame_conditioning_p', 'ltx_mode', 'target_fps'):
         if k in ts:
             label_vals[k] = ts.get(k)
-    for k in ('separate_audio_buckets', 'slider', 'ic_lora', 'use_mask', 'ltx_2_3'):
+    for k in ('separate_audio_buckets', 'slider', 'ic_lora', 'vace_lora', 'use_mask', 'ltx_2_3'):
         if k in ts:
             label_vals[k] = to_bool(ts.get(k, False))
 
@@ -519,7 +519,7 @@ def update_ui_from_toml(container: Any, toml_data: dict) -> None:
         'activation_checkpointing', 'eval_every_n_epochs', 'eval_micro_batch_size_per_gpu',
         'eval_gradient_accumulation_steps', 'save_every_n_epochs', 'checkpoint_every_n_minutes',
         'partition_method', 'save_dtype', 'caching_batch_size', 'steps_per_print', 'video_clip_mode',
-        'init_from_existing'
+        'init_from_existing', 'extra_flags'
     ]
     for k in top_keys:
         if k in toml_data:

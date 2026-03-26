@@ -91,6 +91,8 @@ joy_prompt_dropdown_ref = ft.Ref[ft.Dropdown]()
 affix_text_field_ref = ft.Ref[ft.TextField]()
 find_text_field_ref = ft.Ref[ft.TextField]()
 replace_text_field_ref = ft.Ref[ft.TextField]()
+vace_start_frame_textfield_ref = ft.Ref[ft.TextField]()  # VACE: frames to keep at start
+vace_end_frame_textfield_ref = ft.Ref[ft.TextField]()  # VACE: frames to keep at end
 
 # ======================================================================================
 # Page State Initialization (Per-tab independent state)
@@ -1375,6 +1377,41 @@ def _build_misc_section():
         ft.Container(content=frame_count_tf, col=4,),
     ], spacing=5)
 
+    # Create VACE temporal inpainting controls
+    vace_start_frame_textfield = create_textfield(
+        "Start",
+        "16",
+        hint_text="Frames to keep at start",
+        expand=True,
+        col=3,
+        ref=vace_start_frame_textfield_ref,
+    )
+    vace_end_frame_textfield = create_textfield(
+        "End",
+        "16",
+        hint_text="Frames to keep at end",
+        expand=True,
+        col=3,
+        ref=vace_end_frame_textfield_ref,
+    )
+    create_vace_button = create_styled_button(
+        "Create VACE",
+        tooltip="Create temporal inpainting control files in control/ folder (black out middle frames)",
+        expand=True,
+        on_click=_on_create_vace_click,
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        col=6,
+        height=30
+    )
+    vace_control_section = ft.ResponsiveRow([
+        vace_start_frame_textfield,
+        vace_end_frame_textfield,
+        create_vace_button,
+    ], spacing=5)
+
     # Create "Create 1st frame control" button
     create_first_frame_button = create_styled_button(
         "Create 1st frame control",
@@ -1393,6 +1430,7 @@ def _build_misc_section():
         controls=[
             get_frame_section,
             ft.Divider(thickness=1),
+            vace_control_section,
             create_first_frame_button,
         ],
         initially_expanded=False,
@@ -2047,6 +2085,224 @@ def _on_create_first_frame_control_click(e: ft.ControlEvent):
 
     except Exception as ex:
         print(f"Error in create first frame control: {ex}")
+        import traceback
+        traceback.print_exc()
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text(f"Error: {str(ex)}"),
+            open=True
+        )
+        e.page.update()
+
+def _on_create_vace_click(e: ft.ControlEvent):
+    """Handle Create VACE button click - creates temporal inpainting control files"""
+    print("Create VACE button clicked!")
+
+    try:
+        import subprocess
+        import threading
+        from pathlib import Path
+
+        # Initialize page state and get selected videos
+        _initialize_page_state(e.page)
+
+        # Get selected videos directly from page state
+        selected_set = e.page.selected_thumbnails_set if hasattr(e.page, 'selected_thumbnails_set') else set()
+
+        # If no videos selected, use all videos from page
+        if not selected_set:
+            selected_videos = e.page.video_files_list if hasattr(e.page, 'video_files_list') else []
+            print(f"No videos selected, processing all {len(selected_videos)} videos")
+        else:
+            # Use selected paths directly
+            selected_videos = list(selected_set)
+            print(f"Processing {len(selected_videos)} selected videos")
+
+        if not selected_videos:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("No videos found to process"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        # Get start and end frame values
+        try:
+            start_frames = int(vace_start_frame_textfield_ref.current.value) if vace_start_frame_textfield_ref and vace_start_frame_textfield_ref.current.value else 16
+        except (ValueError, AttributeError):
+            start_frames = 16
+            print("Invalid start frames value, using default: 16")
+
+        try:
+            end_frames = int(vace_end_frame_textfield_ref.current.value) if vace_end_frame_textfield_ref and vace_end_frame_textfield_ref.current.value else 16
+        except (ValueError, AttributeError):
+            end_frames = 16
+            print("Invalid end frames value, using default: 16")
+
+        print(f"VACE parameters: start={start_frames}, end={end_frames}")
+
+        # Get video directory and create control subdirectory
+        video_dir = Path(selected_videos[0]).parent
+        control_dir = video_dir / "control"
+        control_dir.mkdir(exist_ok=True)
+
+        # Get FFmpeg path
+        from flet_app.ui_popups import video_player_utils as vpu
+        ffmpeg_exe = vpu._get_ffmpeg_exe_path()
+        codec_flags = vpu._get_video_codec_and_flags()
+
+        def process_video(video_path):
+            """Process a single video to create VACE control files"""
+            try:
+                video_path = Path(video_path)
+                video_name = video_path.stem
+                video_ext = video_path.suffix
+
+                control_video_path = control_dir / f"{video_name}{video_ext}"
+                mask_video_path = control_dir / f"{video_name}_mask{video_ext}"
+
+                # Always overwrite existing files (no skip)
+                print(f"Processing {video_name}...")
+
+                # Get full video info including frame count for VACE processing
+                # Use -count_frames to force actual counting (nb_read_frames may be missing from metadata)
+                probe_cmd = [
+                    ffmpeg_exe.replace('ffmpeg', 'ffprobe'),
+                    '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=codec_name,width,height,r_frame_rate,nb_read_frames',
+                    '-count_frames',
+                    '-of', 'json',
+                    str(video_path)
+                ]
+                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                if probe_result.returncode != 0:
+                    return {"status": "error", "video": video_name, "error": "Failed to get stream info"}
+
+                import json
+                try:
+                    video_info = json.loads(probe_result.stdout)
+                except json.JSONDecodeError as je:
+                    return {"status": "error", "video": video_name, "error": f"Failed to parse ffprobe JSON: {je} - output: {probe_result.stdout[:200]}"}
+
+                stream = video_info.get('streams', [{}])[0]
+                codec = stream.get('codec_name', 'libx264')
+                width = stream.get('width', 512)
+                height = stream.get('height', 512)
+                fps_str = stream.get('r_frame_rate', '30/1')
+
+                # Parse and format fps for ffmpeg (keep as fraction like "25/1")
+                if '/' in fps_str:
+                    output_fps = f"{fps_str}"
+                else:
+                    output_fps = str(fps_str)
+
+                # Get frame count (required for VACE processing)
+                nb_frames = int(stream.get('nb_read_frames', 0))
+                if nb_frames == 0:
+                    return {"status": "error", "video": video_name, "error": f"Cannot determine frame count - ffprobe returned 0 frames"}
+
+                print(f"Video info: {nb_frames} frames, {output_fps} fps, {width}x{height}")
+
+                # Calculate frame ranges for VACE processing
+                keep_end_frame = start_frames - 1           # Last frame to KEEP (0-indexed)
+                generate_start_frame = start_frames          # First frame to BLACK OUT (0-indexed)
+                generate_end_frame = nb_frames - end_frames  # Last frame to black out
+                print(f"Frame ranges: keep=[0,{keep_end_frame}], black=[{generate_start_frame},{generate_end_frame}], keep_last=[{nb_frames-end_frames},{nb_frames-1}]")
+
+                # Create VACE filter for control video (black middle section)
+                # Use drawbox to fill frames with black during the generate range
+                vace_filter = f"drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='between(n,{generate_start_frame},{generate_end_frame})'"
+
+                # Create control video with middle frames blacked out (no audio needed for VACE)
+                # Use -g 1 (every frame is keyframe) and -tune stillimage to prevent shifting artifacts
+                control_cmd = [
+                    ffmpeg_exe, '-y',
+                    '-i', str(video_path),
+                    '-vf', vace_filter,
+                    '-an',                   # Disable audio - not needed for VACE control videos
+                    '-c:v', codec,
+                    '-s', f'{width}x{height}',
+                    '-r', output_fps,
+                    *codec_flags,
+                    '-g', '1',              # Every frame is a keyframe - prevents motion vector artifacts
+                    '-tune', 'stillimage',  # Optimize for static content
+                    '-pix_fmt', 'yuv420p',
+                    str(control_video_path)
+                ]
+
+                print(f"Creating VACE control video: {' '.join(control_cmd)}")
+                control_result = subprocess.run(control_cmd, capture_output=True, text=True)
+                if control_result.returncode != 0:
+                    print(f"FFmpeg error: {control_result.stderr}")
+                    return {"status": "error", "video": video_name, "error": control_result.stderr[:200]}
+
+                # Create mask video - black for keep frames (first 16 + last 16), white for generate middle section
+                # Use color source as base (black) with drawbox to fill middle frames with white
+                vace_mask_filter = f"color=c=black:s={width}x{height}:r={output_fps},drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='between(n,{generate_start_frame},{generate_end_frame})'"
+
+                mask_cmd = [
+                    ffmpeg_exe, '-y',
+                    '-f', 'lavfi', '-i', vace_mask_filter,
+                    '-c:v', codec,
+                    *codec_flags,
+                    '-pix_fmt', 'yuv420p',
+                    '-frames:v', str(nb_frames),  # Set frame count to match original video
+                    str(mask_video_path)
+                ]
+
+                print(f"Creating VACE mask video: {' '.join(mask_cmd)}")
+                mask_result = subprocess.run(mask_cmd, capture_output=True, text=True)
+                if mask_result.returncode != 0:
+                    print(f"FFmpeg error: {mask_result.stderr}")
+                    return {"status": "error", "video": video_name, "error": mask_result.stderr[:200]}
+
+                return {"status": "success", "video": video_name}
+
+            except Exception as ex:
+                print(f"Error processing {video_path}: {ex}")
+                import traceback
+                traceback.print_exc()
+                return {"status": "error", "video": Path(video_path).name, "error": str(ex)}
+
+        # Process all videos in a thread
+        results = []
+        total_videos = len(selected_videos)
+
+        def run_processing():
+            nonlocal results
+            print(f"Starting processing of {total_videos} videos...")
+            for i, video_path in enumerate(selected_videos):
+                print(f"Processing video {i+1}/{total_videos}: {video_path}")
+                result = process_video(video_path)
+                print(f"Result: {result}")
+                results.append(result)
+
+                # Update progress
+                progress = (i + 1) / total_videos
+                e.page.snack_bar = ft.SnackBar(
+                    ft.Text(f"Processing {i+1}/{total_videos}: {result.get('video', 'Unknown')} - {result.get('status', 'unknown')}"),
+                    open=True
+                )
+                e.page.update()
+
+            # Final summary
+            success_count = sum(1 for r in results if r['status'] == 'success')
+            skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+            error_count = sum(1 for r in results if r['status'] == 'error')
+            print(f"Processing complete: {success_count} success, {skipped_count} skipped, {error_count} errors")
+            summary = f"VACE created: {success_count}, Skipped: {skipped_count}, Errors: {error_count}"
+            e.page.snack_bar = ft.SnackBar(ft.Text(summary), open=True)
+            e.page.update()
+
+            # Refresh thumbnails
+            if thumbnails_grid_ref and thumbnails_grid_ref.current:
+                e.page.run_task(update_thumbnails, page_ctx=e.page, grid_control=thumbnails_grid_ref.current, force_refresh=True)
+
+        thread = threading.Thread(target=run_processing, daemon=False)
+        thread.start()
+
+    except Exception as ex:
+        print(f"Error in create VACE: {ex}")
         import traceback
         traceback.print_exc()
         e.page.snack_bar = ft.SnackBar(

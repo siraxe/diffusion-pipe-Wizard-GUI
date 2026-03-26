@@ -146,6 +146,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     # Check if slider mode is enabled (for cache directory naming)
     slider_enabled = False
     ic_lora_enabled = False
+    vace_lora_enabled = False
     if last_config_path and os.path.exists(last_config_path):
         try:
             with open(last_config_path, 'r') as f:
@@ -153,10 +154,13 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
             training_strategy = last_config.get('training_strategy', {})
             slider_enabled = training_strategy.get('slider', False)
             ic_lora_enabled = training_strategy.get('ic_lora', False)
+            vace_lora_enabled = training_strategy.get('vace_lora', False)
             if not isinstance(slider_enabled, bool):
                 slider_enabled = str(slider_enabled).lower() in ['true', '1', 'yes', 'on']
             if not isinstance(ic_lora_enabled, bool):
                 ic_lora_enabled = str(ic_lora_enabled).lower() in ['true', '1', 'yes', 'on']
+            if not isinstance(vace_lora_enabled, bool):
+                vace_lora_enabled = str(vace_lora_enabled).lower() in ['true', '1', 'yes', 'on']
         except Exception:
             pass
 
@@ -209,11 +213,13 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
         # For multiple resolutions, create a dataset entry for each resolution
         for resolution in resolution_list:
-            # cache_directory = path + /cache_musubi (or musubi_cache_positive for slider mode, or cache_ic_lora for ic_lora mode)
+            # cache_directory = path + /cache_musubi (or musubi_cache_positive for slider mode, or cache_ic_lora for ic_lora mode, or cache_vace for vace_lora mode)
             if slider_enabled:
                 cache_directory = os.path.join(dir_path, "musubi_cache_positive") if dir_path else ""
             elif ic_lora_enabled:
                 cache_directory = os.path.join(dir_path, "cache_ic_lora") if dir_path else ""
+            elif vace_lora_enabled:
+                cache_directory = os.path.join(dir_path, "cache_vace") if dir_path else ""
             else:
                 cache_directory = os.path.join(dir_path, "cache_musubi") if dir_path else ""
 
@@ -271,6 +277,13 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                     potential_control = os.path.join(dir_path, 'control')
                     if os.path.exists(potential_control) and os.path.isdir(potential_control):
                         dataset_config['reference_directory'] = potential_control
+                # Add vace_directory for VACE-LoRA mode (uses control/ for consistency)
+                if vace_lora_enabled and dir_path:
+                    # Create control subdirectory for VACE control videos/masks
+                    potential_control = os.path.join(dir_path, 'control')
+                    if not os.path.exists(potential_control):
+                        os.makedirs(potential_control, exist_ok=True)
+                    dataset_config['vace_directory'] = potential_control
 
             datasets_list.append(dataset_config)
 
@@ -291,6 +304,17 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
             potential_control = os.path.join(main_dir, 'control')
             if os.path.exists(potential_control) and os.path.isdir(potential_control):
                 general_config['reference_cache_directory'] = os.path.join(potential_control, 'cache_ref')
+
+    # Add vace_cache_directory for VACE-LoRA mode
+    if vace_lora_enabled and datasets_list:
+        first_ds = datasets_list[0]
+        main_dir = first_ds.get('image_directory', first_ds.get('video_directory', ''))
+        if main_dir:
+            # VACE cache is in the control subdirectory (consistent with ic_lora)
+            potential_control = os.path.join(main_dir, 'control')
+            if not os.path.exists(potential_control):
+                os.makedirs(potential_control, exist_ok=True)
+            general_config['vace_cache_directory'] = os.path.join(potential_control, 'cache_vace')
 
     # Only add AR bucketing to general section if not audio-only mode
     if ltx_mode != 'audio':

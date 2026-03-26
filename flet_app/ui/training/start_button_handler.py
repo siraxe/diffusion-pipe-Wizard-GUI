@@ -1,9 +1,3 @@
-"""
-Training Start Button Handler
-
-Handles Start/Cancel button logic, process management, and training orchestration.
-"""
-
 import os
 import signal
 import traceback
@@ -27,14 +21,6 @@ from flet_app.ui.utils.toml_to_musubi_toml import convert_toml_to_musubi_toml
 # =====================
 
 def set_button_state(main_container, text: str, page=None):
-    """
-    Set the Start/Cancel button text and update the page.
-
-    Args:
-        main_container: Main UI container
-        text: Button text ("Start" or "Cancel")
-        page: Optional Flet page to update
-    """
     try:
         start_btn = getattr(main_container, 'start_btn', None)
         if start_btn is not None:
@@ -53,14 +39,6 @@ def set_button_state(main_container, text: str, page=None):
 
 
 def reset_to_start_button(main_container, training_tab_container, page=None):
-    """
-    Reset the button back to "Start" and clear process handles.
-
-    Args:
-        main_container: Main UI container
-        training_tab_container: Training tab container
-        page: Optional Flet page to update
-    """
     try:
         if hasattr(main_container, 'start_btn') and main_container.start_btn is not None:
             main_container.start_btn.text = "Start"
@@ -78,14 +56,6 @@ def reset_to_start_button(main_container, training_tab_container, page=None):
 # =====================
 
 def terminate_process(training_proc, main_container, page=None):
-    """
-    Terminate a running training process with proper cleanup.
-
-    Args:
-        training_proc: subprocess.Popen object to terminate
-        main_container: Main UI container
-        page: Optional Flet page to update
-    """
     # Append cancel notice to console
     try:
         monitor_content = getattr(main_container, 'monitor_page_content', None)
@@ -141,6 +111,141 @@ def terminate_process(training_proc, main_container, page=None):
 
 
 # =====================
+# Cache Execution Constants & Helpers
+# =====================
+
+# Priority order for cache types
+CACHE_PRIORITY = ['i2v_preprocess', 'latents', 'vace_latents', 'latents_negative', 'text_encoder', 'sample_prompts']
+
+# Human-readable names for cache types
+CACHE_DISPLAY_NAMES = {
+    'i2v_preprocess': 'I2V Preprocess',
+    'latents': 'Latents',
+    'vace_latents': 'VACE Latents',
+    'latents_negative': 'Control Images (Negative)',
+    'text_encoder': 'Text Encoder',
+    'sample_prompts': 'Sample Prompts'
+}
+
+
+def get_cache_display_name(cache_type: str, context: str = 'running') -> str:
+    if cache_type == 'latents_negative':
+        return 'Control images' if context != 'running' else 'Control images (negative)'
+    return CACHE_DISPLAY_NAMES.get(cache_type, cache_type.replace('_', ' ').title())
+
+
+def run_on_page_if_available(page, coro):
+    if page:
+        page.run_task(coro)
+
+
+# =====================
+# Cache Execution Helper Functions
+# =====================
+
+def _get_command_string(cmd_data) -> str:
+    if cmd_data and isinstance(cmd_data[0], list):
+        cmd_list = cmd_data[0]
+    else:
+        cmd_list = cmd_data
+    return " ".join(cmd_list)
+
+
+def _show_cache_summary(runner, training_console_text, page, cache_order: list):
+    from flet_app.ui.training.output_manager import add_warning_message
+
+    display_names = [CACHE_DISPLAY_NAMES.get(ct, ct.replace('_', ' ').title()) for ct in cache_order]
+
+    # Check if IC-LoRA or VACE-LoRA is enabled
+    config = runner.get_config()
+    training_strategy = config.get('training_strategy', {})
+    ic_lora_enabled = str(training_strategy.get('ic_lora', False)).lower() in ('true', '1', 'yes')
+    vace_lora_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
+
+    mode_suffixes = []
+    if ic_lora_enabled:
+        mode_suffixes.append('IC-LoRA')
+    if vace_lora_enabled:
+        mode_suffixes.append('VACE-LoRA')
+
+    summary_line = f"\n[Cache Summary] Will run: {', '.join(display_names)}"
+    if mode_suffixes:
+        summary_line += f" ({' + '.join(mode_suffixes)})"
+    summary_line += "\n"
+
+    async def show(_txt=training_console_text):
+        add_warning_message(_txt, summary_line)
+    run_on_page_if_available(page, show)
+
+
+def _show_cache_starting(cache_type: str, cmd_str: str, training_console_text, page):
+    display_name = get_cache_display_name(cache_type, 'running')
+
+    async def show(_txt=training_console_text):
+        add_info_message(_txt, f"\n[Info] Running {display_name} caching...\n")
+        add_info_message(_txt, f"\n[Command] {cmd_str}\n")
+    run_on_page_if_available(page, show)
+
+
+def _handle_cache_result(cache_type: str, proc, main_container,
+                        training_console_text, page) -> bool:
+    from flet_app.ui.training.output_manager import add_action_message
+
+    # Check if process reference was cleared (indicates user cancellation)
+    if proc.returncode != 0 and getattr(main_container, 'training_proc', None) is None:
+        display_name = get_cache_display_name(cache_type, 'cancelled')
+
+        async def show(_txt=training_console_text):
+            add_action_message(_txt,
+                            f"\n[Action] {display_name} caching cancelled.\n")
+        run_on_page_if_available(page, show)
+        return True
+    return False
+
+
+def _show_cache_failed(cache_type: str, exit_code: int, training_console_text, page):
+    from flet_app.ui.training.output_manager import add_error_message
+    display_name = get_cache_display_name(cache_type, 'completed')
+
+    async def show(_txt=training_console_text):
+        add_error_message(_txt,
+                        f"\n[Error] {display_name} caching failed with exit code {exit_code}\n")
+    run_on_page_if_available(page, show)
+
+
+def _show_cache_completed(cache_type: str, training_console_text, page):
+    from flet_app.ui.training.output_manager import add_success_message
+    display_name = get_cache_display_name(cache_type, 'completed')
+
+    async def show(_txt=training_console_text):
+        add_success_message(_txt,
+                          f"\n[Success] {display_name} caching completed.\n")
+    run_on_page_if_available(page, show)
+
+
+def _show_final_status(was_cancelled: bool, all_success: bool, model_type: str,
+                      main_container, training_tab_container, page,
+                      training_console_text,
+                      reset_button_on_complete: bool):
+    from flet_app.ui.training.output_manager import add_warning_message, add_success_message
+
+    async def show(_txt=training_console_text):
+        if was_cancelled:
+            add_warning_message(_txt,
+                             f"\n[Info] Caching was cancelled. Partial caches may exist.\n")
+        elif all_success:
+            add_success_message(_txt,
+                             f"\n[Success] All caching completed for {model_type}.\n")
+        else:
+            add_warning_message(_txt,
+                             f"\n[Warning] Caching completed with errors for {model_type}.\n")
+
+        if reset_button_on_complete:
+            reset_to_start_button(main_container, training_tab_container, page)
+    run_on_page_if_available(page, show)
+
+
+# =====================
 # Cache Execution (Modular - shared by ltx-video-2 and wan22)
 # =====================
 
@@ -155,155 +260,87 @@ async def run_cache_commands(
     cache_types: list = None,
     reset_button_on_complete: bool = True,
 ):
-    """
-    Execute cache commands sequentially (latents, then text_encoder).
-    Uses musubi_run.run_cache_async() for each cache, then chains the rest.
-
-    Args:
-        runner: MusubiRun instance
-        dataset_config: Path to dataset config
-        main_container: Main UI container
-        training_tab_container: Training tab container
-        page: Flet page
-        training_console_text: Console output control
-        slider_config: Path to slider config (for i2v mode detection)
-        cache_types: Optional list of cache types to run (e.g., ['sample_prompts'])
-                     If None, runs all available cache types
-        reset_button_on_complete: If True, reset button to Start after caching completes.
-                                  If False, leave button state as-is (for when training follows).
-    """
-    import subprocess
     import threading
 
     def run_cache_thread():
         try:
+            # Get available cache commands
             cache_cmds_dict = runner.get_cache_commands(dataset_config, slider_config)
-            # Dynamic cache order based on what commands are available
-            # Priority: i2v_preprocess > latents > text_encoder > sample_prompts
-            cache_priority = ['i2v_preprocess', 'latents', 'text_encoder', 'sample_prompts']
 
-            # Filter by cache_types if specified
+            # Determine which caches to run (respecting priority order)
             if cache_types:
-                cache_order = [ct for ct in cache_priority if ct in cache_cmds_dict and ct in cache_types]
+                cache_order = [ct for ct in CACHE_PRIORITY if ct in cache_cmds_dict and ct in cache_types]
             else:
-                cache_order = [ct for ct in cache_priority if ct in cache_cmds_dict]
+                cache_order = [ct for ct in CACHE_PRIORITY if ct in cache_cmds_dict]
 
             # Track overall success/failure state
             all_success = True
             was_cancelled = False
 
-            # Flag to track if current cache was cancelled
-            cache_cancelled = False
+            # Show cache summary before starting
+            _show_cache_summary(runner, training_console_text, page, cache_order)
 
+            # Process each cache type in order
             for cache_type in cache_order:
+                # Get command string for display
+                cmd_str = _get_command_string(cache_cmds_dict[cache_type])
 
-                # Print progress between caches
-                pass
+                # Show what's starting
+                _show_cache_starting(cache_type, cmd_str, training_console_text, page)
 
-                # Get command(s) for this cache type
-                cmd_data = cache_cmds_dict[cache_type]
-
-                # Handle both single command (list) and multiple commands (list of lists)
-                # i2v_preprocess can have multiple commands for multiple video directories
-                if cmd_data and isinstance(cmd_data[0], list):
-                    # List of lists - multiple commands to run sequentially
-                    cmd_list = cmd_data[0]  # Use first command for display
-                else:
-                    cmd_list = cmd_data
-
-                cmd_str = " ".join(cmd_list)
-
-                # Capture current values for closures (avoid reference issues)
-                current_type = cache_type
-
-                async def show_start(ct=current_type, cs=cmd_str):
-                    add_info_message(training_console_text, f"\n[Info] Running {ct.upper()} caching...\n")
-                    add_info_message(training_console_text, f"\n[Command] {cs}\n")
-                if page:
-                    page.run_task(show_start)
-
-                # Run the cache command using musubi_run
+                # Run the cache command
                 proc = runner.run_cache_async(dataset_config, cache_type=cache_type, slider_config=slider_config)
 
+                # Store process reference for cancellation
                 main_container.training_proc = proc
                 training_tab_container.training_proc = proc
 
-                async def update_btn():
-                    set_button_state(main_container, "Stop", page)
-                if page:
-                    page.run_task(update_btn)
+                # Update button to "Stop"
+                async def update_btn(_mc=main_container, _pg=page):
+                    set_button_state(_mc, "Stop", _pg)
+                run_on_page_if_available(page, update_btn)
 
+                # Stream output and wait for completion
                 from flet_app.ui.training.output_manager import start_ltx_output_streamer
                 start_ltx_output_streamer(proc, training_console_text, main_container=main_container, page=page)
                 proc.wait()
 
-                # Process completed
-                pass
-
-                # Check if cancelled after process completes
-                # The process reference might be cleared by the output manager on normal completion
-                # or by user cancellation. We need to distinguish between these cases.
-                if proc.returncode == 0:
-                    # Process completed successfully - any clearing of training_proc is expected
-                    pass
-                elif getattr(main_container, 'training_proc', None) is None:
-                    # Process reference was cleared but it didn't complete successfully
-                    # This indicates it was cancelled by the user
-                    was_cancelled = True
-                    cache_cancelled = True
-                    async def show_cancel(ct=current_type):
-                        add_action_message(training_console_text, f"\n[Action] {ct.upper()} caching cancelled.\n")
-                    if page:
-                        page.run_task(show_cancel)
-                    # Don't return - continue to next cache type
+                # Handle result (success/failure/cancellation)
+                was_cancelled = _handle_cache_result(
+                    cache_type, proc, main_container,
+                    training_console_text, page
+                )
+                if was_cancelled:
                     all_success = False
                     continue
 
                 if proc.returncode != 0:
-                    async def show_err(ct=current_type):
-                        add_error_message(training_console_text, f"\n[Error] {ct.upper()} caching failed with exit code {proc.returncode}\n")
-                    if page:
-                        page.run_task(show_err)
-                    # Don't return - continue to next cache type
+                    _show_cache_failed(cache_type, proc.returncode, training_console_text, page)
                     all_success = False
                     continue
 
-                async def show_success(ct=current_type):
-                    add_success_message(training_console_text, f"\n[Success] {ct.upper()} caching completed.\n")
-                if page:
-                    page.run_task(show_success)
-
-                # Cache completed successfully, moving to next
-                pass
+                # Success case
+                _show_cache_completed(cache_type, training_console_text, page)
 
             # Show final status after all caches processed
-            async def show_final_status():
-                if was_cancelled:
-                    add_warning_message(training_console_text, f"\n[Info] Caching was cancelled. Partial caches may exist.\n")
-                elif all_success:
-                    add_success_message(training_console_text, f"\n[Success] All caching completed for {runner.model_type}.\n")
-                else:
-                    add_warning_message(training_console_text, f"\n[Warning] Caching completed with errors for {runner.model_type}.\n")
-                # Only reset button if requested (e.g., not when training will follow)
-                if reset_button_on_complete:
-                    reset_to_start_button(main_container, training_tab_container, page)
-            if page:
-                page.run_task(show_final_status)
+            _show_final_status(was_cancelled, all_success, runner.model_type,
+                            main_container, training_tab_container, page,
+                            training_console_text,
+                            reset_button_on_complete)
+
 
         except Exception as e:
-            error_msg = str(e)  # Capture error message before async context
-            async def show_err(err_msg=error_msg):
-                add_error_message(training_console_text, f"\n[Error] Failed to run cache commands: {err_msg}\n")
-            if page:
-                page.run_task(show_err)
-            logger.error(f"Failed to run cache commands: {e}")
+            import traceback
+            error_detail = f"{e}\n\nTraceback:\n{traceback.format_exc()}"
+            logger.error(f"Failed to run cache commands: {error_detail}")
 
-            async def reset_btn():
-                # Only reset button if requested (e.g., not when training will follow)
+            async def show_err(err=e, _txt=training_console_text, _mc=main_container, _ttc=training_tab_container, _pg=page):
+                from flet_app.ui.training.output_manager import add_error_message
+                add_error_message(_txt,
+                               f"\n[Error] Failed to run cache commands: {err}\n")
                 if reset_button_on_complete:
-                    reset_to_start_button(main_container, training_tab_container, page)
-            if page:
-                page.run_task(reset_btn)
+                    reset_to_start_button(_mc, _ttc, _pg)
+            run_on_page_if_available(page, show_err)
 
     # Start the cache thread and wait for it to complete without blocking event loop
     cache_thread = threading.Thread(target=run_cache_thread, daemon=False)
@@ -365,20 +402,6 @@ async def run_ltx2_training_flow(
     reset_optimizer=False,
     reset_optimizer_params=False
 ):
-    """
-    Orchestrate the LTX2 training flow including cache creation and training.
-
-    Args:
-        out_path: Path to config file
-        trust_cache: Whether to skip cache creation
-        cache_only: Whether to only create cache (no training)
-        resume_last: Whether to resume from last saved state
-        use_last_config: Whether to reuse existing YAML without regenerating
-        main_container: Main UI container
-        training_tab_container: Training tab container
-        page: Flet page
-        trust_cache_checkbox: Checkbox reference
-    """
     # Get monitor components
     monitor_content = getattr(training_tab_container, 'monitor_page_content', None)
     training_console_text = getattr(monitor_content, 'training_console_text', None)
@@ -401,12 +424,6 @@ async def run_ltx2_training_flow(
     # Get trust_cache and cache_only values
     trust_cache = trust_cache_checkbox.value
     cache_only = cache_only if isinstance(cache_only, bool) else False
-
-    # Skip LTX-2 caching - go directly to musubi config creation
-    # The old LTX-2 process_dataset flow has been removed
-
-    # Now run training (for LTX model)
-    # Convert TOML config to Musubi TOML and run LTX-2 training
 
     # Get paths
     ws_dir = os.path.dirname(out_path)
@@ -459,38 +476,44 @@ async def run_ltx2_training_flow(
         else:
             add_warning_message(training_console_text, f"\n[Resume] No state found\n")
 
-    # Run cache commands before training
-    # In trust_cache mode: skip latents/text_encoder but still run sample_prompts caching
-    # In cache_only mode: run all caching then stop
-    # In full mode: run all caching then train
+    match mode:
+        case 'trust_cache':
+            add_info_message(training_console_text, f"\n[Info] Trust-cache mode: Skipping latents/text_encoder caching\n")
+            add_info_message(training_console_text, f"\n[Info] Running sample prompts caching...\n")
+            if training_console_text.page:
+                training_console_text.update()
+            await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'], reset_button_on_complete=False)
 
-    if mode == 'trust_cache':
-        add_info_message(training_console_text, f"\n[Info] Trust-cache mode: Skipping latents/text_encoder caching\n")
-        # Only run sample_prompts caching in trust_cache mode
-        add_info_message(training_console_text, f"\n[Info] Running sample prompts caching...\n")
-        if training_console_text.page:
-            training_console_text.update()
+        case 'cache_only':
+            add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running all cache commands\n")
+            if training_console_text.page:
+                training_console_text.update()
+            await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=True)
+            return  # Stop after caching
 
-        # Run only sample_prompts cache
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'], reset_button_on_complete=False)
-    elif mode == 'cache_only':
-        add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running all cache commands\n")
-        if training_console_text.page:
-            training_console_text.update()
+        case 'full':
+            add_info_message(training_console_text, f"\n[Info] Running cache commands before training...\n")
+            if training_console_text.page:
+                training_console_text.update()
+            await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=False)
 
-        # Run all cache commands (reset button after since no training follows)
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=True)
-        return  # Stop after caching
-    else:  # full mode
-        add_info_message(training_console_text, f"\n[Info] Running cache commands before training...\n")
-        if training_console_text.page:
-            training_console_text.update()
+    # Detect VACE mode: check if vace_lora is enabled in last_config.toml
+    # ltx2_run.py will auto-detect and use the correct training script/flags
+    vace_dataset_config = None
+    config = runner.get_config()
+    training_strategy = config.get('training_strategy', {})
+    vace_lora_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
+    if vace_lora_enabled and dataset_config:
+        vace_config_path = dataset_config.replace('.toml', '_vace.toml')
+        if os.path.exists(vace_config_path):
+            vace_dataset_config = vace_config_path
+            add_info_message(training_console_text, f"\n[Info] VACE mode detected - using {os.path.basename(vace_config_path)}\n")
 
-        # Run all cache commands
-        await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=False)
-
-    # Build training command
-    cmd = runner.get_training_command(dataset_config, slider_config_path, resume_path, reset_optimizer, reset_optimizer_params)
+    # Build training command (use VACE config if detected)
+    cmd = runner.get_training_command(
+        vace_dataset_config or dataset_config,
+        slider_config_path, resume_path, reset_optimizer, reset_optimizer_params
+    )
 
     # Print the training command for reference (sorted and formatted)
     add_info_message(training_console_text, f"\n[Info] Training command:\n")

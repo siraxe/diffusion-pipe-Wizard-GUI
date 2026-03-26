@@ -462,11 +462,17 @@ def build_toml_config_from_ui(container: Any) -> str:
         dataset_list_formatted = "[" + ", ".join(f'"{name}"' for name in dataset_names) + "]"
         lines.append(f"dataset_list = {dataset_list_formatted}")
 
-    lines.append("")
-
     # Helper
     def _get(name, default=None):
         return cfg.get(name, default)
+
+    # Extra flags
+    extra_flags_val = _get('extra_flags', '')
+    if extra_flags_val and str(extra_flags_val).strip():
+        lines.append("")
+        lines.append(f"extra_flags = {quote(str(extra_flags_val).strip())}")
+
+    lines.append("")
 
     # Build sections
     build_training_section(lines, cfg, _get)

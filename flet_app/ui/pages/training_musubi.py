@@ -18,6 +18,7 @@ def get_musubi_training_settings(
     self_flow_args_ref=None,
     cts_lambda_ref=None,
     cts_lambda_args_ref=None,
+    extra_flags_ref=None,
     audio_lr_rate_ref=None,
     sync_visibility_func=None,
 ):
@@ -52,6 +53,10 @@ def get_musubi_training_settings(
         # Show/hide optimizer_args field based on optimizer selection
         if optimizer_ref.current and optimizer_args_ref.current:
             if optimizer_ref.current.value == "Automagic":
+                optimizer_args_ref.current.value = "min_lr=1e-7, max_lr=1e-3, lr_bump=1e-6, eps=(1e-30; 1e-3), clip_threshold=1.0, beta2=0.999, weight_decay=0.0, do_paramiter_swapping=False, paramiter_swapping_factor=0.1"
+                optimizer_args_ref.current.visible = True
+            elif optimizer_ref.current.value == "AdamWScheduleFree":
+                optimizer_args_ref.current.value = "weight_decay=0.001, betas=(0.9, 0.95) , warmup_steps=50"
                 optimizer_args_ref.current.visible = True
             else:
                 optimizer_args_ref.current.visible = False
@@ -82,21 +87,22 @@ def get_musubi_training_settings(
                         ], spacing=6),
                         # Row 2: learning_rate, optimizer, scheduler_type, timestep_sampling
                         ft.ResponsiveRow(controls=[
-                            create_textfield("learning_rate", 0.0001, col=1.8, expand=True, ref=learning_rate_ref),
-                            create_textfield("audio_lr", 0.0000, col=1.8, expand=True, ref=audio_lr_rate_ref, visible=False),
+                            create_textfield("learning_rate", 0.0001, col=1.5, expand=True, ref=learning_rate_ref),
+                            create_textfield("audio_lr", 0.0000, col=1.5, expand=True, ref=audio_lr_rate_ref, visible=False),
                             create_dropdown(
                                 "optimizer_type_m",
                                 "AdamW",
                                 {
                                     "AdamW": "AdamW",
                                     "AdamW8bit": "AdamW8bit",
+                                    "AdamWScheduleFree": "AdamWScheduleFree",
                                     "Adafactor": "Adafactor",
                                     "Prodigy": "Prodigy",
                                     "Automagic": "Automagic",
                                     "Stiefel": "Stiefel",
                                     "CAME": "CAME",
                                 },
-                                col=2.4, expand=True, scale=0.8,
+                                col=3, expand=True, scale=0.8,
                                 on_change=on_optimizer_change, ref=optimizer_ref
                             ),
                             create_dropdown(
@@ -435,6 +441,23 @@ def get_musubi_training_settings(
                                     expand=True,
                                 ),
                                 col=12, expand=True,
+                            ),
+                        ], spacing=6),
+                        # Extra flags row (always visible)
+                        ft.ResponsiveRow(controls=[
+                            ft.Container(
+                                content=ft.TextField(
+                                    label="extra_flags",
+                                    value="",
+                                    multiline=True,
+                                    min_lines=2,
+                                    max_lines=2,
+                                    scale=0.8,
+                                    ref=extra_flags_ref,
+                                    data="extra_flags",
+                                    tooltip="Additional flags for training.",
+                                ),
+                                col={"md": 12},
                             ),
                         ], spacing=6),
                         ft.Divider(height=1),
