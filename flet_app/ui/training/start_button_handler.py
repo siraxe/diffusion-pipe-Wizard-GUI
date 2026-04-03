@@ -156,17 +156,24 @@ def _show_cache_summary(runner, training_console_text, page, cache_order: list):
 
     display_names = [CACHE_DISPLAY_NAMES.get(ct, ct.replace('_', ' ').title()) for ct in cache_order]
 
-    # Check if IC-LoRA or VACE-LoRA is enabled
+    # Check if IC-LoRA or VACE is enabled
     config = runner.get_config()
     training_strategy = config.get('training_strategy', {})
     ic_lora_enabled = str(training_strategy.get('ic_lora', False)).lower() in ('true', '1', 'yes')
-    vace_lora_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
+    vace_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
 
     mode_suffixes = []
     if ic_lora_enabled:
         mode_suffixes.append('IC-LoRA')
-    if vace_lora_enabled:
-        mode_suffixes.append('VACE-LoRA')
+    if vace_enabled:
+        # Determine if VACE is using LoRA adapters or full training
+        vace_config = training_strategy.get('vace', {})
+        vace_lora_explicit = vace_config.get('lora', None)
+        if vace_lora_explicit is not None:
+            vace_is_lora = str(vace_lora_explicit).lower() in ('true', '1', 'yes')
+        else:
+            vace_is_lora = False  # Default to full VACE training
+        mode_suffixes.append('VACE-LoRA' if vace_is_lora else 'VACE')
 
     summary_line = f"\n[Cache Summary] Will run: {', '.join(display_names)}"
     if mode_suffixes:
@@ -502,8 +509,8 @@ async def run_ltx2_training_flow(
     vace_dataset_config = None
     config = runner.get_config()
     training_strategy = config.get('training_strategy', {})
-    vace_lora_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
-    if vace_lora_enabled and dataset_config:
+    vace_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
+    if vace_enabled and dataset_config:
         vace_config_path = dataset_config.replace('.toml', '_vace.toml')
         if os.path.exists(vace_config_path):
             vace_dataset_config = vace_config_path

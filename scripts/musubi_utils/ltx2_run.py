@@ -947,6 +947,7 @@ class LTX2Run:
 
             # --vace_layers: comma-separated DiT block indices (default every 4th)
             vace_layers = vace_config.get('layers', [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44])
+            #vace_layers = vace_config.get('layers', [0,8,16,24,32,40])
             if isinstance(vace_layers, list):
                 layers_str = ",".join(map(str, vace_layers))
             else:
@@ -972,15 +973,11 @@ class LTX2Run:
                 cmd.extend(["--audio_vace_scale", str(audio_vace_scale)])
 
             # VACE LoRA mode: train adapters instead of full VACE model
-            # Enabled when training_mode is 'lora' (default) or when vace.lora is explicitly True
-            training_mode = model.get('training_mode', 'lora')
+            # Default is full VACE training; LoRA only when vace.lora is explicitly True
             vace_lora_explicit = vace_config.get('lora', None)
-            # LoRA mode enabled if: training_mode='lora' OR vace.lora=True
-            # Full training when: training_mode='full' AND vace.lora not explicitly True
+            vace_lora_mode = False  # Default to full VACE training
             if vace_lora_explicit is not None:
                 vace_lora_mode = self.parse_bool(vace_lora_explicit)
-            else:
-                vace_lora_mode = (training_mode == 'lora')
 
             if vace_lora_mode:
                 vace_lora_dim = vace_config.get('lora_dim', lora.get('rank', 32))

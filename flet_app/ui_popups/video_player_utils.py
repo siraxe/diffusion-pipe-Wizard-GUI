@@ -890,11 +890,13 @@ def cut_video_by_frames(
         ]
     else:
         # Re-encode for frame-accurate cutting (needed when start_frame > 0)
+        # Use video filter select for exact frame selection to avoid duplicate first frames
+        # that can occur with time-based seeking due to keyframe alignment issues.
         command = [
             ffmpeg_exe, "-y",
-            "-ss", str(start_time),
             "-i", current_video_path,
-            "-t", str(duration),
+            "-vf", f"select='between(n,{start_frame},{end_frame})',setpts=PTS-STARTPTS",
+            "-vsync", "vfr",
             *_get_video_codec_and_flags(),  # Uses GPU if enabled in settings
             temp_output_path
         ]
