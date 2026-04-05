@@ -227,7 +227,21 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     for k in ('first_frame_conditioning_p', 'ltx_mode', 'target_fps'):
         if k in ts:
             label_vals[k] = ts.get(k)
-    for k in ('separate_audio_buckets', 'slider', 'ic_lora', 'vace_lora', 'use_mask', 'ltx_2_3'):
+    # Handle t_type dropdown (replaces slider/ic_lora/vace_lora checkboxes)
+    # Backward compatibility: if old checkbox keys exist, convert to t_type
+    if 't_type' in ts:
+        label_vals['t_type'] = ts.get('t_type', 'none')
+    else:
+        # Convert old checkbox format to t_type for backward compatibility
+        if to_bool(ts.get('slider', False)):
+            label_vals['t_type'] = 'slider'
+        elif to_bool(ts.get('ic_lora', False)):
+            label_vals['t_type'] = 'ic_lora'
+        elif to_bool(ts.get('vace_lora', False)):
+            label_vals['t_type'] = 'vace_lora'
+        else:
+            label_vals['t_type'] = 'none'
+    for k in ('separate_audio_buckets', 'use_mask', 'ltx_2_3'):
         if k in ts:
             label_vals[k] = to_bool(ts.get(k, False))
 

@@ -1,0 +1,16 @@
+python scripts/test_vace_inference.py \
+    --vace_model_path workspace/output/vace/vace-000004_vace.safetensors \
+    --control_video workspace/datasets/vace_connect3/control/0a565d83-3704-4e24-ba88-9a9499663ee7.mp4 \
+    --control_mask workspace/datasets/vace_connect3/control/0a565d83-3704-4e24-ba88-9a9499663ee7_mask.mp4 \
+    --prompt "Two chinstrap penguins stand on a rocky shore" \
+    --height 416 --width 640 --frame_count 81 \
+    --sample_steps 30 --guidance_scale 4.0 --seed 42 \
+    --blocks_to_swap 45 --fp8_base --fp8_scaled
+
+python scripts/test_vace_inference.py \
+    --vace_lora_path workspace/output/vace/vace-step00000150.safetensors \
+    --vace_cached_latent workspace/datasets/vace_connect3/control/cache_vace/0a565d83-3704-4e24-ba88-9a9499663ee7_00000-081_0512x0256_ltx2_vace.safetensors \
+    --prompt "Two chinstrap penguins stand on a rocky shore, then wade into the water" \
+    --fp8_base \
+    --fp8_scaled \
+    --8_bit_te

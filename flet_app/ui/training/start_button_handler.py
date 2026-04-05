@@ -156,11 +156,12 @@ def _show_cache_summary(runner, training_console_text, page, cache_order: list):
 
     display_names = [CACHE_DISPLAY_NAMES.get(ct, ct.replace('_', ' ').title()) for ct in cache_order]
 
-    # Check if IC-LoRA or VACE is enabled
+    # Check t_type dropdown value (replaces ic_lora/vace_lora checkboxes)
     config = runner.get_config()
     training_strategy = config.get('training_strategy', {})
-    ic_lora_enabled = str(training_strategy.get('ic_lora', False)).lower() in ('true', '1', 'yes')
-    vace_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
+    t_type = training_strategy.get('t_type', 'none') or 'none'
+    ic_lora_enabled = (t_type == 'ic_lora')
+    vace_enabled = (t_type == 'vace_lora')
 
     mode_suffixes = []
     if ic_lora_enabled:
@@ -504,12 +505,13 @@ async def run_ltx2_training_flow(
                 training_console_text.update()
             await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=False)
 
-    # Detect VACE mode: check if vace_lora is enabled in last_config.toml
+    # Detect VACE mode: check t_type dropdown value
     # ltx2_run.py will auto-detect and use the correct training script/flags
     vace_dataset_config = None
     config = runner.get_config()
     training_strategy = config.get('training_strategy', {})
-    vace_enabled = str(training_strategy.get('vace_lora', False)).lower() in ('true', '1', 'yes')
+    t_type = training_strategy.get('t_type', 'none') or 'none'
+    vace_enabled = (t_type == 'vace_lora')
     if vace_enabled and dataset_config:
         vace_config_path = dataset_config.replace('.toml', '_vace.toml')
         if os.path.exists(vace_config_path):

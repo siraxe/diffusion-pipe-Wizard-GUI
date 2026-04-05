@@ -494,7 +494,6 @@ class LTX2Run:
             config_flag, str(config_path),
             CONFIG_FLAGS["GEMMA_ROOT"], model.get('text_encoder_path', ''),
             CONFIG_FLAGS["LTX2_CHECKPOINT"], model.get('model_path', ''),
-            "--flash_attn",
         ]
 
         output_name = model.get('output_name', model.get('name', 'ltx2_lora'))
@@ -511,6 +510,11 @@ class LTX2Run:
         self._add_bool_flag(cmd, 'fp8_base', acceleration, CONFIG_FLAGS["FP8_BASE"])
         self._add_bool_flag(cmd, 'fp8_scaled', acceleration, CONFIG_FLAGS["FP8_SCALED"])
         self._add_bool_flag(cmd, '8_bit_te', acceleration, CONFIG_FLAGS["GEMMA_8BIT"])
+        # flash_attn vs sdpa: add --sdpa when flash_attn is not enabled (default fallback)
+        if not self.parse_bool(acceleration.get('flash_attn', False)):
+            cmd.append("--sdpa")
+        else:
+            cmd.append("--flash_attn")
 
         if self.parse_bool(optimization.get('attn_chunking', False)):
             cmd.extend([CONFIG_FLAGS["SPLIT_ATTN_TARGET"], "video",
@@ -851,18 +855,15 @@ class LTX2Run:
         flow_matching = config.get('flow_matching', {})
         validation = config.get('validation', {})
 
-        # Determine script (slider vs regular vs ic_lora vs vace)
-        slider_enabled = self.parse_bool(training_strategy.get('slider', False))
-        use_slider = slider_enabled and slider_config and os.path.exists(slider_config)
+        # Determine script (slider vs regular vs ic_lora vs vace) using t_type dropdown
+        t_type = training_strategy.get('t_type', 'none') or 'none'
+        use_slider = (t_type == 'slider') and slider_config and os.path.exists(slider_config)
+        use_ic_lora = (t_type == 'ic_lora')
 
-        # IC-LoRA uses standard script with v2v preset and reference_cache_directory
-        ic_lora_enabled = self.parse_bool(training_strategy.get('ic_lora', False))
-        use_ic_lora = ic_lora_enabled
-
-        # VACE training detection: check if vace_lora is enabled in last_config.toml
+        # VACE training detection: check if t_type is vace_lora
         use_vace = False
         vace_dataset_config = None
-        vace_lora_enabled = self.parse_bool(training_strategy.get('vace_lora', False))
+        vace_lora_enabled = (t_type == 'vace_lora')
         if vace_lora_enabled and dataset_config:
             # Check if dataset_config already points to _vace.toml (passed from start_button_handler)
             if dataset_config.endswith('_vace.toml'):

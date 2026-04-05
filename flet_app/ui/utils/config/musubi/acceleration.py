@@ -18,6 +18,7 @@ def get_musubi_precision_defaults() -> Dict[str, Any]:
         'fp8_base': True,
         'fp8_scaled': True,
         'attn_chunking': False,
+        'flash_attn': True,
     }
 
 
@@ -39,6 +40,8 @@ def populate_musubi_acceleration_section(toml_data: Dict, label_vals: Dict, to_b
         label_vals['fp8_scaled'] = to_bool_func(acceleration.get('fp8_scaled', True))
     if 'attn_chunking' in acceleration:
         label_vals['attn_chunking'] = to_bool_func(acceleration.get('attn_chunking', False))
+    if 'flash_attn' in acceleration:
+        label_vals['flash_attn'] = to_bool_func(acceleration.get('flash_attn', True))
 
     # Advanced options checkboxes and their args
     if 'blank_preservation' in acceleration:
@@ -83,6 +86,7 @@ def append_musubi_acceleration_section(lines: List[str], _get_func) -> bool:
     - fp8_base
     - fp8_scaled
     - attn_chunking
+    - flash_attn
 
     Returns True if the section was appended.
     """
@@ -90,6 +94,7 @@ def append_musubi_acceleration_section(lines: List[str], _get_func) -> bool:
     fp8_base = _get_func('fp8_base', True)
     fp8_scaled = _get_func('fp8_scaled', True)
     attn_chunking = _get_func('attn_chunking', False)
+    flash_attn = _get_func('flash_attn', True)
 
     lines.append("")
     lines.append("[acceleration]")
@@ -98,5 +103,6 @@ def append_musubi_acceleration_section(lines: List[str], _get_func) -> bool:
     lines.append(f"fp8_base = {'true' if fp8_base else 'false'}")
     lines.append(f"fp8_scaled = {'true' if fp8_scaled else 'false'}")
     lines.append(f"attn_chunking = {'true' if attn_chunking else 'false'}")
+    lines.append(f"flash_attn = {'true' if flash_attn else 'false'}")
 
     return True

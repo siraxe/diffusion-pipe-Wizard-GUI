@@ -143,26 +143,32 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         except Exception:
             pass
 
-    # Check if slider mode is enabled (for cache directory naming)
-    slider_enabled = False
-    ic_lora_enabled = False
-    vace_lora_enabled = False
+    # Check t_type dropdown value (replaces slider/ic_lora/vace_lora checkboxes)
+    t_type = 'none'
     if last_config_path and os.path.exists(last_config_path):
         try:
             with open(last_config_path, 'r') as f:
                 last_config = toml.load(f)
             training_strategy = last_config.get('training_strategy', {})
-            slider_enabled = training_strategy.get('slider', False)
-            ic_lora_enabled = training_strategy.get('ic_lora', False)
-            vace_lora_enabled = training_strategy.get('vace_lora', False)
-            if not isinstance(slider_enabled, bool):
-                slider_enabled = str(slider_enabled).lower() in ['true', '1', 'yes', 'on']
-            if not isinstance(ic_lora_enabled, bool):
-                ic_lora_enabled = str(ic_lora_enabled).lower() in ['true', '1', 'yes', 'on']
-            if not isinstance(vace_lora_enabled, bool):
-                vace_lora_enabled = str(vace_lora_enabled).lower() in ['true', '1', 'yes', 'on']
+            # Get t_type directly or fall back to old checkbox format for backward compatibility
+            if 't_type' in training_strategy:
+                t_type = training_strategy.get('t_type', 'none')
+            else:
+                # Backward compatibility: check old checkbox keys
+                if training_strategy.get('slider', False):
+                    t_type = 'slider'
+                elif training_strategy.get('ic_lora', False):
+                    t_type = 'ic_lora'
+                elif training_strategy.get('vace_lora', False):
+                    t_type = 'vace_lora'
+                else:
+                    t_type = 'none'
         except Exception:
             pass
+    # Derived boolean flags for backward compatibility with existing code
+    slider_enabled = (t_type == 'slider')
+    ic_lora_enabled = (t_type == 'ic_lora')
+    vace_lora_enabled = (t_type == 'vace_lora')
 
     # Build the musubi config - create one dataset entry per directory
     datasets_list = []
@@ -277,6 +283,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                     potential_control = os.path.join(dir_path, 'control')
                     if os.path.exists(potential_control) and os.path.isdir(potential_control):
                         dataset_config['reference_directory'] = potential_control
+                        # Add per-dataset reference_cache_directory for proper multi-dataset support
+                        dataset_config['reference_cache_directory'] = os.path.join(potential_control, 'cache_ref')
                 # Add vace_directory for VACE-LoRA mode (uses control/ for consistency)
                 if vace_lora_enabled and dir_path:
                     # Create control subdirectory for VACE control videos/masks
@@ -295,15 +303,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         'bucket_no_upscale': False,
     }
 
-    # Add reference_cache_directory for IC-LoRA mode
-    if ic_lora_enabled and datasets_list:
-        first_ds = datasets_list[0]
-        main_dir = first_ds.get('image_directory', first_ds.get('video_directory', ''))
-        if main_dir:
-            # Reference cache is in the control subdirectory
-            potential_control = os.path.join(main_dir, 'control')
-            if os.path.exists(potential_control) and os.path.isdir(potential_control):
-                general_config['reference_cache_directory'] = os.path.join(potential_control, 'cache_ref')
+    # Note: reference_cache_directory is now handled per-dataset for proper multi-dataset IC-LoRA support
 
     # Add vace_cache_directory for VACE-LoRA mode
     if vace_lora_enabled and datasets_list:
@@ -337,16 +337,21 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     slider_config_path = None
     if datasets_list and last_config_path and os.path.exists(last_config_path):
         try:
-            # Read slider setting from last_config.toml
+            # Read t_type from last_config.toml (already computed above, but re-read for this scope)
             with open(last_config_path, 'r') as f:
                 last_config = toml.load(f)
 
             training_strategy = last_config.get('training_strategy', {})
-            slider_enabled = training_strategy.get('slider', False)
-
-            # Handle boolean conversion from string
-            if not isinstance(slider_enabled, bool):
-                slider_enabled = str(slider_enabled).lower() in ['true', '1', 'yes', 'on']
+            # Use t_type dropdown value (replaces slider checkbox)
+            if 't_type' in training_strategy:
+                t_type_for_slider = training_strategy.get('t_type', 'none')
+            else:
+                # Backward compatibility
+                if training_strategy.get('slider', False):
+                    t_type_for_slider = 'slider'
+                else:
+                    t_type_for_slider = 'none'
+            slider_enabled = (t_type_for_slider == 'slider')
 
             if slider_enabled:
                 # Get sample_slider_range from config
@@ -470,9 +475,6 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
     lines.append(f"batch_size = {general['batch_size']}")
     lines.append(f"enable_bucket = {str(general['enable_bucket']).lower()}")
     lines.append(f"bucket_no_upscale = {str(general['bucket_no_upscale']).lower()}")
-    # Add reference_cache_directory for IC-LoRA if present
-    if 'reference_cache_directory' in general:
-        lines.append(f"reference_cache_directory = \"{general['reference_cache_directory']}\"")
     lines.append("")
 
     # [[datasets]] section - may have multiple datasets
@@ -503,6 +505,9 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
         # Add reference_directory for IC-LoRA if present
         if 'reference_directory' in dataset:
             lines.append(f"reference_directory = \"{dataset['reference_directory']}\"")
+        # Add per-dataset reference_cache_directory for IC-LoRA (multi-dataset support)
+        if 'reference_cache_directory' in dataset:
+            lines.append(f"reference_cache_directory = \"{dataset['reference_cache_directory']}\"")
 
         lines.append(f"cache_directory = \"{dataset['cache_directory']}\"")
         lines.append(f"num_repeats = {dataset['num_repeats']}")

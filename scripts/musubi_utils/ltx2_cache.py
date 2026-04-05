@@ -314,7 +314,8 @@ class LTX2Cache:
         )
 
         # Add IC-LoRA reference caching arguments
-        ic_lora_enabled = self.parse_bool(training_strategy.get('ic_lora', False))
+        t_type = training_strategy.get('t_type', 'none') or 'none'
+        ic_lora_enabled = (t_type == 'ic_lora')
         if ic_lora_enabled:
             ref_downscale = training_strategy.get('ref_downscale', 1)
             reference_frames = training_strategy.get('reference_frames', 1)
@@ -379,8 +380,8 @@ class LTX2Cache:
 
             return None
 
-        # Only process VACE if vace_lora is enabled
-        vace_lora_enabled = self.parse_bool(training_strategy.get('vace_lora', False))
+        # Only process VACE if t_type is vace_lora
+        vace_lora_enabled = (t_type == 'vace_lora')
 
         # Detect VACE structure from dataset config
         video_dir = _get_dataset_video_dir(dataset_config)
@@ -453,7 +454,8 @@ class LTX2Cache:
             ]
 
         # Slider mode: cache control folder to musubi_cache_negative
-        slider_enabled = self.parse_bool(training_strategy.get('slider', False))
+        t_type = training_strategy.get('t_type', 'none') or 'none'
+        slider_enabled = (t_type == 'slider')
         if slider_enabled and slider_config:
             # Read the slider config to get the negative cache directory
             try:

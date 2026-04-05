@@ -192,12 +192,9 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"frame_extraction = {_quote(frame_extraction_val)}")
     separate_audio_buckets_val = _as_bool(_get('separate_audio_buckets', True))
     lines.append(f"separate_audio_buckets = {'true' if separate_audio_buckets_val else 'false'}")
-    slider_val = _as_bool(_get('slider', False))
-    lines.append(f"slider = {'true' if slider_val else 'false'}")
-    ic_lora_val = _as_bool(_get('ic_lora', False))
-    lines.append(f"ic_lora = {'true' if ic_lora_val else 'false'}")
-    vace_lora_val = _as_bool(_get('vace_lora', False))
-    lines.append(f"vace_lora = {'true' if vace_lora_val else 'false'}")
+    # t_type dropdown replaces slider/ic_lora/vace_lora checkboxes
+    t_type_val = _get('t_type', 'none') or 'none'
+    lines.append(f"t_type = {_quote(t_type_val)}")
     # ref_downscale for IC-LoRA reference caching
     ref_downscale_val = _clean_value(_get('ref_downscale', 1), is_numeric=True)
     lines.append(f"ref_downscale = {ref_downscale_val}")
@@ -266,6 +263,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"8_bit_te = {'true' if load_text_encoder_in_8bit else 'false'}")
     attn_chunking_val = _as_bool(_get('attn_chunking', False))
     lines.append(f"attn_chunking = {'true' if attn_chunking_val else 'false'}")
+    flash_attn_val = _as_bool(_get('flash_attn', True))
+    lines.append(f"flash_attn = {'true' if flash_attn_val else 'false'}")
     blank_preservation_val = _as_bool(_get('blank_preservation', False))
     lines.append(f"blank_preservation = {'true' if blank_preservation_val else 'false'}")
     blank_preservation_args_val = _get('blank_preservation_args', 'multiplier=0.5')
@@ -620,10 +619,9 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if not isinstance(separate_audio_buckets, bool):
             separate_audio_buckets = str(separate_audio_buckets).lower() in ['true', '1', 'yes', 'on']
         _set_field_value('separate_audio_buckets', separate_audio_buckets)
-        slider = training_strategy.get('slider', False)
-        if not isinstance(slider, bool):
-            slider = str(slider).lower() in ['true', '1', 'yes', 'on']
-        _set_field_value('slider', slider)
+        # t_type dropdown replaces slider/ic_lora/vace_lora checkboxes
+        t_type = training_strategy.get('t_type', 'none') or 'none'
+        _set_field_value('t_type', t_type)
         ltx_2_3 = training_strategy.get('ltx_2_3', False)
         if not isinstance(ltx_2_3, bool):
             ltx_2_3 = str(ltx_2_3).lower() in ['true', '1', 'yes', 'on']
@@ -632,37 +630,28 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         if not isinstance(use_mask, bool):
             use_mask = str(use_mask).lower() in ['true', '1', 'yes', 'on']
         _set_field_value('use_mask', use_mask)
-        ic_lora = training_strategy.get('ic_lora', False)
-        if not isinstance(ic_lora, bool):
-            ic_lora = str(ic_lora).lower() in ['true', '1', 'yes', 'on']
-        _set_field_value('ic_lora', ic_lora)
-        vace_lora = training_strategy.get('vace_lora', False)
-        if not isinstance(vace_lora, bool):
-            vace_lora = str(vace_lora).lower() in ['true', '1', 'yes', 'on']
-        _set_field_value('vace_lora', vace_lora)
         ref_downscale = training_strategy.get('ref_downscale', 1)
         _set_field_value('ref_downscale', ref_downscale)
 
-        # Trigger slider on_change to update sample_slider_range visibility
-        # and ic_lora on_change to update ref_downscale visibility
+        # Trigger t_type dropdown on_change to update dependent field visibility
         try:
-            def _trigger_checkbox_change(control):
+            def _trigger_dropdown_change(control):
                 ctrl_label = getattr(control, 'label', None)
-                if ctrl_label in ('slider', 'ic_lora', 'vace_lora') and isinstance(control, ft.Checkbox):
+                if ctrl_label == 't_type' and isinstance(control, ft.Dropdown):
                     if hasattr(control, 'on_change') and control.on_change:
                         control.on_change(ft.ControlEvent('change'))
                         return True
                 if hasattr(control, 'controls') and control.controls:
                     for c in control.controls:
-                        if _trigger_checkbox_change(c):
+                        if _trigger_dropdown_change(c):
                             return True
                 if hasattr(control, 'content') and control.content:
-                    return _trigger_checkbox_change(control.content)
+                    return _trigger_dropdown_change(control.content)
                 return False
 
             config_content = getattr(training_tab_container, 'config_page_content', None)
             if config_content:
-                _trigger_checkbox_change(config_content)
+                _trigger_dropdown_change(config_content)
         except Exception:
             pass
 
@@ -798,6 +787,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('fp8_scaled', acceleration.get('fp8_scaled', True))
         _set_field_value('8_bit_te', acceleration.get('8_bit_te', True))
         _set_field_value('attn_chunking', acceleration.get('attn_chunking', False))
+        _set_field_value('flash_attn', acceleration.get('flash_attn', True))
         _set_field_value('blank_preservation', acceleration.get('blank_preservation', False))
         _set_field_value('blank_preservation_args', acceleration.get('blank_preservation_args', 'multiplier=0.5'))
         _set_field_value('dop', acceleration.get('dop', False))

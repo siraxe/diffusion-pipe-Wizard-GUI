@@ -61,9 +61,8 @@ wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 wan_task_dropdown_ref = ft.Ref[ft.Dropdown]()
 separate_audio_buckets_checkbox_ref = ft.Ref[ft.Checkbox]()
 gradient_checkpointing_checkbox_ref = ft.Ref[ft.Checkbox]()
-slider_checkbox_ref = ft.Ref[ft.Checkbox]()
-ic_lora_checkbox_ref = ft.Ref[ft.Checkbox]()
-vace_lora_checkbox_ref = ft.Ref[ft.Checkbox]()
+t_type_dropdown_ref = ft.Ref[ft.Dropdown]()
+flash_attn_checkbox_ref = ft.Ref[ft.Checkbox]()
 reference_downscale_field_ref = ft.Ref[ft.TextField]()
 use_mask_checkbox_ref = ft.Ref[ft.Checkbox]()
 checkpoint_row_ref = ft.Ref[ft.ResponsiveRow]()
@@ -229,48 +228,8 @@ def _should_show_factor_field():
     return False
 
 
-def _on_slider_change(e):
-    """Handle slider checkbox change - show/hide sample_slider_range field."""
-    if e.control.value:
-        # Uncheck other options
-        if ic_lora_checkbox_ref and ic_lora_checkbox_ref.current:
-            ic_lora_checkbox_ref.current.value = False
-            if ic_lora_checkbox_ref.current.page:
-                ic_lora_checkbox_ref.current.update()
-        if vace_lora_checkbox_ref and vace_lora_checkbox_ref.current:
-            vace_lora_checkbox_ref.current.value = False
-            if vace_lora_checkbox_ref.current.page:
-                vace_lora_checkbox_ref.current.update()
-    sync_dependent_field_visibility()
-
-
-def _on_ic_lora_change(e):
-    """Handle ic_lora checkbox change - show/hide reference_downscale field."""
-    if e.control.value:
-        # Uncheck other options
-        if slider_checkbox_ref and slider_checkbox_ref.current:
-            slider_checkbox_ref.current.value = False
-            if slider_checkbox_ref.current.page:
-                slider_checkbox_ref.current.update()
-        if vace_lora_checkbox_ref and vace_lora_checkbox_ref.current:
-            vace_lora_checkbox_ref.current.value = False
-            if vace_lora_checkbox_ref.current.page:
-                vace_lora_checkbox_ref.current.update()
-    sync_dependent_field_visibility()
-
-
-def _on_vace_lora_change(e):
-    """Handle vace_lora checkbox change."""
-    if e.control.value:
-        # Uncheck other options
-        if slider_checkbox_ref and slider_checkbox_ref.current:
-            slider_checkbox_ref.current.value = False
-            if slider_checkbox_ref.current.page:
-                slider_checkbox_ref.current.update()
-        if ic_lora_checkbox_ref and ic_lora_checkbox_ref.current:
-            ic_lora_checkbox_ref.current.value = False
-            if ic_lora_checkbox_ref.current.page:
-                ic_lora_checkbox_ref.current.update()
+def _on_t_type_change(e):
+    """Handle t_type dropdown change - show/hide dependent fields."""
     sync_dependent_field_visibility()
 
 
@@ -295,32 +254,33 @@ def sync_dependent_field_visibility():
     Centralized function to sync visibility of all dependent fields based on their checkbox states.
     Called from: on_change handlers, model type changes, and after TOML loading.
     """
-    # Handle sample_slider_range, i2v_type, sample_each visibility (depends on slider checkbox + model type)
+    # Handle sample_slider_range, i2v_type, sample_each visibility (depends on t_type dropdown + model type)
     try:
-        slider_checked = slider_checkbox_ref.current.value if slider_checkbox_ref and slider_checkbox_ref.current else False
+        t_type = t_type_dropdown_ref.current.value if t_type_dropdown_ref and t_type_dropdown_ref.current else "none"
+        slider_active = t_type == "slider"
         # Get the currently selected model from the dropdown
         current_model = None
         if model_type_dropdown_ref and model_type_dropdown_ref.current:
             current_model = model_type_dropdown_ref.current.value
-        # Only show slider-related fields if slider is checked AND it's visible for this model
+        # Only show slider-related fields if slider is selected AND it's visible for this model
         is_visible_for_model = _should_show_field("sample_slider_range", current_model)
-        should_show = is_visible_for_model and slider_checked
+        should_show_slider_fields = is_visible_for_model and slider_active
 
         # sample_slider_range
         if sample_slider_range_field_ref and sample_slider_range_field_ref.current:
-            sample_slider_range_field_ref.current.visible = should_show
+            sample_slider_range_field_ref.current.visible = should_show_slider_fields
             if sample_slider_range_field_ref.current.page:
                 sample_slider_range_field_ref.current.update()
 
         # i2v_type
         if i2v_type_dropdown_ref and i2v_type_dropdown_ref.current:
-            i2v_type_dropdown_ref.current.visible = should_show
+            i2v_type_dropdown_ref.current.visible = should_show_slider_fields
             if i2v_type_dropdown_ref.current.page:
                 i2v_type_dropdown_ref.current.update()
 
         # sample_each
         if sample_each_field_ref and sample_each_field_ref.current:
-            sample_each_field_ref.current.visible = should_show
+            sample_each_field_ref.current.visible = should_show_slider_fields
             if sample_each_field_ref.current.page:
                 sample_each_field_ref.current.update()
     except Exception:
@@ -387,10 +347,10 @@ def sync_dependent_field_visibility():
             if audio_lr_rate_ref.current.page:
                 audio_lr_rate_ref.current.update()
 
-        # reference_downscale field (only when ic_lora is checked)
-        ic_lora_checked = ic_lora_checkbox_ref.current.value if ic_lora_checkbox_ref and ic_lora_checkbox_ref.current else False
+        # reference_downscale field (only when t_type is ic_lora)
+        t_type = t_type_dropdown_ref.current.value if t_type_dropdown_ref and t_type_dropdown_ref.current else "none"
         if reference_downscale_field_ref and reference_downscale_field_ref.current:
-            reference_downscale_field_ref.current.visible = ic_lora_checked
+            reference_downscale_field_ref.current.visible = (t_type == "ic_lora")
             if reference_downscale_field_ref.current.page:
                 reference_downscale_field_ref.current.update()
     except Exception:
@@ -461,9 +421,8 @@ def get_training_config_page_content():
             "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
             "ltx_2_3": ltx_2_3_checkbox_ref,
             "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
-            "slider": slider_checkbox_ref,
-            "ic_lora": ic_lora_checkbox_ref,
-            "vace_lora": vace_lora_checkbox_ref,
+            "t_type": t_type_dropdown_ref,
+            "flash_attn": flash_attn_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
@@ -582,10 +541,8 @@ def get_training_config_page_content():
             # Z-image specific
             "z_image_diffusion_model_dtype_fp8": z_image_diffusion_model_dtype_checkbox_ref,
             "attn_chunking": attn_chunking_checkbox_ref,
-            # LTX2 specific
-            "slider": slider_checkbox_ref,
-            "ic_lora": ic_lora_checkbox_ref,
-            "vace_lora": vace_lora_checkbox_ref,
+            # LTX2 specific - t_type dropdown handles slider/ic_lora/vace_lora selection
+            "flash_attn": flash_attn_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
             # Preservation & regularization args
             "blank_preservation_args": blank_preservation_args_field_ref,
@@ -1280,8 +1237,28 @@ def get_training_config_page_content():
                             col=3,
                         ),
                     ], spacing=2),
-                    # Musubi checkboxes row 2: use_mask, stiefel, slider
+                    # Musubi row: t_type dropdown, flash_attn checkbox, use_mask checkbox
                     ft.ResponsiveRow(controls=[
+                        create_dropdown(
+                            "t_type",
+                            "none",
+                            {"none": "none", "slider": "slider", "ic_lora": "ic_lora", "vace_lora": "vace_lora"},
+                            col=2.5,
+                            expand=False,
+                            scale=0.8,
+                            ref=t_type_dropdown_ref,
+                            visible=_should_show_field("t_type"),
+                            on_change=_on_t_type_change
+                        ),
+                        ft.Checkbox(
+                            label="flash_attn",
+                            value=True,
+                            scale=0.8,
+                            ref=flash_attn_checkbox_ref,
+                            visible=_should_show_field("flash_attn"),
+                            data="flash_attn",
+                            col=3,
+                        ),
                         ft.Checkbox(
                             label="use_mask",
                             value=False,
@@ -1289,36 +1266,6 @@ def get_training_config_page_content():
                             ref=use_mask_checkbox_ref,
                             visible=_should_show_field("use_mask"),
                             data="use_mask",
-                            col=3,
-                        ),
-                        ft.Checkbox(
-                            label="slider",
-                            value=False,
-                            scale=0.8,
-                            ref=slider_checkbox_ref,
-                            visible=_should_show_field("slider"),
-                            data="slider",
-                            on_change=lambda e: _on_slider_change(e),
-                            col=3,
-                        ),
-                        ft.Checkbox(
-                            label="ic_lora",
-                            value=False,
-                            scale=0.8,
-                            ref=ic_lora_checkbox_ref,
-                            visible=_should_show_field("ic_lora"),
-                            data="ic_lora",
-                            on_change=lambda e: _on_ic_lora_change(e),
-                            col=3,
-                        ),
-                        ft.Checkbox(
-                            label="vace_lora",
-                            value=False,
-                            scale=0.8,
-                            ref=vace_lora_checkbox_ref,
-                            visible=_should_show_field("vace_lora"),
-                            data="vace_lora",
-                            on_change=lambda e: _on_vace_lora_change(e),
                             col=3,
                         ),
                     ], spacing=2),
@@ -2000,7 +1947,7 @@ def update_musubi_fields_visibility(
     ltx_mode_value=None,
     separate_audio_buckets_value=None,
     gradient_checkpointing_value=None,
-    slider_value=None
+    t_type_value=None
 ):
     """Update visibility and values for Musubi-specific fields."""
     field_refs = {
@@ -2008,7 +1955,8 @@ def update_musubi_fields_visibility(
         "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
         "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
         "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
-        "slider": slider_checkbox_ref,
+        "t_type": t_type_dropdown_ref,
+        "flash_attn": flash_attn_checkbox_ref,
         "use_mask": use_mask_checkbox_ref,
     }
     field_values = {}
@@ -2018,8 +1966,8 @@ def update_musubi_fields_visibility(
         field_values["separate_audio_buckets"] = separate_audio_buckets_value
     if gradient_checkpointing_value is not None:
         field_values["gradient_checkpointing"] = gradient_checkpointing_value
-    if slider_value is not None:
-        field_values["slider"] = slider_value
+    if t_type_value is not None:
+        field_values["t_type"] = t_type_value
 
     _update_field_refs_visibility(field_refs, is_musubi, field_values)
 
