@@ -219,6 +219,136 @@ def process_video_for_trim(
         return {"status": "error", "video": str(video_path), "error": str(ex)}
 
 
+def process_video_for_time_remap(
+    video_path: Path,
+    ffmpeg_exe: str,
+    codec_flags: list,
+    speed_multiplier: float
+) -> dict:
+    """
+    Process a single video to change speed via time remap.
+    Keeps the same FPS — drops frames to speed up, duplicates frames to slow down.
+    """
+    try:
+        import math
+
+        video_path = Path(video_path)
+        video_name = video_path.stem
+
+        # Get video info
+        info = get_video_info(ffmpeg_exe, video_path)
+
+        if info['nb_frames'] == 0:
+            return {"status": "error", "video": video_name, "error": "Cannot determine frame count"}
+
+        codec = info['codec']
+        width = info['width']
+        height = info['height']
+        fps_str = info['fps_str']
+        nb_frames = info['nb_frames']
+
+        # Parse original FPS
+        if '/' in fps_str:
+            output_fps = f"{fps_str}"
+        else:
+            output_fps = str(fps_str)
+
+        # setpts changes timestamps, then fps filter forces back to original rate
+        # fps filter drops or duplicates frames to match the target rate
+        pts_factor = 1.0 / speed_multiplier
+        video_filter = f"setpts={pts_factor:.4f}*PTS,fps={output_fps}"
+
+        # Audio: atempo filter (valid range 0.5-100.0, chain if needed)
+        speed = speed_multiplier
+        atempo_filters = []
+        while speed > 100.0:
+            atempo_filters.append("atempo=100.0")
+            speed /= 100.0
+        temp_speed = speed
+        while temp_speed < 0.5:
+            atempo_filters.append("atempo=0.5")
+            temp_speed /= 0.5
+        atempo_filters.append(f"atempo={temp_speed:.4f}")
+
+        temp_path = video_path.with_suffix('.tmp.mp4')
+        cmd = [
+            ffmpeg_exe, '-y',
+            '-i', str(video_path),
+            '-vf', video_filter,
+            '-r', output_fps,
+            '-c:v', codec,
+            '-s', f'{width}x{height}',
+            *codec_flags,
+        ]
+
+        # Add audio filter
+        audio_filter_str = ",".join(atempo_filters)
+        cmd.extend(["-af", audio_filter_str, "-c:a", "aac", "-b:a", "128k"])
+        cmd.append(str(temp_path))
+
+        new_frame_count = int(nb_frames / speed_multiplier)
+        print(f"Time remapping {video_name}: speed={speed_multiplier}, {nb_frames} frames -> ~{new_frame_count} frames, fps unchanged ({output_fps})")
+        print(f"Command: {' '.join(cmd)}")
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"FFmpeg stderr: {result.stderr}")
+            return {"status": "error", "video": video_name, "error": f"FFmpeg failed: {result.stderr[:1000]}"}
+
+        # Move temp file back to original
+        temp_path.replace(video_path)
+
+        return {"status": "success", "video": video_name, "frames_before": nb_frames, "frames_after": new_frame_count}
+
+    except Exception as ex:
+        print(f"Error processing {video_path}: {ex}")
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "video": str(video_path), "error": str(ex)}
+
+
+def run_time_remap_processing(
+    selected_videos: list,
+    ffmpeg_exe: str,
+    codec_flags: list,
+    speed_multiplier: float,
+    page_ctx,
+    thumbnails_grid_ref
+):
+    """
+    Run time remap processing on selected videos in a thread.
+    """
+    results = []
+
+    def run_processing():
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(process_video_for_time_remap, Path(v), ffmpeg_exe, codec_flags, speed_multiplier): v for v in selected_videos}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    results.append(result)
+                    status = result.get('status', 'unknown')
+                    video_name = result.get('video', 'unknown')
+                    if status == 'success':
+                        print(f"Remapped: {video_name} ({result.get('frames_before', '?')} -> {result.get('frames_after', '?')} frames)")
+                    elif status == 'error':
+                        print(f"Error: {video_name} - {result.get('error', 'unknown error')[:100]}")
+                except Exception as ex:
+                    results.append({"status": "error", "video": futures[future], "error": str(ex)})
+
+        # Final summary
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        error_count = sum(1 for r in results if r['status'] == 'error')
+        print(f"Time remap complete: {success_count} remapped, {error_count} errors")
+
+        summary = f"Done! Time remapped: {success_count}, Errors: {error_count}"
+        page_ctx.snack_bar = ft.SnackBar(ft.Text(summary), open=True)
+        page_ctx.update()
+
+    thread = threading.Thread(target=run_processing, daemon=False)
+    thread.start()
+
+
 def run_vace_processing(
     selected_videos: list,
     control_dir: Path,

@@ -14,12 +14,19 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 from pathlib import Path
 from typing import List
 
 import torch
 from PIL import Image
 import torchvision.transforms.functional as TVF  # type: ignore
+
+# Suppress HuggingFace warnings (e.g. pad_token_id, torch_dtype deprecation)
+from transformers.utils.logging import set_verbosity_error, disable_progress_bar as hf_disable_progress_bar
+set_verbosity_error()
+hf_disable_progress_bar()
 
 try:
     from transformers import AutoTokenizer, LlavaForConditionalGeneration  # type: ignore
@@ -100,6 +107,7 @@ def _caption_single(
             attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
             do_sample=False,
+            pad_token_id=getattr(tok, 'eos_token_id', None),
             suppress_tokens=None,
             use_cache=True,
         )
@@ -156,9 +164,13 @@ def main() -> int:
         print("No images found to caption.")
         return 0
 
+    total = len(images)
+    print(f"[STATUS] Found {total} image(s) to caption. Loading model...", flush=True)
+
     # Load tokenizer/model
     device_map = 0 if torch.cuda.is_available() else "cpu"
     llm_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    t_load = time.time()
     tok = AutoTokenizer.from_pretrained(args.model_path, use_fast=True, local_files_only=True)
     model = LlavaForConditionalGeneration.from_pretrained(
         args.model_path,
@@ -167,20 +179,32 @@ def main() -> int:
         local_files_only=True,
     )
     model.eval()
+    load_sec = time.time() - t_load
+    print(f"[STATUS] Model loaded in {load_sec:.1f}s. Starting captioning...", flush=True)
 
     wrote = 0
-    for img_path in images:
+    t0 = time.time()
+    for idx, img_path in enumerate(images, 1):
         rel = os.path.relpath(str(img_path), str(in_dir))
+        t_start = time.time()
         try:
             cap = _caption_single(model, tok, img_path, args.instruction, args.max_new_tokens)
             txt_path = img_path.with_suffix(".txt")
             with open(txt_path, "w", encoding="utf-8") as ftxt:
                 ftxt.write(cap)
             wrote += 1
-            print(f"[OK] {rel}")
+            status = "OK"
         except Exception as ex:
-            print(f"[ERR] {rel}: {ex}")
-    print(f"Wrote {wrote} caption text files")
+            status = f"ERR: {ex}"
+
+        elapsed = time.time() - t_start
+        avg = (time.time() - t0) / idx
+        remaining = avg * (total - idx)
+        eta_min, eta_sec = divmod(int(remaining), 60)
+        # Structured line for the UI to parse; format: [PROGRESS] current/total filename | Xs/img ETA: Ms
+        print(f"[PROGRESS] {idx}/{total} {rel} | {elapsed:.1f}s ETA: {eta_min:d}:{eta_sec:02d}", flush=True)
+
+    print(f"[DONE] Wrote {wrote}/{total} caption text files")
     return 0
 
 

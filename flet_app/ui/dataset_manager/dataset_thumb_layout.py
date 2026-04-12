@@ -242,12 +242,13 @@ def update_thumbnail_caption_status(thumbnails_grid: ft.GridView, dataset_folder
     # Import here to avoid circular import
     from flet_app.ui.dataset_manager.dataset_utils import get_videos_and_thumbnails
 
-    # Get updated caption status
-    video_files, thumbnails_dict, _ = get_videos_and_thumbnails(dataset_folder_path, dataset_type)
+    # Get updated caption status — extract dataset name from full path
+    dataset_name = os.path.basename(dataset_folder_path)
+    thumbnail_paths, media_info = get_videos_and_thumbnails(dataset_name, dataset_type)
 
     # Create a set of files that have captions for quick lookup
     captioned_files = set()
-    for video_file in video_files:
+    for video_file in thumbnail_paths:
         video_name = os.path.basename(video_file)
         # Check for caption file (.txt for individual captions)
         base_name = os.path.splitext(video_name)[0]
@@ -266,17 +267,8 @@ def update_thumbnail_caption_status(thumbnails_grid: ft.GridView, dataset_folder
             cap_val, cap_color = ("yes", ft.Colors.GREEN) if has_caption else ("no", ft.Colors.RED)
 
             # Get video info for frame count (only for videos)
-            video_info = {}
             if dataset_type == "video":
-                info_path = os.path.join(dataset_folder_path, "info.json")
-                if os.path.exists(info_path):
-                    try:
-                        import json
-                        with open(info_path, "r") as f:
-                            video_info = json.load(f)
-                    except Exception:
-                        pass
-                info = video_info.get(video_name, {})
+                info = media_info.get(video_name, {})
                 frames = info.get("frames", "?")
             else:
                 frames = None

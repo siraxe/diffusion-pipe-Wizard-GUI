@@ -11,6 +11,7 @@ import signal
 import subprocess
 import shutil
 import time
+import re
 
 from flet_app.settings import settings
 # Import centralized video encoding settings
@@ -172,6 +173,59 @@ async def run_dataset_script_command(
         except Exception:
             pass
 
+    _progress_re = re.compile(r'^\[PROGRESS\]\s+(\d+)/(\d+)\s+(.+?)\s*\|\s*[\d.]+s\s+ETA:\s*([0-9:]+)')
+    _done_re = re.compile(r'^\[DONE\]\s+(.*)')
+    # Patterns for noisy HuggingFace output to skip
+    _hf_noise_res = [
+        re.compile(r'^Loading checkpoint shards', re.IGNORECASE),
+        re.compile(r'.*torch_dtype.*deprecated', re.IGNORECASE),
+        re.compile(r'^Setting `pad_token_id`', re.IGNORECASE),
+        re.compile(r'^\s*\d+%\|'),  # tqdm checkpoint loading bars
+    ]
+
+    # Track last progress line to replace in-place in the output field
+    _last_progress_line = [None]
+
+    def update_progress(line_text):
+        """Parse [PROGRESS] or [DONE] lines — update bar and replace last progress line."""
+        m = _progress_re.match(line_text)
+        if m:
+            current, total, filename, eta = m.group(1), m.group(2), m.group(3), m.group(4)
+            frac = int(current) / int(total) if int(total) else 0
+            progress_bar_ref.value = frac
+
+            compact = f"[{current}/{total}] {filename} | ETA: {eta}"
+            lines = output_field_ref.value.splitlines()
+            # Remove the previous compact progress line if present
+            if _last_progress_line[0] is not None and lines and lines[-1] == _last_progress_line[0]:
+                lines.pop()
+            lines.append(compact)
+            _last_progress_line[0] = compact
+            output_field_ref.value = "\n".join(lines) + "\n"
+
+            try:
+                progress_bar_ref.update()
+                output_field_ref.update()
+            except Exception:
+                pass
+            return True
+
+        m2 = _done_re.match(line_text)
+        if m2:
+            progress_bar_ref.value = 1.0
+            _last_progress_line[0] = None
+            lines = output_field_ref.value.splitlines()
+            lines.append(m2.group(1))
+            output_field_ref.value = "\n".join(lines) + "\n"
+            try:
+                progress_bar_ref.update()
+                output_field_ref.update()
+            except Exception:
+                pass
+            return True
+
+        return False
+
     try:
         output_field_ref.value = ""
         output_field_ref.visible = True
@@ -210,7 +264,14 @@ async def run_dataset_script_command(
             line = await process.stdout.readline()
             if not line:
                 break
-            append_output(line.decode(errors='replace'))
+            line_text = line.decode(errors='replace').rstrip('\n\r')
+            # Skip noisy HuggingFace/loader output
+            if any(pat.match(line_text) for pat in _hf_noise_res):
+                continue
+            # Handle structured progress lines — update bar, don't spam output
+            if update_progress(line_text):
+                continue
+            append_output(line_text + "\n")
 
         rc = await process.wait()
         current_caption_process["proc"] = None

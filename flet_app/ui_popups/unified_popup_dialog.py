@@ -696,10 +696,19 @@ def open_unified_popup_dialog(
                         media_view.pause()
                         play_pause_btn.icon = ft.Icons.PLAY_ARROW
                         video_is_playing = False
+                        try:
+                            media_view.on_completed = None
+                        except Exception:
+                            pass
                     else:
                         media_view.play()
                         play_pause_btn.icon = ft.Icons.PAUSE
                         video_is_playing = True
+                        try:
+                            if hasattr(media_view, '_on_video_completed_handler'):
+                                media_view.on_completed = media_view._on_video_completed_handler
+                        except Exception:
+                            pass
                     if play_pause_btn.page: play_pause_btn.update()
                 except Exception:
                     pass
@@ -1504,6 +1513,11 @@ def open_unified_popup_dialog(
 
             local_video_player = media_view if hasattr(media_view, 'seek') else None
 
+            _last_moved_thumb = ["start"]  # track which thumb was last dragged
+            # Initialize previous values to slider defaults so the first on_change
+            # can detect which thumb moved (otherwise prev is None and detection is skipped)
+            _prev_slider = {"s": 0, "en": original_frames}
+
             def _on_slider_change(e_slider: ft.ControlEvent):
                 try:
                     s = int(frame_range_slider.start_value or 0)
@@ -1511,6 +1525,17 @@ def open_unified_popup_dialog(
                     start_value_text.value = f"Start: {s}"
                     end_value_text.value = f"End: {en}"
                     total_frames_text.value = f"Total: {max(0, en - s)}"
+                    # Track which thumb moved by comparing to previous values
+                    ps, pe = _prev_slider["s"], _prev_slider["en"]
+                    if s != ps and en == pe:
+                        _last_moved_thumb[0] = "start"
+                    elif en != pe and s == ps:
+                        _last_moved_thumb[0] = "end"
+                    _prev_slider["s"] = s
+                    _prev_slider["en"] = en
+                    # Keep video in its current play/pause state during drag
+                    if local_video_player and not video_is_playing:
+                        local_video_player.pause()
                     if start_value_text.page:
                         start_value_text.update()
                     if end_value_text.page:
@@ -1523,14 +1548,22 @@ def open_unified_popup_dialog(
             def _on_slider_change_end(e_slider: ft.ControlEvent):
                 try:
                     s = int(frame_range_slider.start_value or 0)
-                    if local_video_player and fps > 0:
+                    en = int(frame_range_slider.end_value or original_frames)
+                    if not local_video_player or fps <= 0:
+                        return
+                    if _last_moved_thumb[0] == "end":
+                        # Pause first, then seek — the frame displays while paused
+                        # without triggering the native player's end-of-video restart
+                        local_video_player.pause()
+                        ms = int((max(en - 1, 0) / fps) * 1000)
+                        local_video_player.seek(ms)
+                    else:
                         ms = int((s / fps) * 1000)
                         local_video_player.seek(ms)
-                        # Only play if video was playing before slider move
                         if video_is_playing:
                             local_video_player.play()
-                        if local_video_player.page:
-                            local_video_player.update()
+                    if local_video_player.page:
+                        local_video_player.update()
                 except Exception:
                     pass
 
@@ -1544,23 +1577,17 @@ def open_unified_popup_dialog(
                     if not local_video_player or fps <= 0:
                         return
                     ms = int((s / fps) * 1000)
-                    # Always loop immediately; Area Editor runs on its own layer and repaint path
-                    try:
-                        is_playing_now = bool(local_video_player.is_playing())
-                    except Exception:
-                        is_playing_now = True
                     local_video_player.seek(ms)
-                    if is_playing_now:
-                        local_video_player.play()
+                    local_video_player.play()
                     if local_video_player.page:
                         local_video_player.update()
-                    # Overlay lives on separate layer; nothing to re-order
                 except Exception:
                     pass
 
             try:
                 if local_video_player is not None:
                     local_video_player.on_completed = _on_completed
+                    local_video_player._on_video_completed_handler = _on_completed
             except Exception:
                 pass
 

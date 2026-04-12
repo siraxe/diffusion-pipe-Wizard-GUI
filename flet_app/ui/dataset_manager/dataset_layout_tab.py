@@ -29,7 +29,8 @@ from flet_app.ui.dataset_manager.dataset_controls import build_expansion_tile
 from flet_app.ui.dataset_manager.data_config_panel import create_data_config_panel
 from flet_app.ui.dataset_manager.dataset_video_utils import (
     run_vace_processing,
-    run_trim_processing
+    run_trim_processing,
+    run_time_remap_processing
 )
 from flet_app.ui.flet_hotkeys import is_d_key_pressed_global # Import global D key state
 
@@ -74,7 +75,7 @@ model_name_dropdown: ft.Dropdown = None
 trigger_word_textfield: ft.TextField = None
 
 # Global sorting state for datasets
-dataset_sort_mode = {"value": "newest"}  # "newest", "oldest", "name_asc", "name_desc"
+dataset_sort_mode = {"value": "newest"}  # "newest", "oldest", "name_asc", "name_desc", "shortest", "longest"
 dataset_sort_controls_container: ft.Container | None = None
 
 # References to controls created in dataset_tab_layout that need external access
@@ -101,6 +102,7 @@ fill_rgb_textfield_ref = ft.Ref[ft.TextField]()  # VACE: fill RGB color
 rand_min_textfield_ref = ft.Ref[ft.TextField]()  # VACE: random min
 rand_max_textfield_ref = ft.Ref[ft.TextField]()  # VACE: random max
 trim_frames_textfield_ref = ft.Ref[ft.TextField]()  # Trim to max frames
+time_remap_speed_textfield_ref = ft.Ref[ft.TextField]()  # Time Remap speed multiplier
 pyscenedetect_threshold_textfield_ref = ft.Ref[ft.TextField]()  # PySceneDetect threshold
 pyscenedetect_minlen_textfield_ref = ft.Ref[ft.TextField]()  # PySceneDetect min scene length
 pyscenedetect_combos_checkbox_ref = ft.Ref[ft.Checkbox]()  # PySceneDetect combos checkbox
@@ -731,6 +733,8 @@ def create_sort_controls_container():
             "oldest": "Oldest",
             "name_asc": "A-Z",
             "name_desc": "Z-A",
+            "shortest": "Shortest",
+            "longest": "Longest",
         },
         width=170,
         on_change=handle_dataset_sort_change,
@@ -938,6 +942,15 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
             else:
                 # Apply sorting based on current sort mode
                 sort_mode = dataset_sort_mode.get("value", "newest")
+
+                # Helper: get frame count from info.json (video_info dict)
+                def _get_frame_count(video_path: str) -> int:
+                    basename = os.path.basename(video_path)
+                    meta = video_info.get(basename) if isinstance(video_info, dict) else None
+                    if meta and isinstance(meta, dict):
+                        return int(meta.get('frames', 0))
+                    return 0
+
                 if sort_mode == "name_desc":
                     sorted_thumbnail_items = sorted(
                         thumbnail_paths_map.items(),
@@ -954,6 +967,19 @@ async def update_thumbnails(page_ctx: ft.Page | None, grid_control: ft.GridView 
                     sorted_thumbnail_items = sorted(
                         thumbnail_paths_map.items(),
                         key=lambda item: os.path.getmtime(item[0]) if os.path.exists(item[0]) else 0,
+                    )
+                elif sort_mode == "shortest":
+                    # Sort by frame count (fewest frames first)
+                    sorted_thumbnail_items = sorted(
+                        thumbnail_paths_map.items(),
+                        key=lambda item: _get_frame_count(item[0]),
+                    )
+                elif sort_mode == "longest":
+                    # Sort by frame count (most frames first)
+                    sorted_thumbnail_items = sorted(
+                        thumbnail_paths_map.items(),
+                        key=lambda item: _get_frame_count(item[0]),
+                        reverse=True,
                     )
                 else:  # newest (default)
                     # Sort by modification time (newest first)
@@ -1480,6 +1506,32 @@ def _build_misc_section():
         trim_frames_textfield,
     ], spacing=5)
 
+    # Time Remap controls row
+    time_remap_button = create_styled_button(
+        "Time Remap:",
+        tooltip="Speed up or slow down videos (changes FPS, preserves frame content)",
+        expand=True,
+        on_click=_on_time_remap_click,
+        button_style=ft.ButtonStyle(
+            text_style=ft.TextStyle(size=10),
+            shape=ft.RoundedRectangleBorder(radius=3)
+        ),
+        col=6,
+        height=30
+    )
+    time_remap_speed_textfield = create_textfield(
+        "speed",
+        "1.2",
+        hint_text="Speed multiplier (e.g. 0.5=slow, 2.0=fast)",
+        expand=True,
+        col=6,
+        ref=time_remap_speed_textfield_ref,
+    )
+    time_remap_controls_section = ft.ResponsiveRow([
+        time_remap_button,
+        time_remap_speed_textfield,
+    ], spacing=5)
+
     # Run PySceneDetect controls row
     pyscenedetect_button = create_styled_button(
         "Run PySceneDetect",
@@ -1550,6 +1602,7 @@ def _build_misc_section():
             rand_inputs_section,
             ft.Divider(thickness=1),
             trim_controls_section,
+            time_remap_controls_section,
             ft.Divider(thickness=1),
             pyscenedetect_controls_section,
             pyscenedetect_options_row,
@@ -2272,6 +2325,77 @@ def _on_trim_to_max_click(e: ft.ControlEvent):
 
     except Exception as ex:
         print(f"Error in trim to max: {ex}")
+        import traceback
+        traceback.print_exc()
+        e.page.snack_bar = ft.SnackBar(
+            ft.Text(f"Error: {str(ex)}"),
+            open=True
+        )
+        e.page.update()
+
+def _on_time_remap_click(e: ft.ControlEvent):
+    """Handle Time Remap button click - speeds up or slows down videos by changing FPS"""
+    print("Time Remap button clicked!")
+
+    try:
+        from pathlib import Path
+
+        # Initialize page state and get selected videos
+        _initialize_page_state(e.page)
+
+        # Get selected videos directly from page state
+        selected_set = e.page.selected_thumbnails_set if hasattr(e.page, 'selected_thumbnails_set') else set()
+
+        # If no videos selected, use all videos from page
+        if not selected_set:
+            selected_videos = e.page.video_files_list if hasattr(e.page, 'video_files_list') else []
+            print(f"No videos selected, processing all {len(selected_videos)} videos")
+        else:
+            selected_videos = list(selected_set)
+            print(f"Processing {len(selected_videos)} selected videos")
+
+        if not selected_videos:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("No videos found to process"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        # Get speed multiplier value
+        try:
+            speed = float(time_remap_speed_textfield_ref.current.value) if time_remap_speed_textfield_ref and time_remap_speed_textfield_ref.current.value else 1.2
+        except (ValueError, AttributeError):
+            speed = 1.2
+            print("Invalid speed value, using default: 1.2")
+
+        if speed <= 0:
+            e.page.snack_bar = ft.SnackBar(
+                ft.Text("Speed must be a positive number"),
+                open=True
+            )
+            e.page.update()
+            return
+
+        print(f"Time Remap parameters: speed={speed}")
+
+        # Get FFmpeg path
+        from flet_app.ui_popups import video_player_utils as vpu
+        ffmpeg_exe = vpu._get_ffmpeg_exe_path()
+        codec_flags = vpu._get_video_codec_and_flags()
+
+        # Run time remap processing using the utility module
+        run_time_remap_processing(
+            selected_videos=selected_videos,
+            ffmpeg_exe=ffmpeg_exe,
+            codec_flags=codec_flags,
+            speed_multiplier=speed,
+            page_ctx=e.page,
+            thumbnails_grid_ref=thumbnails_grid_ref
+        )
+
+    except Exception as ex:
+        print(f"Error in time remap: {ex}")
         import traceback
         traceback.print_exc()
         e.page.snack_bar = ft.SnackBar(

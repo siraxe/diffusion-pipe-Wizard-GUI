@@ -643,6 +643,7 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
     # Independent state for this block
     selected_dataset = {"value": initial_dataset}
     frame_extraction_value = {"value": "head"}  # Default frame_extraction value
+    frame_stride_value = {"value": 39}  # Default frame_stride value
     is_ltx2_model = {"value": False}  # Track if model type is ltx-video-2
     num_repeats_value = {"value": 1}  # Default num_repeats value
     content_column_ref = ft.Ref[ft.Column]()
@@ -650,6 +651,8 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
     clear_button_ref = ft.Ref[ft.IconButton]()
     frame_extraction_dropdown_ref = ft.Ref[ft.Dropdown]()
     frame_extraction_row_ref = ft.Ref[ft.Row]()
+    frame_stride_field_ref = ft.Ref[ft.TextField]()
+    frame_stride_row_ref = ft.Ref[ft.Row]()
     num_repeats_field_ref = ft.Ref[ft.TextField]()
     num_repeats_column_ref = ft.Ref[ft.Column]()
 
@@ -1012,7 +1015,9 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
                 ensure_frame_extraction_in_dataset_toml(selected_dataset["value"])
                 # Read frame_extraction from dataset TOML and update UI
                 read_frame_extraction_from_dataset_toml(selected_dataset["value"])
-            # Read num_repeats from dataset TOML and update UI
+            # Read frame_stride and num_repeats from dataset TOML and update UI
+            read_frame_stride_from_dataset_toml(selected_dataset["value"])
+            update_frame_stride_visibility()
             read_num_repeats_from_dataset_toml(selected_dataset["value"])
 
         dataset_dropdown.on_change = on_dataset_change
@@ -1191,6 +1196,139 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
                 except Exception as ex:
                     pass
 
+            # Show/hide frame_stride field based on whether "slide" is selected
+            update_frame_stride_visibility()
+
+    def update_frame_stride_visibility():
+        """Show frame_stride field only when frame_extraction is 'slide'."""
+        is_slide = frame_extraction_value["value"] == "slide"
+        row = frame_stride_row_ref.current
+        field = frame_stride_field_ref.current
+        if row:
+            row.visible = is_slide
+            try:
+                if row.page:
+                    row.update()
+            except Exception:
+                pass
+        if field:
+            field.visible = is_slide
+            try:
+                if field.page:
+                    field.update()
+            except Exception:
+                pass
+
+    def on_frame_stride_change(e):
+        """Handle frame_stride field change - update dataset config file."""
+        new_value = e.control.value if e.control.value else None
+        if new_value:
+            try:
+                frame_stride_value["value"] = int(new_value)
+            except ValueError:
+                field = frame_stride_field_ref.current
+                if field:
+                    field.value = str(frame_stride_value["value"])
+                    try:
+                        field.update()
+                    except Exception:
+                        pass
+                return
+
+            # Update the dataset's TOML config file
+            current_dataset = selected_dataset.get("value")
+            if current_dataset:
+                try:
+                    import toml
+                    from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+
+                    base_dir, _dtype = _get_dataset_base_dir(current_dataset)
+                    config_file = os.path.join(base_dir, f"{current_dataset}.toml")
+
+                    content = ""
+                    if os.path.exists(config_file):
+                        with open(config_file, 'r') as f:
+                            content = f.read()
+
+                    if 'frame_stride' in content:
+                        lines = content.split('\n')
+                        new_lines = []
+                        for line in lines:
+                            if line.strip().startswith('frame_stride'):
+                                new_lines.append(f'frame_stride = {frame_stride_value["value"]}')
+                            else:
+                                new_lines.append(line)
+                        content = '\n'.join(new_lines)
+                    else:
+                        # Add frame_stride after frame_extraction line or before [[directory]]
+                        lines = content.split('\n')
+                        new_lines = []
+                        inserted = False
+
+                        for line in lines:
+                            if not inserted and line.strip().startswith('frame_extraction'):
+                                new_lines.append(line)
+                                new_lines.append(f'frame_stride = {frame_stride_value["value"]}')
+                                inserted = True
+                            else:
+                                new_lines.append(line)
+
+                        if not inserted:
+                            final_lines = []
+                            for line in new_lines:
+                                if not inserted and line.strip().startswith('[[directory]]'):
+                                    final_lines.append(f'frame_stride = {frame_stride_value["value"]}')
+                                    inserted = True
+                                final_lines.append(line)
+                            new_lines = final_lines
+
+                        content = '\n'.join(new_lines)
+
+                    with open(config_file, 'w') as f:
+                        f.write(content)
+
+                except Exception as ex:
+                    pass
+
+    def read_frame_stride_from_dataset_toml(dataset_name):
+        """Read frame_stride value from dataset's TOML file and update UI."""
+        if not dataset_name:
+            return
+        try:
+            import toml
+            from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir
+
+            base_dir, _dtype = _get_dataset_base_dir(dataset_name)
+            config_file = os.path.join(base_dir, f"{dataset_name}.toml")
+
+            if not os.path.exists(config_file):
+                return
+
+            with open(config_file, 'r') as f:
+                content = f.read()
+
+            for line in content.split('\n'):
+                line = line.strip()
+                if line.startswith('frame_stride'):
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        value = value.strip()
+                        try:
+                            frame_stride_int = int(value)
+                            frame_stride_value["value"] = frame_stride_int
+                            field = frame_stride_field_ref.current
+                            if field and field.value != str(frame_stride_int):
+                                field.value = str(frame_stride_int)
+                                try:
+                                    field.update()
+                                except Exception:
+                                    pass
+                            return
+                        except ValueError:
+                            pass
+        except Exception as ex:
+            pass
+
     content_column = ft.Column(
         ref=content_column_ref,
         controls=[
@@ -1268,6 +1406,28 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
                 ],
                 visible=False,  # Row is hidden by default
             ),
+            # Frame stride field (hidden by default, shown only when frame_extraction is "slide")
+            ft.Row(
+                ref=frame_stride_row_ref,
+                controls=[
+                    ft.TextField(
+                        ref=frame_stride_field_ref,
+                        label="Frame stride",
+                        hint_text="Frame stride for slide extraction",
+                        value="39",
+                        keyboard_type=ft.KeyboardType.NUMBER,
+                        fill_color=ft.Colors.GREY_900,
+                        filled=True,
+                        expand=True,
+                        text_size=11,
+                        label_style=ft.TextStyle(size=10),
+                        scale=0.75,
+                        visible=False,  # Hidden by default
+                        on_change=lambda e: on_frame_stride_change(e),
+                    ),
+                ],
+                visible=False,  # Row is hidden by default
+            ),
         ],
         spacing=8,
         horizontal_alignment=ft.CrossAxisAlignment.START,
@@ -1338,7 +1498,9 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
             ensure_frame_extraction_in_dataset_toml(selected_dataset["value"])
             # Read frame_extraction from dataset TOML and update UI
             read_frame_extraction_from_dataset_toml(selected_dataset["value"])
-        # Read num_repeats from dataset TOML and update UI
+        # Read frame_stride and num_repeats from dataset TOML and update UI
+        read_frame_stride_from_dataset_toml(selected_dataset["value"])
+        update_frame_stride_visibility()
         read_num_repeats_from_dataset_toml(selected_dataset["value"])
 
     def reload_datasets():
@@ -1380,6 +1542,22 @@ def build_compact_dataset_block(label: str, initial_dataset: str = None):
                     dropdown.update()
         except Exception:
             pass
+
+        # Also hide frame_stride when frame_extraction is hidden
+        if not visible:
+            stride_row = frame_stride_row_ref.current
+            stride_field = frame_stride_field_ref.current
+            try:
+                if stride_row:
+                    stride_row.visible = False
+                    if stride_row.page:
+                        stride_row.update()
+                if stride_field:
+                    stride_field.visible = False
+                    if stride_field.page:
+                        stride_field.update()
+            except Exception:
+                pass
 
     container.get_selected_dataset = get_selected_dataset
     container.set_selected_dataset = set_selected_dataset

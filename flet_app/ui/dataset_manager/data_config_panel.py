@@ -525,12 +525,11 @@ def create_data_config_panel(upload_button=None):
                 ], spacing=5, alignment=ft.MainAxisAlignment.START),
                 # Row 3: Has control checkbox
                 has_control_checkbox,
-                # Row 4: Has negative checkbox
-                has_negative_checkbox,
-                # Row 5: X button to hide panel
+                # Row 4: Has negative checkbox + hide panel button
                 ft.Row([
+                    has_negative_checkbox,
                     hide_button,
-                ], alignment=ft.MainAxisAlignment.END),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.START),
             col=3,
         ),

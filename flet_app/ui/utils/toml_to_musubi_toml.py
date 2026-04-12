@@ -187,6 +187,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         dir_frame_buckets = dir_info.get('frame_buckets', global_frame_buckets)
         # Get frame_extraction from per-dataset setting (only for LTX2 datasets)
         dir_frame_extraction = dir_info.get('frame_extraction', frame_extraction)
+        # Get frame_stride from per-dataset setting (only for slide extraction)
+        dir_frame_stride = dir_info.get('frame_stride', 39)
         # Get control_args for i2v preprocessing
         dir_control_args = dir_info.get('control_args', None)
 
@@ -267,6 +269,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 dataset_config['video_directory'] = dir_path
                 dataset_config['target_frames'] = dir_frame_buckets
                 dataset_config['frame_extraction'] = dir_frame_extraction
+                if dir_frame_extraction == 'slide':
+                    dataset_config['frame_stride'] = dir_frame_stride
                 dataset_config['target_fps'] = target_fps
                 # Automatically set max_frames to the largest value in target_frames
                 if dir_frame_buckets:
@@ -411,10 +415,10 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                     slider_lines = [
                         'mode = "reference"',
                         '',
-                        '# Slider cache directories for reference mode training (list format)',
-                        f'pos_cache_dirs = [ "{pos_cache_dir}", ]',
-                        f'neg_cache_dirs = [ "{neg_cache_dir}", ]',
-                        f'text_cache_dirs = [ "{text_cache_dir}", ]',
+                        '# Slider cache directories for reference mode training',
+                        f'pos_cache_dir = "{pos_cache_dir}"',
+                        f'neg_cache_dir = "{neg_cache_dir}"',
+                        f'text_cache_dir = "{text_cache_dir}"',
                         '',
                         f'batch_size = {batch_size}',
                         '',
@@ -497,6 +501,8 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
                 lines.append(f"target_frames = {_format_list(dataset['target_frames'])}")
             if 'frame_extraction' in dataset:
                 lines.append(f"frame_extraction = \"{dataset['frame_extraction']}\"")
+            if 'frame_stride' in dataset:
+                lines.append(f"frame_stride = {dataset['frame_stride']}")
             if 'target_fps' in dataset:
                 lines.append(f"target_fps = {float(dataset['target_fps'])}")
             if 'max_frames' in dataset:

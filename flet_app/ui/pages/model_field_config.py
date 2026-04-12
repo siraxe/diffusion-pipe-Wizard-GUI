@@ -119,7 +119,7 @@ MODEL_CONFIG = {
             "use_mask": True,
             "gradient_checkpointing": True,
             "t_type": True,
-            "ltx_2_3": False,
+            "ltx_2_3": True,
             "sample_slider_range": True,
             "rank": True,
             "alpha": True,

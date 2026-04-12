@@ -210,15 +210,17 @@ class LTX2Cache:
                 for cf in caption_files:
                     existing_captions.add(os.path.splitext(os.path.basename(cf))[0])
 
-            # Create empty caption files for images that don't have them
-            for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.PNG', '.JPG', '.JPEG', '.WEBP', '.BMP']:
-                for img_file in glob.glob(os.path.join(control_dir, f"*{ext}")):
-                    img_base = os.path.splitext(os.path.basename(img_file))[0]
-                    if img_base not in existing_captions:
-                        caption_file = os.path.join(control_dir, img_base + ".txt")
+            # Create empty caption files for media that don't have them
+            media_exts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.PNG', '.JPG', '.JPEG', '.WEBP', '.BMP',
+                          '.mp4', '.avi', '.mov', '.mkv', '.webm', '.MP4', '.AVI', '.MOV', '.MKV', '.WEBM']
+            for ext in media_exts:
+                for media_file in glob.glob(os.path.join(control_dir, f"*{ext}")):
+                    media_base = os.path.splitext(os.path.basename(media_file))[0]
+                    if media_base not in existing_captions:
+                        caption_file = os.path.join(control_dir, media_base + ".txt")
                         with open(caption_file, 'w') as f:
                             f.write("")  # Empty caption file
-                        existing_captions.add(img_base)
+                        existing_captions.add(media_base)
 
         # Create a minimal dataset config for the control folder
         control_config = {
