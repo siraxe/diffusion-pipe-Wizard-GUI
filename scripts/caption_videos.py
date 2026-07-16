@@ -106,6 +106,12 @@ try:
 except Exception:
     Qwen3VLForConditionalGeneration = None  # type: ignore
 
+# HF backend for Qwen3.5-VL
+try:
+    from transformers import Qwen3_5ForConditionalGeneration  # type: ignore
+except Exception:
+    Qwen3_5ForConditionalGeneration = None  # type: ignore
+
 DEFAULT_VLM_CAPTION_INSTRUCTION = (
     "Shortly describe the content of this video  events and actions as they occur over time."
 )
@@ -236,6 +242,69 @@ class Qwen3VLHFLocalCaptioner(MediaCaptioningModel):
         return (output_text[0] if output_text else "").strip()
 
 
+class Qwen35VLHFLocalCaptioner(MediaCaptioningModel):
+    """Captioner for Qwen3.5-VL models (model_type=qwen3_5)."""
+
+    def __init__(self, model_id_or_path: str, *, device: str = "cuda", instruction: str = DEFAULT_VLM_CAPTION_INSTRUCTION) -> None:
+        if AutoProcessor is None or Qwen3_5ForConditionalGeneration is None:
+            raise RuntimeError("transformers with Qwen3.5 support is required")
+        self.model = Qwen3_5ForConditionalGeneration.from_pretrained(
+            model_id_or_path,
+            torch_dtype="auto",
+            device_map="auto",
+            trust_remote_code=True,
+        )
+        self.processor = AutoProcessor.from_pretrained(
+            model_id_or_path,
+            trust_remote_code=True,
+            fix_mistral_regex=True,
+        )
+        self.instruction = instruction
+
+    def caption(self, path: Path, fps: int, clean_caption: bool, max_new_tokens: int) -> str:
+        p = str(path)
+        ext = path.suffix.lower()
+        is_video = ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".gif"}
+        content = []
+        if is_video:
+            content.append({"type": "video", "video": p})
+        else:
+            content.append({"type": "image", "image": p})
+        content.append({"type": "text", "text": self.instruction})
+        messages = [{"role": "user", "content": content}]
+
+        inputs = self.processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        inputs = inputs.to(self.model.device)
+        generated_ids = self.model.generate(**inputs, max_new_tokens=int(max_new_tokens))
+        trimmed = [out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
+        output_text = self.processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        return (output_text[0] if output_text else "").strip()
+
+
+def _detect_qwen_model_type(model_path: str) -> str | None:
+    """Read config.json and return 'qwen3_5' or 'qwen3_vl' or None."""
+    import json as _json
+    cfg_path = os.path.join(model_path, "config.json")
+    if os.path.isfile(cfg_path):
+        try:
+            with open(cfg_path) as f:
+                cfg = _json.load(f)
+            mt = cfg.get("model_type", "")
+            if mt == "qwen3_5":
+                return "qwen3_5"
+            if mt == "qwen3_vl":
+                return "qwen3_vl"
+        except Exception:
+            pass
+    return None
+
+
 def create_captioner(
     captioner_type: str,
     device: str,
@@ -275,7 +344,15 @@ def create_captioner(
                 alt = pr / "models" / "_misc" / "Qwen3-VL-8B-Instruct"
             model_path = str(alt)
         if ctype in ("qwen3_vl_4b_hf", "qwen3_vl_8b_hf"):
-            # Lightweight HF Transformers backend for 4B
+            # Auto-detect model type from config.json to pick the right class
+            detected = _detect_qwen_model_type(model_path)
+            if detected == "qwen3_5":
+                return Qwen35VLHFLocalCaptioner(
+                    model_path,
+                    device=device,
+                    instruction=vlm_instruction,
+                )
+            # Default: Qwen3-VL
             return Qwen3VLHFLocalCaptioner(
                 model_path,
                 device=device,

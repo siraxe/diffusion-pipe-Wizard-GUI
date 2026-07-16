@@ -244,12 +244,15 @@ def create_mask_from_overlay(
     overlay_visible: bool,
     viewer_w: int,
     viewer_h: int,
+    ellipse: bool = False,
+    feather: int = 80,
+    overlay_angle: float = 0.0,
 ) -> bool:
     """
     Create a mask from the selected area.
 
     Creates a black PNG image with a white rectangle in the selected area.
-    Saves it to a 'mask/' subdirectory next to the media file with the same base name.
+    Saves it to a 'masks/' subdirectory next to the media file with the same base name.
 
     Returns
     -------
@@ -341,24 +344,67 @@ def create_mask_from_overlay(
     actual_w = max(1, min(actual_w, media_orig_w - actual_left))
     actual_h = max(1, min(actual_h, media_orig_h - actual_top))
 
-    # Create mask: black background, white rectangle in selected area
+    # Create mask: black background, white shape in selected area
     mask = Image.new('L', (media_orig_w, media_orig_h), 0)  # 0 = black
     from PIL import ImageDraw
-    draw = ImageDraw.Draw(mask)
-    draw.rectangle([actual_left, actual_top, actual_left + actual_w, actual_top + actual_h], fill=255)  # 255 = white
+
+    # Calculate center of the shape in original media coordinates
+    cx = actual_left + actual_w / 2.0
+    cy = actual_top + actual_h / 2.0
+
+    if abs(overlay_angle) > 0.01:
+        # Draw shape on a temp layer sized to the bounding box, then rotate
+        import math
+
+        # Make temp layer large enough to hold the rotated shape (diagonal)
+        diag = int(math.ceil(math.sqrt(actual_w ** 2 + actual_h ** 2)))
+        temp = Image.new('L', (diag, diag), 0)
+        draw = ImageDraw.Draw(temp)
+        ox = (diag - actual_w) / 2.0
+        oy = (diag - actual_h) / 2.0
+        if ellipse:
+            draw.ellipse([ox, oy, ox + actual_w, oy + actual_h], fill=255)
+        else:
+            draw.rectangle([ox, oy, ox + actual_w, oy + actual_h], fill=255)
+
+        # Rotate around the temp layer center (convert radians to degrees, negate for PIL CCW convention)
+        angle_deg = -math.degrees(overlay_angle)
+        rotated = temp.rotate(angle_deg, resample=Image.BICUBIC, center=(diag / 2, diag / 2), expand=False)
+
+        # Paste rotated shape onto the mask at the correct center position
+        paste_x = int(cx - diag / 2)
+        paste_y = int(cy - diag / 2)
+        mask.paste(rotated, (paste_x, paste_y))
+    else:
+        draw = ImageDraw.Draw(mask)
+        if ellipse:
+            draw.ellipse([actual_left, actual_top, actual_left + actual_w, actual_top + actual_h], fill=255)
+        else:
+            draw.rectangle([actual_left, actual_top, actual_left + actual_w, actual_top + actual_h], fill=255)
+
+    # Feather / smooth edges with Gaussian blur
+    if feather > 0:
+        from PIL import ImageFilter
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=feather))
 
     # Determine mask file path
     media_dir = os.path.dirname(media_path)
     media_filename = os.path.basename(media_path)
     media_name, _ = os.path.splitext(media_filename)
 
-    mask_dir = os.path.join(media_dir, 'mask')
+    mask_dir = os.path.join(media_dir, 'masks')
     os.makedirs(mask_dir, exist_ok=True)
 
     mask_path = os.path.join(mask_dir, f"{media_name}.png")
 
-    # Save mask
+    # Save mask (additive: composite on top of existing mask if it exists)
     try:
+        if os.path.exists(mask_path):
+            existing = Image.open(mask_path).convert('L')
+            existing = existing.resize((media_orig_w, media_orig_h), Image.BICUBIC)
+            mask = Image.fromarray(
+                (numpy.array(existing, dtype=numpy.float32) + numpy.array(mask, dtype=numpy.float32)).clip(0, 255).astype(numpy.uint8)
+            )
         mask.save(mask_path)
         page.snack_bar = ft.SnackBar(ft.Text(f"Mask saved: {mask_path}"), open=True)
         page.update()

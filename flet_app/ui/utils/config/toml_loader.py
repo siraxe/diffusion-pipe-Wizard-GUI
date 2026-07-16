@@ -40,6 +40,8 @@ def populate_model_section(toml_data: dict, label_vals: dict) -> None:
         label_vals['dtype'] = model.get('dtype')
     if 'transformer_dtype' in model:
         label_vals['transformer_dtype'] = model.get('transformer_dtype')
+    elif 'diffusion_model_dtype' in model:
+        label_vals['transformer_dtype'] = model.get('diffusion_model_dtype')
 
     if 'timestep_sample_method' in model:
         ts_method = model.get('timestep_sample_method')
@@ -400,6 +402,23 @@ def apply_all_values(container: Any, label_vals: dict, page: Any) -> None:
                     setattr(e, 'control', trainer_dropdown_ref.current)
                     setattr(e, 'page', page)
                     trainer_dropdown_ref.current.on_change(e)
+        except Exception:
+            pass
+
+    # Handle Model Type dropdown (must run after Trainer since trainer affects model options)
+    if 'Model Type' in label_vals:
+        try:
+            from flet_app.ui.pages.training_config import model_type_dropdown_ref, on_model_type_change
+            if model_type_dropdown_ref and model_type_dropdown_ref.current:
+                model_type_dropdown_ref.current.value = str(label_vals['Model Type'])
+                if model_type_dropdown_ref.current.page:
+                    model_type_dropdown_ref.current.update()
+                if callable(on_model_type_change):
+                    class _E: pass
+                    e = _E()
+                    setattr(e, 'control', model_type_dropdown_ref.current)
+                    setattr(e, 'page', page)
+                    on_model_type_change(e, from_toml_load=True)
         except Exception:
             pass
 

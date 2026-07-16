@@ -1114,6 +1114,16 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
                 )
                 e.page.update()
             return
+    elif (selected_model or "").lower().replace("-", "_") == "gemma_4_e4b":
+        gemma_dir = os.path.join("models", "text_encoders", "gemma-4-E4B")
+        if not os.path.isdir(gemma_dir):
+            if e.page:
+                e.page.snack_bar = ft.SnackBar(
+                    content=ft.Text("Gemma-4-E4B not found at models/text_encoders/gemma-4-E4B."),
+                    open=True,
+                )
+                e.page.update()
+            return
 
     # --- Build the command string ---
     if (selected_model or "").lower() == "joycaption_llava":
@@ -1181,6 +1191,66 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
         if sel_arg:
             command += f" --selected-files {sel_arg}"
         # JoyCaption writes .txt files directly; just update caption status
+        post_success_cb = lambda: update_thumbnail_caption_status(thumbnails_grid_control, dataset_folder_path, dataset_type)
+    elif (selected_model or "").lower().replace("-", "_") == "gemma_4_e4b":
+        image_exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+        if dataset_type != "image":
+            if selected_filenames:
+                selected_images = [fn for fn in selected_filenames if os.path.splitext(fn)[1].lower() in image_exts]
+                skipped_non_images = [fn for fn in selected_filenames if os.path.splitext(fn)[1].lower() not in image_exts]
+                if skipped_non_images:
+                    try:
+                        processed_output_field_ref.value += "[Info] Skipping non-image files: " + ", ".join(skipped_non_images) + "\n"
+                        processed_output_field_ref.visible = True
+                        set_bottom_app_bar_height_func()
+                        processed_output_field_ref.update() if processed_output_field_ref.page else None
+                    except Exception:
+                        pass
+                if not selected_images:
+                    try:
+                        processed_output_field_ref.value += "[Error] No images selected after filtering. Select images or choose a video-capable model.\n"
+                        processed_output_field_ref.visible = True
+                        set_bottom_app_bar_height_func()
+                        processed_output_field_ref.update() if processed_output_field_ref.page else None
+                    except Exception:
+                        pass
+                    if e.page:
+                        e.page.snack_bar = ft.SnackBar(content=ft.Text("No images to process. Select images only or pick another model."), open=True)
+                        e.page.update()
+                    return
+                selected_filenames = selected_images
+            else:
+                try:
+                    processed_output_field_ref.value += "[Error] Mixed dataset detected. Please select images to caption with Gemma-4-E4B.\n"
+                    processed_output_field_ref.visible = True
+                    set_bottom_app_bar_height_func()
+                    processed_output_field_ref.update() if processed_output_field_ref.page else None
+                except Exception:
+                    pass
+                if e.page:
+                    e.page.snack_bar = ft.SnackBar(content=ft.Text("Select images to run Gemma-4-E4B on a mixed dataset."), open=True)
+                    e.page.update()
+                return
+        python_exe = (
+            sys.executable
+            or (os.path.join("venv", "bin", "python") if os.path.exists(os.path.join("venv", "bin", "python")) else None)
+            or (os.path.join("venv", "Scripts", "python.exe") if os.path.exists(os.path.join("venv", "Scripts", "python.exe")) else None)
+            or "python3"
+        )
+        gemma_script = os.path.normpath("scripts/caption_gemma.py")
+        prompt_val = cap_command_textfield.value.strip() or "Describe this image in detail."
+        max_tokens_val = int(max_tokens_textfield.value.strip() or 256)
+        gemma_model = os.path.join("models", "text_encoders", "gemma-4-E4B", "Gemma-4-E4B-Q8_K_P.gguf")
+        gemma_mmproj = os.path.join("models", "text_encoders", "gemma-4-E4B", "mmproj-Gemma-4-E4B-f16.gguf")
+        sel_arg = json.dumps(",".join(selected_filenames)) if selected_filenames else ""
+        command = (
+            f'"{python_exe}" -u "{gemma_script}" "{dataset_folder_path}" '
+            f'--instruction {json.dumps(prompt_val)} '
+            f'--max-new-tokens {max_tokens_val} '
+            f'--model-path "{gemma_model}" --mmproj-path "{gemma_mmproj}"'
+        )
+        if sel_arg:
+            command += f" --selected-files {sel_arg}"
         post_success_cb = lambda: update_thumbnail_caption_status(thumbnails_grid_control, dataset_folder_path, dataset_type)
     else:
         # Default path: use our caption_videos.py pipeline (video/image)

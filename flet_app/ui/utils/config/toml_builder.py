@@ -167,12 +167,14 @@ def build_model_section(lines: List[str], cfg: Dict, _get: callable) -> None:
     lines.append("")
     lines.append(f"dtype = {quote(_get('dtype', 'bfloat16'))}")
 
-    # transformer_dtype
+    # transformer_dtype (flux2/klein/krea2 use diffusion_model_dtype instead)
     t_dtype = str(_get('transformer_dtype', 'float8'))
+    _diffusion_dtype_models = ('flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'krea2')
+    dtype_field = 'diffusion_model_dtype' if mt_lower in _diffusion_dtype_models else 'transformer_dtype'
     if t_dtype.strip().lower() == 'none':
-        lines.append("#transformer_dtype = 'float8'")
+        lines.append(f"#{dtype_field} = 'float8'")
     else:
-        lines.append(f"transformer_dtype = {quote(t_dtype)}")
+        lines.append(f"{dtype_field} = {quote(t_dtype)}")
 
     # timestep_sample_method
     is_musubi_model = mt_lower in ('_wan22', 'ltx-video-2', 'ltx2') and trainer == 'musubi'

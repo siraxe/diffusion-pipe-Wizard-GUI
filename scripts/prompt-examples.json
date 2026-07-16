@@ -3,5 +3,8 @@
   {
     "prompt": "Write a medium-length stable diffusion prompt for this image.",
     "weight": 0.5
+  },
+  {
+    "prompt": "Write a medium-length stable diffusion prompt for this image in e621 format . reply only with prompt , don't add ### Option or ### Prompt etc prefix or e621 into prompt itself"
   }
 ]

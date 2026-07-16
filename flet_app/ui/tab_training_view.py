@@ -178,11 +178,20 @@ async def save_training_config_to_toml(training_tab_container):
             max_ar_val = ds_config.get('max_ar', 2.0)
             num_ar_buckets_val = ds_config.get('num_ar_buckets', 7)
 
-            # Read control_path and negative_path from [[directory]] section
+            # Read control_path, negative_path, and mask_path from [[directory]] section
             directory_config = ds_config.get('directory', [{}])[0] if ds_config.get('directory') else {}
             # Also check for values directly at top level (old format)
             control_path_val = ds_config.get('control_path') or directory_config.get('control_path')
             negative_path_val = ds_config.get('negative_path') or directory_config.get('negative_path')
+            mask_path_val = ds_config.get('mask_path') or directory_config.get('mask_path')
+
+            # Auto-detect masks subdirectory if mask_path not explicitly set
+            if not mask_path_val:
+                for mask_dir_name in ('masks', 'mask'):
+                    candidate = os.path.join(ds_info['path'], mask_dir_name).replace('\\', '/')
+                    if os.path.isdir(candidate):
+                        mask_path_val = candidate
+                        break
 
             # Read control_args from last_config.toml if slider mode is enabled
             control_args_val = None
@@ -269,11 +278,13 @@ async def save_training_config_to_toml(training_tab_container):
                     formatted_args = "[" + ", ".join(f'"{v}"' if isinstance(v, str) else str(v) for v in control_args_val) + "]"
                     lines.append(f"control_args = {formatted_args}")
 
-            # control_path and negative_path (per-dataset, only if set)
+            # control_path, negative_path, and mask_path (per-dataset, only if set)
             if control_path_val:
                 lines.append(f"control_path = '{control_path_val}'")
             if negative_path_val:
                 lines.append(f"negative_path = '{negative_path_val}'")
+            if mask_path_val:
+                lines.append(f"mask_path = '{mask_path_val}'")
 
             # Blank line between datasets
             if i < len(datasets_to_save) - 1:

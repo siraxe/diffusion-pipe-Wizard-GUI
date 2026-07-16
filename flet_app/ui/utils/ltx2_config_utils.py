@@ -370,6 +370,12 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"cache_te = {'true' if cache_te_val else 'false'}")
     lines.append("")
 
+    # Extra flags (top-level)
+    extra_flags_val = _get('extra_flags', '')
+    if extra_flags_val and str(extra_flags_val).strip():
+        lines.append(f"extra_flags = {_quote(str(extra_flags_val).strip())}")
+        lines.append("")
+
     return "\n".join(lines) + "\n"
 
 

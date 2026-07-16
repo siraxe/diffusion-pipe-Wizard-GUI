@@ -145,6 +145,7 @@ def open_unified_popup_dialog(
     neg_caption_tf: Optional[ft.TextField] = None
     caption_timer: Optional[threading.Timer] = None
     neg_caption_timer: Optional[threading.Timer] = None
+    _padding_value: str = "80"
 
     # Track video play/pause state (resets to playing when switching videos)
     video_is_playing = True
@@ -1063,10 +1064,25 @@ def open_unified_popup_dialog(
             video_editor.handle_crop_video_click(page, width_field, height_field, path, items, None)
         ), style=BTN_STYLE2)
 
-        crop_all_btn = ft.ElevatedButton("Crop All", on_click=lambda e: (
-            image_editor.handle_crop_all_images(page, path, width_field, height_field, items, None) if is_img else
-            video_editor.handle_crop_all_videos(page, path, width_field, height_field, items, None)
-        ), style=BTN_STYLE2)
+        def on_crop_all_click(e):
+            def do_crop_all(e):
+                page.close(dialog)
+                if is_img:
+                    image_editor.handle_crop_all_images(page, path, width_field, height_field, items, None)
+                else:
+                    video_editor.handle_crop_all_videos(page, path, width_field, height_field, items, None)
+
+            dialog = ft.AlertDialog(
+                title=ft.Text("Crop All?"),
+                content=ft.Text("This will crop ALL items. Are you sure?"),
+                actions=[
+                    ft.TextButton("Yes", on_click=do_crop_all),
+                    ft.TextButton("No", on_click=lambda e: page.close(dialog)),
+                ],
+            )
+            page.open(dialog)
+
+        crop_all_btn = ft.ElevatedButton("Crop All", on_click=on_crop_all_click, style=BTN_STYLE2)
 
         def toggle_area_editor(e):
             nonlocal overlay_visible
@@ -1162,14 +1178,17 @@ def open_unified_popup_dialog(
             if area_apply_crop(page, path, overlay_control, overlay_visible, viewer_w, viewer_h, overlay_angle):
                 refresh()
 
-        def create_mask_from_overlay(e):
-            if area_create_mask(page, path, overlay_control, overlay_visible, viewer_w, viewer_h):
+        def create_mask_from_overlay(e, ellipse=False):
+            nonlocal _padding_value
+            feather = int(padding_field.value or 80)
+            _padding_value = padding_field.value or "80"
+            if area_create_mask(page, path, overlay_control, overlay_visible, viewer_w, viewer_h, ellipse=ellipse, feather=feather, overlay_angle=overlay_angle):
                 refresh()
 
         # Create padding field for minimax-remover
         padding_field = create_textfield(
             label="Padding",
-            value="80",
+            value=_padding_value,
             hint_text="px",
             expand=0,
             width=100,
@@ -1460,7 +1479,8 @@ def open_unified_popup_dialog(
 
         area_btn = ft.ElevatedButton("Area Editor", on_click=toggle_area_editor, style=BTN_STYLE2)
         apply_crop_btn = ft.ElevatedButton("Apply Crop", on_click=apply_crop_from_overlay, style=BTN_STYLE2)
-        mask_it_btn = ft.ElevatedButton("Mask it", on_click=create_mask_from_overlay, style=BTN_STYLE2)
+        mask_it_btn = ft.ElevatedButton("boxM", on_click=lambda e: create_mask_from_overlay(e), style=BTN_STYLE2)
+        circle_mask_btn = ft.ElevatedButton("circleM", on_click=lambda e: create_mask_from_overlay(e, ellipse=True), style=BTN_STYLE2)
         apply_clean_btn = ft.ElevatedButton("Clear Area", on_click=apply_clean_from_overlay, disabled=is_img, style=BTN_STYLE2, tooltip=("Disabled for images" if is_img else None))
         x_btn = ft.ElevatedButton("X", on_click=on_x_click, style=BTN_STYLE2)
         create_target_btn = ft.ElevatedButton("Create target", on_click=on_target_click, style=BTN_STYLE2)
@@ -1478,7 +1498,7 @@ def open_unified_popup_dialog(
                 ft.Container(closest_btn, col=4),
             ], spacing=1, expand=True),
             ft.Divider(thickness=1, height=4),
-            ft.ResponsiveRow([ft.Container(area_btn, col=4), ft.Container(apply_crop_btn, col=4), ft.Container(mask_it_btn, col=4)], spacing=3, expand=True),
+            ft.ResponsiveRow([ft.Container(area_btn, col=4), ft.Container(apply_crop_btn, col=3), ft.Container(mask_it_btn, col=2), ft.Container(circle_mask_btn, col=3)], spacing=3, expand=True),
             ft.ResponsiveRow([
                 ft.Container(padding_field, col=4),
                 ft.Container(apply_clean_btn, col=8),

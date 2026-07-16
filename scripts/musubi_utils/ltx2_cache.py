@@ -80,7 +80,9 @@ class LTX2Cache:
             "--vae_dtype", vae_dtype,
             "--ltx2_mode", ltx2_mode,
             "--batch_size", str(batch_size),
-            "--vae_spatial_tile_size", "512"
+            # "--vae_spatial_tile_size", "512",
+            "--vae_temporal_tile_size", "96",
+            "--vae_temporal_tile_overlap", "24",
         ]
 
     def format_cache_latents_command(self, **kwargs) -> str:
@@ -181,7 +183,8 @@ class LTX2Cache:
         self,
         dataset_config: str,
         control_dir: str,
-        neg_cache_dir: str
+        neg_cache_dir: str,
+        pos_cache_dir: Optional[str] = None,
     ) -> str:
         """Create a temporary dataset config for caching the control folder.
 
@@ -189,9 +192,10 @@ class LTX2Cache:
             dataset_config: Path to the original dataset config
             control_dir: Path to the control folder
             neg_cache_dir: Path to the negative cache directory
+            pos_cache_dir: Path to positive cache dir (optional, used to match frame counts)
 
         Returns:
-            Path to the temporary dataset config file
+            Path to the created config file.
         """
         # Read the original dataset config
         with open(dataset_config, 'r') as f:
@@ -200,15 +204,16 @@ class LTX2Cache:
         # Get the general section (for caption extension, batch_size, etc.)
         general = orig_config.get('general', {})
 
+        first_ds = orig_config.get('datasets', [{}])[0] if 'datasets' in orig_config else {}
+
         # For slider mode, control images don't need captions
         # Create empty caption files so the dataset loader doesn't filter them out
         if os.path.exists(control_dir):
             # Track which images already have captions to avoid duplicates
             existing_captions = set()
-            if os.path.exists(control_dir):
-                caption_files = glob.glob(os.path.join(control_dir, "*.txt"))
-                for cf in caption_files:
-                    existing_captions.add(os.path.splitext(os.path.basename(cf))[0])
+            caption_files = glob.glob(os.path.join(control_dir, "*.txt"))
+            for cf in caption_files:
+                existing_captions.add(os.path.splitext(os.path.basename(cf))[0])
 
             # Create empty caption files for media that don't have them
             media_exts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.PNG', '.JPG', '.JPEG', '.WEBP', '.BMP',
@@ -255,21 +260,17 @@ class LTX2Cache:
                 'bucket_no_upscale': general.get('bucket_no_upscale', False),
             }
             # Copy video-specific settings from the first dataset in original config
-            if 'datasets' in orig_config and len(orig_config['datasets']) > 0:
-                first_ds = orig_config['datasets'][0]
-                for key in ['target_frames', 'frame_extraction', 'target_fps', 'max_frames', 'enable_mask']:
-                    if key in first_ds:
-                        control_dataset[key] = first_ds[key]
-
-        # Copy resolution and AR bucketing settings from original dataset
-        if 'datasets' in orig_config and len(orig_config['datasets']) > 0:
-            first_ds = orig_config['datasets'][0]
-            if 'resolution' in first_ds:
-                control_dataset['resolution'] = first_ds['resolution']
-            # Copy AR bucketing settings to dataset level (needed even if in general)
-            for key in ['enable_ar_bucket', 'min_ar', 'max_ar', 'num_ar_buckets']:
+            for key in ['target_frames', 'frame_extraction', 'target_fps', 'max_frames', 'enable_mask']:
                 if key in first_ds:
                     control_dataset[key] = first_ds[key]
+
+
+        # Copy resolution and AR bucketing settings from original dataset
+        if 'resolution' in first_ds:
+            control_dataset['resolution'] = first_ds['resolution']
+        for key in ['enable_ar_bucket', 'min_ar', 'max_ar', 'num_ar_buckets']:
+            if key in first_ds:
+                control_dataset[key] = first_ds[key]
 
         control_config['datasets'].append(control_dataset)
 
@@ -280,6 +281,8 @@ class LTX2Cache:
 
         logger.info(f"Created temporary control dataset config: {temp_config_path}")
         return temp_config_path
+
+
 
     # ==========================================================================
     # Batch Command Building
@@ -464,9 +467,13 @@ class LTX2Cache:
                 with open(slider_config, 'r') as f:
                     slider_cfg = toml.load(f)
 
-                neg_cache_dirs = slider_cfg.get('neg_cache_dirs', [])
-                if neg_cache_dirs:
-                    neg_cache_dir = neg_cache_dirs[0]  # Use first entry
+                neg_cache_dir = slider_cfg.get('neg_cache_dir', None)
+                pos_cache_dir = slider_cfg.get('pos_cache_dir', None)
+                if not neg_cache_dir:
+                    neg_cache_dirs = slider_cfg.get('neg_cache_dirs', [])
+                    if neg_cache_dirs:
+                        neg_cache_dir = neg_cache_dirs[0]  # Use first entry
+                if neg_cache_dir:
                     # Derive control folder path (parent of musubi_cache_negative)
                     # neg_cache_dir is like: /path/to/dataset/control/musubi_cache_negative
                     # control folder is: /path/to/dataset/control
@@ -478,7 +485,8 @@ class LTX2Cache:
                         temp_control_config = self._create_control_dataset_config(
                             dataset_config,
                             control_dir,
-                            neg_cache_dir
+                            neg_cache_dir,
+                            pos_cache_dir=pos_cache_dir,
                         )
 
                         # Build cache command for control folder
@@ -488,6 +496,7 @@ class LTX2Cache:
                             ltx2_mode=ltx2_mode
                         )
                         commands['latents_negative'] = latents_negative_cmd
+
                         logger.info(f"Added latents_negative caching for slider mode: {control_dir} -> {neg_cache_dir}")
                     else:
                         logger.warning(f"Control directory does not exist, skipping negative caching: {control_dir}")

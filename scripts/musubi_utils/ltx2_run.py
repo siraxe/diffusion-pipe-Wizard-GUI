@@ -695,7 +695,11 @@ class LTX2Run:
             cmd.append(CONFIG_FLAGS["CREPA"])
             crepa_mode = acceleration.get('crepa_mode', 'backbone')
             crepa_args = acceleration.get('crepa_args', 'student_block_idx=16 teacher_block_idx=32 lambda_crepa=0.1 tau=1.0 num_neighbors=2')
-            cmd.extend([CONFIG_FLAGS["CREPA_ARGS"], f"mode={crepa_mode} {crepa_args}"])
+            # Parse args and pass each individually (like optimizer_args)
+            cmd.append(CONFIG_FLAGS["CREPA_ARGS"])
+            cmd.append(f"mode={crepa_mode}")
+            for arg in crepa_args.split():
+                cmd.append(arg)
 
         if self.parse_bool(acceleration.get('self_flow', False)):
             cmd.append(CONFIG_FLAGS["SELF_FLOW"])
@@ -1033,6 +1037,11 @@ class LTX2Run:
         if reset_optimizer_params:
             cmd.append("--reset_optimizer_params")
 
+        # 12. Extra flags from top-level config
+        extra = config.get('extra_flags', '')
+        if extra and str(extra).strip():
+            cmd.extend(str(extra).strip().split())
+
         return cmd
 
     # NOTE: Sample prompt caching is now handled by LTX2Cache.build_all_cache_commands
@@ -1069,8 +1078,8 @@ class LTX2Run:
         i = 0
         while i < len(cmd):
             arg = cmd[i]
-            # If this is a flag that takes a value, include both on the same line
-            if i + 1 < len(cmd) and not cmd[i + 1].startswith('-'):
+            # If this is a --flag (not a bare key=value), pair it with its value
+            if arg.startswith('--') and i + 1 < len(cmd) and not cmd[i + 1].startswith('-'):
                 formatted_lines.append(f"  {arg} {cmd[i + 1]} \\")
                 i += 2
             else:

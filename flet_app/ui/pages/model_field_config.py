@@ -756,6 +756,34 @@ MODEL_CONFIG = {
             "flux_shift": True,
         },
     },
+    "krea2": {
+        "aliases": ["krea2"],
+        "show_fields": {
+            "checkpoint_path": False,
+            "diffusers_path": False,
+            "transformer_path": False,
+            "transformer_path_full": False,
+            "text_encoder_path": False,
+            "vae_path": False,
+            "llm_path": False,
+            "ckpt_path": False,
+            "clip_path": False,
+            "llama3_path": False,
+            "byt5_path": False,
+            "t5_path": False,
+            "single_file_path": False,
+            "diffusion_model": True,
+            "vae": True,
+            "text_encoders": True,
+            "shift": False,
+        },
+        "defaults": {
+            "diffusion_model": "models/krea2/krea2_raw.safetensors",
+            "vae": "models/vae/qwen_image_vae.safetensors",
+            "text_encoders": "models/text_encoders/qwen3vl_4b_bf16.safetensors",
+        },
+        "timestep_sm": "logit_normal",
+    },
 }
 
 
