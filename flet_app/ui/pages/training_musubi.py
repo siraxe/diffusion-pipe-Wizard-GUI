@@ -18,6 +18,8 @@ def get_musubi_training_settings(
     self_flow_args_ref=None,
     cts_lambda_ref=None,
     cts_lambda_args_ref=None,
+    forward_xm_ref=None,
+    forward_xm_args_ref=None,
     extra_flags_ref=None,
     audio_lr_rate_ref=None,
     sync_visibility_func=None,
@@ -44,6 +46,8 @@ def get_musubi_training_settings(
         self_flow_args_ref = ft.Ref[ft.TextField]()
     if cts_lambda_args_ref is None:
         cts_lambda_args_ref = ft.Ref[ft.TextField]()
+    if forward_xm_args_ref is None:
+        forward_xm_args_ref = ft.Ref[ft.TextField]()
 
     def on_optimizer_change(e):
         """Update learning rate when optimizer changes."""
@@ -337,6 +341,21 @@ def get_musubi_training_settings(
                                 ),
                                 col=3, expand=True,
                             ),
+                            ft.Container(
+                                content=ft.Checkbox(
+                                    label="forward_xm",
+                                    value=False,
+                                    scale=0.8,
+                                    ref=forward_xm_ref,
+                                    data="forward_xm",
+                                    tooltip="Enable forward XM (ltx2_xm_k).",
+                                    on_change=lambda e: (
+                                        setattr(forward_xm_args_ref.current, 'visible', e.control.value) if forward_xm_args_ref.current else None,
+                                        forward_xm_args_ref.current.update() if forward_xm_args_ref.current else None
+                                    ),
+                                ),
+                                col=3, expand=True,
+                            ),
                         ], spacing=6),
                         # CREPA row: mode dropdown + args (hidden by default)
                         ft.ResponsiveRow(controls=[
@@ -428,7 +447,7 @@ def get_musubi_training_settings(
                                 col=12, expand=True,
                             ),
                         ], spacing=6),
-                        # Row 4: cts_lambda_args field (hidden by default)
+                        # Row 4: cts_lambda_args and forward_xm_args fields (hidden by default)
                         ft.ResponsiveRow(controls=[
                             ft.Container(
                                 content=ft.TextField(
@@ -440,7 +459,19 @@ def get_musubi_training_settings(
                                     visible=False,
                                     expand=True,
                                 ),
-                                col=12, expand=True,
+                                col=6, expand=True,
+                            ),
+                            ft.Container(
+                                content=ft.TextField(
+                                    label="forward_xm_args",
+                                    value="2",
+                                    scale=0.8,
+                                    ref=forward_xm_args_ref,
+                                    data="forward_xm_args",
+                                    visible=False,
+                                    expand=True,
+                                ),
+                                col=6, expand=True,
                             ),
                         ], spacing=6),
                         # Extra flags row (always visible)

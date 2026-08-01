@@ -291,6 +291,10 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"cts_lambda = {'true' if cts_lambda_val else 'false'}")
     cts_lambda_args_val = _get('cts_lambda_args', 'video_driven=0.3 audio_driven=0.1')
     lines.append(f"cts_lambda_args = {_quote(cts_lambda_args_val)}")
+    forward_xm_val = _as_bool(_get('forward_xm', False))
+    lines.append(f"forward_xm = {'true' if forward_xm_val else 'false'}")
+    forward_xm_args_val = _get('forward_xm_args', '2')
+    lines.append(f"forward_xm_args = {_quote(forward_xm_args_val)}")
     lines.append("")
 
     # [data]
@@ -807,6 +811,8 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('self_flow_args', acceleration.get('self_flow_args', 'teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1'))
         _set_field_value('cts_lambda', acceleration.get('cts_lambda', False))
         _set_field_value('cts_lambda_args', acceleration.get('cts_lambda_args', 'video_driven=0.3 audio_driven=0.1'))
+        _set_field_value('forward_xm', acceleration.get('forward_xm', False))
+        _set_field_value('forward_xm_args', acceleration.get('forward_xm_args', '2'))
 
         # Checkpoints section
         checkpoints = toml_data.get('checkpoints', {})

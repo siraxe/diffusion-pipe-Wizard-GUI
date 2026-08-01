@@ -71,6 +71,10 @@ def populate_musubi_acceleration_section(toml_data: Dict, label_vals: Dict, to_b
         label_vals['cts_lambda'] = to_bool_func(acceleration.get('cts_lambda', False))
     if 'cts_lambda_args' in acceleration:
         label_vals['cts_lambda_args'] = acceleration.get('cts_lambda_args', 'video_driven=0.3 audio_driven=0.1')
+    if 'forward_xm' in acceleration:
+        label_vals['forward_xm'] = to_bool_func(acceleration.get('forward_xm', False))
+    if 'forward_xm_args' in acceleration:
+        label_vals['forward_xm_args'] = acceleration.get('forward_xm_args', '2')
 
 
 # =============================================================================

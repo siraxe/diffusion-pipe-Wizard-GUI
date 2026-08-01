@@ -193,6 +193,7 @@ CONFIG_FLAGS = {
     "SELF_FLOW_ARGS": "--self_flow_args",
     "CTS_LAMBDA_VIDEO_DRIVEN": "--cts_lambda_video_driven",
     "CTS_LAMBDA_AUDIO_DRIVEN": "--cts_lambda_audio_driven",
+    "FORWARD_XM_K": "--ltx2_xm_k",
     "AUDIO_LOSS_BALANCE_MODE": "--audio_loss_balance_mode",
     "AUDIO_LOSS_BALANCE_TARGET_RATIO": "--audio_loss_balance_target_ratio",
     "AUDIO_LOSS_BALANCE_EMA_DECAY": "--audio_loss_balance_ema_decay",
@@ -725,6 +726,10 @@ class LTX2Run:
                                 cmd.extend([CONFIG_FLAGS["CTS_LAMBDA_AUDIO_DRIVEN"], str(val)])
                     except ValueError:
                         logger.warning(f"Could not parse cts_lambda arg: {arg}")
+
+        if self.parse_bool(acceleration.get('forward_xm', False)):
+            forward_xm_k = acceleration.get('forward_xm_args', '2')
+            cmd.extend([CONFIG_FLAGS["FORWARD_XM_K"], str(forward_xm_k)])
 
         return cmd
 
