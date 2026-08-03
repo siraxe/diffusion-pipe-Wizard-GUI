@@ -13,6 +13,8 @@ Modules:
 from .ltx2_cache import LTX2Cache
 from .ltx2_run import LTX2Run
 from .wan22_cache import WAN22Cache
+from .mmh3_cache import MMH3Cache
+from .mmh3_run import MMH3Run
 
 # Import utility functions from original musubi_utils
 try:
@@ -33,7 +35,7 @@ except ImportError:
                 return state_dirs[0][1]
         return None
 
-__all__ = ['LTX2Cache', 'LTX2Run', 'WAN22Cache', 'find_last_state_directory']
+__all__ = ['LTX2Cache', 'LTX2Run', 'WAN22Cache', 'MMH3Cache', 'MMH3Run', 'find_last_state_directory']
 
 # Model type registry - maps model identifiers to their handler classes
 MODEL_HANDLERS = {
@@ -41,6 +43,9 @@ MODEL_HANDLERS = {
     'ltx2': ('LTX2Cache', 'LTX2Run'),
     'wan22': ('WAN22Cache', 'LTX2Run'),  # Run handler not implemented yet
     'wan2.2': ('WAN22Cache', 'LTX2Run'),
+    'minimaxh3': ('MMH3Cache', 'MMH3Run'),  # Cache handler now wired; run handler is build+print only
+    'minimax-h3': ('MMH3Cache', 'MMH3Run'),
+    'mmh3': ('MMH3Cache', 'MMH3Run'),
 }
 
 

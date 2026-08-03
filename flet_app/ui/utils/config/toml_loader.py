@@ -46,7 +46,7 @@ def populate_model_section(toml_data: dict, label_vals: dict) -> None:
     if 'timestep_sample_method' in model:
         ts_method = model.get('timestep_sample_method')
         trainer = str(label_vals.get('Trainer', '')).lower() if 'Trainer' in label_vals else ''
-        is_musubi = str(normalized_type).lower() in ('_wan22', 'ltx-video-2', 'ltx2') and trainer == 'musubi'
+        is_musubi = str(normalized_type).lower() in ('_wan22', 'ltx-video-2', 'ltx2', 'minimaxh3') and trainer == 'musubi'
 
         if is_musubi and ts_method == 'logit_normal':
             ts_method = 'shifted_logit_normal'
@@ -611,7 +611,7 @@ def update_ui_from_toml(container: Any, toml_data: dict) -> None:
         trainer = model.get('trainer', '')
         model_type = model.get('type', '')
         is_musubi = (trainer == 'musubi' or
-                     any(m in str(model_type).lower() for m in ['ltx-video-2', 'ltx2', 'wan22', 'wan']))
+                     any(m in str(model_type).lower() for m in ['ltx-video-2', 'ltx2', 'wan22', 'wan', 'minimaxh3']))
         if is_musubi:
             from flet_app.ui.utils.config_utils_musubi import update_musubi_ui_from_toml
             update_musubi_ui_from_toml(container, toml_data)

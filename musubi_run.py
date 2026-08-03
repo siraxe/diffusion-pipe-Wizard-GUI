@@ -15,6 +15,7 @@ class MusubiRun:
     MODEL_PATTERNS = {
         'ltx-video-2': ['ltx-video-2', 'ltx2', 'ltx-video'],
         'wan22': ['wan', 'wan22', 'wan-2.2', 'wan2.2', 'wan-a14b', 'wan-a14b-i2v'],
+        'minimaxh3': ['minimaxh3', 'minimax-h3', 'minimax_h3', 'mmh3'],
     }
 
     def __init__(self, project_root: Optional[str] = None):
@@ -94,6 +95,13 @@ class MusubiRun:
                 from musubi_utils.wan22_run import WAN22Run
                 self.cache_handler = WAN22Cache(str(self.project_root))
                 self.run_handler = WAN22Run(str(self.project_root))
+            elif self.model_type == 'minimaxh3':
+                # Cache commands are built by MMH3Cache (same shape as LTX2Cache).
+                # The run handler is still build+print only — training isn't executed yet.
+                from musubi_utils.mmh3_cache import MMH3Cache
+                from musubi_utils.mmh3_run import MMH3Run
+                self.cache_handler = MMH3Cache(str(self.project_root))
+                self.run_handler = MMH3Run(str(self.project_root))
             else:
                 raise ValueError(f"No handler available for model type: {self.model_type}")
         except ImportError as e:

@@ -128,6 +128,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     ltx_mode = 'video'  # default
     # target_fps from last_config.toml [training_strategy] section
     target_fps = 25.0  # default
+    model_type_lower = ''
     if last_config_path and os.path.exists(last_config_path):
         try:
             with open(last_config_path, 'r') as f:
@@ -137,11 +138,17 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 use_mask = config.get('training_strategy', {}).get('use_mask', False)
                 ltx_mode = config.get('training_strategy', {}).get('ltx_mode', 'video')
                 target_fps = float(config.get('training_strategy', {}).get('target_fps', 25))
+                model_type_lower = str(config.get('model', {}).get('type', '')).lower()
                 # Handle boolean conversion from string
                 if not isinstance(use_mask, bool):
                     use_mask = str(use_mask).lower() in ['true', '1', 'yes', 'on']
         except Exception:
             pass
+
+    # H3's dataset schema (musubi_tuner.dataset.config_utils.VIDEO_DATASET_DISTINCT_SCHEMA)
+    # does not accept target_fps or max_frames — H3 fixes fps at 24 internally and derives
+    # frame limits from its 17k+5 grid. Skip them when building for H3.
+    is_h3 = 'minimax' in model_type_lower and 'h3' in model_type_lower
 
     # Check t_type dropdown value (replaces slider/ic_lora/vace_lora checkboxes)
     t_type = 'none'
@@ -251,14 +258,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 'bucket_no_upscale': False,
             }
 
-            # Only add AR bucketing parameters for non-audio datasets
-            if dir_dataset_type != 'audio':
-                dataset_config.update({
-                    'enable_ar_bucket': dir_enable_ar_bucket,
-                    'min_ar': dir_min_ar,
-                    'max_ar': dir_max_ar,
-                    'num_ar_buckets': dir_num_ar_buckets,
-                })
+            # AR bucketing params (enable_ar_bucket/min_ar/max_ar/num_ar_buckets)
+            # are written only at [general] level — musubi-tuner schema rejects
+            # them inside [[datasets]] entries.
 
             # Set directory type based on detected content
             if dir_dataset_type == 'image':
@@ -271,10 +273,11 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 dataset_config['frame_extraction'] = dir_frame_extraction
                 if dir_frame_extraction == 'slide':
                     dataset_config['frame_stride'] = dir_frame_stride
-                dataset_config['target_fps'] = target_fps
-                # Automatically set max_frames to the largest value in target_frames
-                if dir_frame_buckets:
-                    dataset_config['max_frames'] = max(dir_frame_buckets)
+                if not is_h3:
+                    dataset_config['target_fps'] = target_fps
+                    # Automatically set max_frames to the largest value in target_frames
+                    if dir_frame_buckets:
+                        dataset_config['max_frames'] = max(dir_frame_buckets)
                 # Add control_args if present (for i2v preprocessing)
                 if dir_control_args is not None:
                     dataset_config['control_args'] = dir_control_args
@@ -518,11 +521,6 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
         lines.append(f"cache_directory = \"{dataset['cache_directory']}\"")
         lines.append(f"num_repeats = {dataset['num_repeats']}")
         lines.append(f"enable_bucket = {str(dataset.get('enable_bucket', False)).lower()}")
-        if dataset.get('enable_ar_bucket', False):
-            lines.append(f"enable_ar_bucket = {str(dataset['enable_ar_bucket']).lower()}")
-            lines.append(f"min_ar = {dataset.get('min_ar', 0.5)}")
-            lines.append(f"max_ar = {dataset.get('max_ar', 2.0)}")
-            lines.append(f"num_ar_buckets = {dataset.get('num_ar_buckets', 7)}")
         lines.append(f"bucket_no_upscale = {str(dataset.get('bucket_no_upscale', False)).lower()}")
 
         # Add blank line between datasets for readability

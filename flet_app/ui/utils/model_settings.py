@@ -247,6 +247,19 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         if _has(llm_adapter_lr):
             lines.append(f"llm_adapter_lr = {llm_adapter_lr}")
 
+    # minimaxh3: dit checkpoint, audio VAE, and tokenizer/processor directory
+    if mt == 'minimaxh3':
+        model_path = get_value('model_path', None)
+        if _has(model_path):
+            lines.append(f"model_path = '{expand_model_path(str(model_path))}'")
+        vae_audio_path = get_value('vae_audio_path', None)
+        if _has(vae_audio_path):
+            lines.append(f"vae_audio_path = '{expand_model_path(str(vae_audio_path))}'")
+        tokenizer_path = get_value('tokenizer_path', None)
+        if _has(tokenizer_path):
+            lines.append(f"tokenizer_path = '{expand_model_path(str(tokenizer_path))}'")
+
+
 
 def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
     """Populate label_vals from [model] dict and return normalized model_type string.
@@ -297,6 +310,13 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
             label_vals['max_t'] = model_dict.get('max_t')
         if 'ckpt_path' in model_dict:
             label_vals['ckpt_path'] = collapse_model_path(model_dict.get('ckpt_path'))
+    elif mt_lower == 'minimaxh3':
+        if 'model_path' in model_dict:
+            label_vals['model_path'] = collapse_model_path(model_dict.get('model_path'))
+        if 'vae_audio_path' in model_dict:
+            label_vals['vae_audio_path'] = collapse_model_path(model_dict.get('vae_audio_path'))
+        if 'tokenizer_path' in model_dict:
+            label_vals['tokenizer_path'] = collapse_model_path(model_dict.get('tokenizer_path'))
     elif mt_lower == 'auraflow':
         if 'max_sequence_length' in model_dict:
             label_vals['max_sequence_length'] = model_dict.get('max_sequence_length')

@@ -437,7 +437,7 @@ def get_musubi_training_settings(
                             ft.Container(
                                 content=ft.TextField(
                                     label="self_flow_args",
-                                    value="teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1",
+                                    value="student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.8 mask_ratio=0.1 teacher_momentum=0.9999 dual_timestep=true",
                                     scale=0.8,
                                     ref=self_flow_args_ref,
                                     data="self_flow_args",

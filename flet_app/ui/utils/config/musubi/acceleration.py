@@ -66,7 +66,7 @@ def populate_musubi_acceleration_section(toml_data: Dict, label_vals: Dict, to_b
     if 'self_flow' in acceleration:
         label_vals['self_flow'] = to_bool_func(acceleration.get('self_flow', False))
     if 'self_flow_args' in acceleration:
-        label_vals['self_flow_args'] = acceleration.get('self_flow_args', 'teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1')
+        label_vals['self_flow_args'] = acceleration.get('self_flow_args', 'student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.8 mask_ratio=0.1 teacher_momentum=0.9999 dual_timestep=true')
     if 'cts_lambda' in acceleration:
         label_vals['cts_lambda'] = to_bool_func(acceleration.get('cts_lambda', False))
     if 'cts_lambda_args' in acceleration:

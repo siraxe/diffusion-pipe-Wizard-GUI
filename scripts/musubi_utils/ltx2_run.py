@@ -704,7 +704,7 @@ class LTX2Run:
 
         if self.parse_bool(acceleration.get('self_flow', False)):
             cmd.append(CONFIG_FLAGS["SELF_FLOW"])
-            self_flow_args = acceleration.get('self_flow_args', 'teacher_mode=base student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.1')
+            self_flow_args = acceleration.get('self_flow_args', 'student_block_ratio=0.3 teacher_block_ratio=0.7 lambda_self_flow=0.8 mask_ratio=0.1 teacher_momentum=0.9999 dual_timestep=true')
             # Parse args and pass each individually (like optimizer_args)
             for arg in self_flow_args.split():
                 cmd.append(CONFIG_FLAGS["SELF_FLOW_ARGS"])

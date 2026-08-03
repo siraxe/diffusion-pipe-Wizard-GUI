@@ -41,6 +41,8 @@ transformer_path_field_ref = ft.Ref[ft.TextField]()
 transformer_path_full_ref = ft.Ref[ft.TextField]()
 text_encoder_path_field_ref = ft.Ref[ft.TextField]()
 vae_path_field_ref = ft.Ref[ft.TextField]()
+vae_audio_path_field_ref = ft.Ref[ft.TextField]()
+tokenizer_path_field_ref = ft.Ref[ft.TextField]()
 ckpt_path_field_ref = ft.Ref[ft.TextField]()
 llm_path_field_ref = ft.Ref[ft.TextField]()
 float8_e5m2_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -85,6 +87,7 @@ mixed_precision_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 fp8_base_checkbox_ref = ft.Ref[ft.Checkbox]()
 fp8_scaled_checkbox_ref = ft.Ref[ft.Checkbox]()
 load_text_encoder_in_8bit_checkbox_ref = ft.Ref[ft.Checkbox]()
+nf4_te_checkbox_ref = ft.Ref[ft.Checkbox]()
 attn_chunking_checkbox_ref = ft.Ref[ft.Checkbox]()
 # Preservation & regularization fields
 blank_preservation_checkbox_ref = ft.Ref[ft.Checkbox]()
@@ -251,6 +254,22 @@ def _on_ltx_mode_change(e):
             audio_lr_rate_ref.current.page.update()
 
 
+def _on_8bit_te_change(e):
+    """8_bit_te and nf4_te are mutually exclusive quantization modes for H3."""
+    if e.control.value and nf4_te_checkbox_ref and nf4_te_checkbox_ref.current:
+        nf4_te_checkbox_ref.current.value = False
+        if nf4_te_checkbox_ref.current.page:
+            nf4_te_checkbox_ref.current.page.update()
+
+
+def _on_nf4_te_change(e):
+    """8_bit_te and nf4_te are mutually exclusive quantization modes for H3."""
+    if e.control.value and load_text_encoder_in_8bit_checkbox_ref and load_text_encoder_in_8bit_checkbox_ref.current:
+        load_text_encoder_in_8bit_checkbox_ref.current.value = False
+        if load_text_encoder_in_8bit_checkbox_ref.current.page:
+            load_text_encoder_in_8bit_checkbox_ref.current.page.update()
+
+
 def sync_dependent_field_visibility():
     """
     Centralized function to sync visibility of all dependent fields based on their checkbox states.
@@ -393,6 +412,8 @@ def get_training_config_page_content():
             "transformer_path_full": transformer_path_full_ref,
             "text_encoder_path": text_encoder_path_field_ref,
             "vae_path": vae_path_field_ref,
+            "vae_audio_path": vae_audio_path_field_ref,
+            "tokenizer_path": tokenizer_path_field_ref,
             "llm_path": llm_path_field_ref,
             "ckpt_path": ckpt_path_field_ref,
             "clip_path": clip_path_field_ref,
@@ -430,6 +451,7 @@ def get_training_config_page_content():
             "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
             "ltx_2_3": ltx_2_3_checkbox_ref,
             "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
+            "nf4_te": nf4_te_checkbox_ref,
             "t_type": t_type_dropdown_ref,
             "flash_attn": flash_attn_checkbox_ref,
             "use_mask": use_mask_checkbox_ref,
@@ -495,6 +517,8 @@ def get_training_config_page_content():
             "transformer_path_full": transformer_path_full_ref,
             "text_encoder_path": text_encoder_path_field_ref,
             "vae_path": vae_path_field_ref,
+            "vae_audio_path": vae_audio_path_field_ref,
+            "tokenizer_path": tokenizer_path_field_ref,
             "llm_path": llm_path_field_ref,
             "ckpt_path": ckpt_path_field_ref,
             "clip_path": clip_path_field_ref,
@@ -596,6 +620,8 @@ def get_training_config_page_content():
                           if "ltx-video-2" in k.lower()}
             # Add _wan22 as a separate entry for musubi trainer
             musubi_models["_wan22"] = "_wan22"
+            # Add minimaxH3 as a separate entry for musubi trainer
+            musubi_models["minimaxH3"] = "minimaxH3"
             if musubi_models:
                 # Update options to show only musubi models
                 model_type_dropdown_ref.current.options = [
@@ -611,9 +637,9 @@ def get_training_config_page_content():
                 if model_type_dropdown_ref.current.on_change:
                     model_type_dropdown_ref.current.on_change(e)
         else:  # diffusion-pipe
-            # Show all models except ltx-video-2 and _wan22 (those are musubi-only)
+            # Show all models except ltx-video-2, _wan22, and minimaxH3 (those are musubi-only)
             dpipe_models = {k: v for k, v in settings.dpipe_model_dict.items()
-                          if "ltx-video-2" not in k.lower() and k != "_wan22"}
+                          if "ltx-video-2" not in k.lower() and k != "_wan22" and k != "minimaxH3"}
             # Update options to show diffusion-pipe models
             model_type_dropdown_ref.current.options = [
                 ft.dropdown.Option(key=k, text=v) for k, v in dpipe_models.items()
@@ -750,6 +776,8 @@ def get_training_config_page_content():
                 "llm_path": llm_path_field_ref,
                 "text_encoder_path": text_encoder_path_field_ref,
                 "vae_path": vae_path_field_ref,
+            "vae_audio_path": vae_audio_path_field_ref,
+            "tokenizer_path": tokenizer_path_field_ref,
                 "ckpt_path": ckpt_path_field_ref,
                 "clip_path": clip_path_field_ref,
                 "llama3_path": llama3_path_field_ref,
@@ -1016,6 +1044,7 @@ def get_training_config_page_content():
                     ft.ResponsiveRow(
                         controls=[
                             create_textfield("text_encoder_path", "", col=6, expand=True, ref=text_encoder_path_field_ref, visible=_should_show_field("text_encoder_path")),
+                            create_textfield("tokenizer_path", "", col=6, expand=True, ref=tokenizer_path_field_ref, visible=_should_show_field("tokenizer_path")),
                         ], spacing=2,
                         ref=text_encoder_row_ref,
                         visible=True
@@ -1183,7 +1212,10 @@ def get_training_config_page_content():
                     ], spacing=2),
                     ft.ResponsiveRow(controls=[
                         create_textfield("vae_path", "", col=6, expand=True, ref=vae_path_field_ref, visible=_should_show_field("vae_path")),
-                        create_textfield("llm_adapter_lr", "", col=6, expand=True, ref=llm_adapter_lr_field_ref, visible=_should_show_field("llm_adapter_lr")),
+                        create_textfield("vae_audio_path", "", col=6, expand=True, ref=vae_audio_path_field_ref, visible=_should_show_field("vae_audio_path")),
+                ], spacing=2),
+                    ft.ResponsiveRow(controls=[
+                        create_textfield("llm_adapter_lr", "", col=12, expand=True, ref=llm_adapter_lr_field_ref, visible=_should_show_field("llm_adapter_lr")),
                 ], spacing=2),
                     ft.ResponsiveRow(controls=[
                         create_textfield(
@@ -1245,6 +1277,17 @@ def get_training_config_page_content():
                             ref=load_text_encoder_in_8bit_checkbox_ref,
                             visible=True,
                             data="8_bit_te",
+                            on_change=_on_8bit_te_change,
+                            col=3,
+                        ),
+                        ft.Checkbox(
+                            label="nf4_te",
+                            value=False,
+                            scale=0.8,
+                            ref=nf4_te_checkbox_ref,
+                            visible=_should_show_field("nf4_te"),
+                            data="nf4_te",
+                            on_change=_on_nf4_te_change,
                             col=3,
                         ),
                     ], spacing=2),
@@ -1727,9 +1770,10 @@ def get_training_config_page_content():
     if trainer_dropdown_ref and trainer_dropdown_ref.current and model_type_dropdown_ref and model_type_dropdown_ref.current:
         default_trainer = trainer_dropdown_ref.current.value
         if default_trainer == "musubi":
-            # Show ltx-video-2 and wan22 models
+            # Show ltx-video-2, wan22, and minimaxH3 models
             musubi_models = {k: v for k, v in settings.dpipe_model_dict.items()
                           if "ltx-video-2" in k.lower() or "wan22" in k.lower()}
+            musubi_models["minimaxH3"] = "minimaxH3"
             if musubi_models:
                 model_type_dropdown_ref.current.options = [
                     ft.dropdown.Option(key=k, text=v) for k, v in musubi_models.items()
@@ -1968,6 +2012,7 @@ def update_musubi_fields_visibility(
         "separate_audio_buckets": separate_audio_buckets_checkbox_ref,
         "gradient_checkpointing": gradient_checkpointing_checkbox_ref,
         "8_bit_te": load_text_encoder_in_8bit_checkbox_ref,
+        "nf4_te": nf4_te_checkbox_ref,
         "t_type": t_type_dropdown_ref,
         "flash_attn": flash_attn_checkbox_ref,
         "use_mask": use_mask_checkbox_ref,

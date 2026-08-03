@@ -151,7 +151,7 @@ def build_model_section(lines: List[str], cfg: Dict, _get: callable) -> None:
             lines.append(f"checkpoint_path = {quote(ckpt)}")
 
     # Base model paths (skip for SDXL and LTX)
-    skip_path_models = ('sdxl', 'ltx-video', 'ltx', 'ltx-video-2')
+    skip_path_models = ('sdxl', 'ltx-video', 'ltx', 'ltx-video-2', 'minimaxh3')
     if mt_lower not in skip_path_models:
         diff_path = _get('diffusers_path', None)
         if diff_path and str(diff_path).strip():
@@ -177,7 +177,7 @@ def build_model_section(lines: List[str], cfg: Dict, _get: callable) -> None:
         lines.append(f"{dtype_field} = {quote(t_dtype)}")
 
     # timestep_sample_method
-    is_musubi_model = mt_lower in ('_wan22', 'ltx-video-2', 'ltx2') and trainer == 'musubi'
+    is_musubi_model = mt_lower in ('_wan22', 'ltx-video-2', 'ltx2', 'minimaxh3') and trainer == 'musubi'
     if is_musubi_model:
         _tsm = _get('timestep_sm_m', None)
         if not _tsm or not str(_tsm).strip():
@@ -501,7 +501,7 @@ def build_toml_config_from_ui(container: Any) -> str:
     # Musubi acceleration section
     model_type = str(cfg.get('Model Type', '')).lower() if cfg.get('Model Type') else ''
     trainer = str(cfg.get('Trainer', '')).lower() if cfg.get('Trainer') else ''
-    is_musubi = trainer == 'musubi' or model_type in ('ltx-video-2', 'ltx2', 'wan22', 'wan', '_wan22')
+    is_musubi = trainer == 'musubi' or model_type in ('ltx-video-2', 'ltx2', 'wan22', 'wan', '_wan22', 'minimaxh3')
 
     if is_musubi:
         try:
