@@ -187,15 +187,30 @@ class MMH3Run:
         if self.parse_bool(acceleration.get("fp8_base", False)):
             cmd.append("--fp8_base")
 
-        blocks_to_swap = int(optimization.get("blocks_to_swap", acceleration.get("blocks_to_swap", 0)) or 0)
+        # blocks_to_swap may live in [optimization], [acceleration], or top-level
+        # (the UI writes it at top level). H3 LoRA training always freezes the
+        # base transformer, so H2D-only + pinned memory are always valid here and
+        # strongly recommended by the docs.
+        blocks_to_swap = int(
+            optimization.get("blocks_to_swap")
+            or acceleration.get("blocks_to_swap")
+            or config.get("blocks_to_swap")
+            or 0
+        )
         if blocks_to_swap > 0:
             cmd.extend(["--blocks_to_swap", str(blocks_to_swap)])
-            if self.parse_bool(acceleration.get("block_swap_h2d_only", False)):
-                cmd.append("--block_swap_h2d_only")
-                ring_size = int(acceleration.get("block_swap_ring_size", 2) or 2)
-                cmd.extend(["--block_swap_ring_size", str(ring_size)])
-                if self.parse_bool(acceleration.get("use_pinned_memory_for_block_swap", True)):
-                    cmd.append("--use_pinned_memory_for_block_swap")
+            cmd.append("--block_swap_h2d_only")
+            ring_size = int(acceleration.get("block_swap_ring_size", 2) or 2)
+            cmd.extend(["--block_swap_ring_size", str(ring_size)])
+            if self.parse_bool(acceleration.get("use_pinned_memory_for_block_swap", True)):
+                cmd.append("--use_pinned_memory_for_block_swap")
+            # Granularity: block mode maxes at 48 of 50 (needs 2 resident for ring
+            # overlap); layer mode can offload all 50 via individual Linear weights.
+            # Default to block (faster) unless N > 48 forces layer, or the user
+            # explicitly opts in via acceleration.block_swap_granularity = "layer".
+            granularity = str(self._get(acceleration, "block_swap_granularity", "block")).lower()
+            if granularity == "layer" or blocks_to_swap > 48:
+                cmd.extend(["--block_swap_granularity", "layer"])
 
         # H3-specific training mode (default fl2va; ref2va is rejected by the backend)
         h3_mode = self._get(training_strategy, "h3_training_mode", DEFAULTS["h3_training_mode"])
@@ -212,7 +227,7 @@ class MMH3Run:
         rank = self._get(lora, "rank", DEFAULTS["rank"])
         alpha = self._get(lora, "alpha", DEFAULTS["alpha"])
         cmd.extend([
-            "--network_module", "networks.lora",
+            "--network_module", "networks.lora_minimax_h3",
             "--network_dim", str(rank),
             "--network_alpha", str(alpha),
         ])
@@ -245,6 +260,12 @@ class MMH3Run:
                 str(self._get(optimization, "gradient_accumulation_steps", DEFAULTS["gradient_accumulation_steps"])),
         ])
 
+        # Warmup steps — required when scheduler is constant_with_warmup / cosine_with_warmup
+        scheduler = str(self._get(optimization, "scheduler_type", DEFAULTS["scheduler_type"]))
+        if "warmup" in scheduler:
+            lr_warmup_steps = int(optimization.get("lr_warmup_steps", 50) or 50)
+            cmd.extend(["--lr_warmup_steps", str(lr_warmup_steps)])
+
         max_grad_norm = self._get(optimization, "max_grad_norm", DEFAULTS["max_grad_norm"])
         try:
             if float(max_grad_norm) > 0:
@@ -252,24 +273,41 @@ class MMH3Run:
         except (TypeError, ValueError):
             pass
 
-        # Max train steps/epochs + save_every
+        # Max train steps/epochs + save_every + save_state + keep_last_n
         ckpt_mode = checkpoints.get("mode", "steps")
         interval = int(checkpoints.get("interval", 50) or 50)
         steps_or_epochs = int(optimization.get("max_steps", optimization.get("max_train_epochs", 10)) or 10)
+        keep_last_n = int(checkpoints.get("keep_last_n", -1) or -1)
+        if self.parse_bool(checkpoints.get("save_state", False)):
+            cmd.append("--save_state")
         if ckpt_mode == "epochs":
             cmd.extend([
                 "--max_train_epochs", str(steps_or_epochs),
                 "--save_every_n_epochs", str(interval),
             ])
+            if keep_last_n > 0:
+                cmd.extend(["--save_last_n_epochs", str(keep_last_n)])
         else:
             cmd.extend([
                 "--max_train_steps", str(steps_or_epochs),
                 "--save_every_n_steps", str(interval),
             ])
+            if keep_last_n > 0:
+                cmd.extend(["--save_last_n_steps", str(keep_last_n)])
 
-        # Output
-        output_dir = self._get(model, "output_dir", DEFAULTS["output_dir"])
-        output_name = self._get(model, "output_name", DEFAULTS["output_name"])
+        # Output dir/name may live at top level (where the UI writes them) or
+        # inside [model]. Prefer top-level, then model, then default.
+        output_dir = (
+            config.get("output_dir")
+            or model.get("output_dir")
+            or DEFAULTS["output_dir"]
+        )
+        output_name = (
+            config.get("output_name")
+            or model.get("output_name")
+            or model.get("name")
+            or DEFAULTS["output_name"]
+        )
         cmd.extend([
             "--output_dir", str(output_dir),
             "--output_name", str(output_name),

@@ -463,56 +463,6 @@ async def run_ltx2_training_flow(
     runner = create_runner(last_config_path)
     dataset_config = musubi_config_path
 
-    # Special case: minimaxh3.
-    # cache_only mode flows through the standard run_cache_commands path (which
-    # uses MMH3Cache just like LTX2Cache). For full/trust_cache modes we still
-    # only print commands — training execution for H3 is not wired yet.
-    if runner.model_type == 'minimaxh3' and mode != 'cache_only':
-        from musubi_utils.mmh3_run import MMH3Run
-        mmh3 = MMH3Run(str(runner.project_root))
-        config = runner.config
-        model_cfg = config.get('model', {})
-
-        add_info_message(training_console_text,
-            "\n[Info] MiniMax H3 — print-only mode. Commands are shown below but NOT executed.\n")
-
-        # Cache latents
-        add_info_message(training_console_text, "\n=== MiniMax H3 — cache latents ===\n")
-        vae_path = model_cfg.get('vae_path', '')
-        vae_audio_path = model_cfg.get('vae_audio_path', '')
-        if vae_path and vae_audio_path:
-            cmd = mmh3.build_cache_latents_command(dataset_config, vae_path, vae_audio_path)
-            add_info_message(training_console_text, "\n" + mmh3.format_command(cmd) + "\n")
-        else:
-            add_info_message(training_console_text,
-                "\n[skipped] vae_path and vae_audio_path are required for latent caching\n")
-
-        # Cache text encoder
-        add_info_message(training_console_text, "\n=== MiniMax H3 — cache text encoder ===\n")
-        text_encoder_path = model_cfg.get('text_encoder_path', '')
-        tokenizer_path = model_cfg.get('tokenizer_path', '')
-        # 8_bit_te / nf4_te are mutually exclusive; nf4 wins if both somehow set.
-        quantization = "nf4" if config.get('nf4_te') else ("int8" if config.get('8_bit_te') else "none")
-        if text_encoder_path and tokenizer_path:
-            cmd = mmh3.build_cache_text_encoder_command(
-                dataset_config, text_encoder_path, tokenizer_path,
-                text_encoder_quantization=quantization,
-            )
-            add_info_message(training_console_text, "\n" + mmh3.format_command(cmd) + "\n")
-        else:
-            missing = [n for n, v in [('text_encoder_path', text_encoder_path), ('tokenizer_path', tokenizer_path)] if not v]
-            add_info_message(training_console_text,
-                f"\n[skipped] missing required path(s): {', '.join(missing)}\n")
-
-        # Train network
-        add_info_message(training_console_text, "\n=== MiniMax H3 — train network ===\n")
-        train_cmd = mmh3.build_training_command(config, dataset_config)
-        add_info_message(training_console_text, "\n" + mmh3.format_command(train_cmd) + "\n")
-
-        if training_console_text is not None and training_console_text.page is not None:
-            training_console_text.update()
-        return
-
     # Check if training is supported for this model
     if not runner.run_handler:
         add_info_message(training_console_text, f"\n[Info] Training not implemented for {runner.model_type} yet\n")

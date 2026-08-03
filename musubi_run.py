@@ -96,8 +96,6 @@ class MusubiRun:
                 self.cache_handler = WAN22Cache(str(self.project_root))
                 self.run_handler = WAN22Run(str(self.project_root))
             elif self.model_type == 'minimaxh3':
-                # Cache commands are built by MMH3Cache (same shape as LTX2Cache).
-                # The run handler is still build+print only — training isn't executed yet.
                 from musubi_utils.mmh3_cache import MMH3Cache
                 from musubi_utils.mmh3_run import MMH3Run
                 self.cache_handler = MMH3Cache(str(self.project_root))

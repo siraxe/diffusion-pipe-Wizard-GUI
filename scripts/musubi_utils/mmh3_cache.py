@@ -149,9 +149,10 @@ class MMH3Cache:
         text_encoder_path = self._get(model, "text_encoder_path", "")
         tokenizer_path = self._get(model, "tokenizer_path", "")
 
-        # task maps to h3_training_mode (default fl2va; ref2va is rejected by the backend at train time,
-        # but the cache script accepts both for conditioning layout).
-        task = self._get(training_strategy, "h3_training_mode", "fl2va")
+        # The H3 trainer only accepts text-only T2VA conditioning regardless of
+        # h3_training_mode (fl2va training still uses the t2va text path; ref2va
+        # is rejected by the backend). Cache task is therefore always t2va.
+        task = "t2va"
 
         quantization = self._resolve_quantization(config)
 

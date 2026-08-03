@@ -43,7 +43,7 @@ MODEL_HANDLERS = {
     'ltx2': ('LTX2Cache', 'LTX2Run'),
     'wan22': ('WAN22Cache', 'LTX2Run'),  # Run handler not implemented yet
     'wan2.2': ('WAN22Cache', 'LTX2Run'),
-    'minimaxh3': ('MMH3Cache', 'MMH3Run'),  # Cache handler now wired; run handler is build+print only
+    'minimaxh3': ('MMH3Cache', 'MMH3Run'),
     'minimax-h3': ('MMH3Cache', 'MMH3Run'),
     'mmh3': ('MMH3Cache', 'MMH3Run'),
 }
