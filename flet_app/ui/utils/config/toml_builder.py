@@ -514,6 +514,14 @@ def build_toml_config_from_ui(container: Any) -> str:
         except ImportError:
             pass
 
+        # [training_strategy] h3_training_mode for MiniMax H3 only
+        if is_musubi and 'minimax' in model_type.lower() and 'h3' in model_type.lower():
+            lines.append("")
+            lines.append("[training_strategy]")
+            h3_mode = _get('h3_training_mode', 'fl2va')
+            if h3_mode:
+                lines.append(f"h3_training_mode = {quote(str(h3_mode))}")
+
         # Musubi [lora] section — read rank/alpha from the musubi UI fields
         # (rank/alpha), not the diffusion-pipe a_rank/a_alpha fields.
         lines.append("")

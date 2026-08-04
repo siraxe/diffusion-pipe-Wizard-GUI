@@ -58,6 +58,7 @@ def is_wan_model(model_type: str) -> bool:
 # Internal UI label -> TOML key mappings
 FIELD_TO_TOML_MAPPINGS: Dict[str, str] = {
     'grad_accum_steps': 'gradient_accumulation_steps',
+    'H3 mode': 'h3_training_mode',
 }
 
 # TOML key -> Internal UI label mappings
@@ -84,7 +85,7 @@ def get_ui_label(toml_key: str) -> str:
 ALWAYS_INCLUDE_FIELDS: Set[str] = {
     'optimizer_type', 'optimizer_type_m', 'grad_accum_steps', 'lr', 'betas',
     'weight_decay', 'eps', 'beta3', 'd0', 'd_coef', 'schedulefree_c',
-    'optimizer_args', 'factor'
+    'optimizer_args', 'factor', 'h3_training_mode'
 }
 
 

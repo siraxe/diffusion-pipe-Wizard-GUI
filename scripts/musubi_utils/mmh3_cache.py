@@ -73,7 +73,7 @@ class MMH3Cache:
         dataset_config: str,
         vae: str,
         audio_vae: str,
-        batch_size: int = 1,
+        batch_size: int = 2,
         device: str = "cuda",
     ) -> List[str]:
         """minimax_h3_cache_latents.py --dataset_config --vae --audio_vae"""
@@ -149,10 +149,8 @@ class MMH3Cache:
         text_encoder_path = self._get(model, "text_encoder_path", "")
         tokenizer_path = self._get(model, "tokenizer_path", "")
 
-        # The H3 trainer only accepts text-only T2VA conditioning regardless of
-        # h3_training_mode (fl2va training still uses the t2va text path; ref2va
-        # is rejected by the backend). Cache task is therefore always t2va.
-        task = "t2va"
+        # Use h3_training_mode from config to determine cache task type
+        task = self._get(training_strategy, "h3_training_mode", "fl2va")
 
         quantization = self._resolve_quantization(config)
 

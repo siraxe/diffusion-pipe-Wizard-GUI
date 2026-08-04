@@ -380,10 +380,15 @@ class MMH3Run:
 
         # ------------------------------------------------------------------
         # H3-specific training mode
+        # Map 'i2va' to 'fl2va' (same checkpoint, different conditioning packing)
         # ------------------------------------------------------------------
         h3_mode = self._get(training_strategy, "h3_training_mode", DEFAULTS["h3_training_mode"])
         if h3_mode:
-            cmd.extend(["--h3_training_mode", str(h3_mode).strip()])
+            h3_mode_str = str(h3_mode).strip().lower()
+            # i2va uses the same FL2VA checkpoint as t2va/fl2va
+            if h3_mode_str == "i2va":
+                h3_mode_str = "fl2va"
+            cmd.extend(["--h3_training_mode", h3_mode_str])
 
         # Optional experimental guidance-distillation scale
         gds = self._get(training_strategy, "h3_guidance_distillation_scale", None)

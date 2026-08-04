@@ -189,6 +189,7 @@ MODEL_CONFIG = {
             "unet_lr": False,
             "te1_lr": False,
             "te2_lr": False,
+            "h3_training_mode": True,
             "ltx_mode": False,
             "target_fps": False,
             "frame_extraction": True,
@@ -217,6 +218,7 @@ MODEL_CONFIG = {
             "vae_path": "models/vae/minimax_h3_video_vae_fp16.safetensors",
             "vae_audio_path": "models/vae/minimax_h3_audio_vae_fp32.safetensors",
             "tokenizer_path": "models/MiniMax-H3/tokenizer",
+            "h3_training_mode": "fl2va",
             "frame_extraction": "uniform",
             "gradient_checkpointing": True,
             "rank": "16",
@@ -936,6 +938,7 @@ DEFAULT_FIELD_VISIBILITY = {
     "te2_lr": False,
     "llm_adapter_lr": False,
     # LTX2-specific mode dropdown
+    "h3_training_mode": False,
     "ltx_mode": False,
     "target_fps": False,
     "wan_mode": False,

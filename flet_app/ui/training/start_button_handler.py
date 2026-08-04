@@ -476,8 +476,12 @@ async def run_ltx2_training_flow(
     resume_path = None
     if resume_last:
         from musubi_utils import find_last_state_directory
-        output_dir = runner.get_config().get('model', {}).get('output_dir', 'output/ltx2_lora')
-        output_name = runner.get_config().get('model', {}).get('name', '')
+        cfg = runner.get_config()
+        model_cfg = cfg.get('model', {})
+        # output_dir / output_name are written at top level by toml_builder;
+        # fall back to [model] for older configs.
+        output_dir = cfg.get('output_dir') or model_cfg.get('output_dir') or 'output/ltx2_lora'
+        output_name = cfg.get('output_name') or model_cfg.get('output_name') or model_cfg.get('name') or ''
         resume_path = find_last_state_directory(output_dir, output_name)
         if resume_path:
             add_info_message(training_console_text, f"\n[Resume] Found state: {resume_path}\n")

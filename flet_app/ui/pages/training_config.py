@@ -57,6 +57,7 @@ single_file_path_field_ref = ft.Ref[ft.TextField]()
 first_frame_conditioning_p_field_ref = ft.Ref[ft.TextField]()
 t5_path_field_ref = ft.Ref[ft.TextField]()
 ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+h3_training_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 target_fps_field_ref = ft.Ref[ft.TextField]()
 ltx_2_3_checkbox_ref = ft.Ref[ft.Checkbox]()
 wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -442,8 +443,9 @@ def get_training_config_page_content():
             "te1_lr": te1_lr_field_ref,
             "te2_lr": te2_lr_field_ref,
             "llm_adapter_lr": llm_adapter_lr_field_ref,
-            # Musubi-specific fields (ltx_mode dropdown)
+            # Musubi-specific fields (ltx_mode and h3_mode dropdowns)
             "ltx_mode": ltx_mode_dropdown_ref,
+            "h3_training_mode": h3_training_mode_dropdown_ref,
             "target_fps": target_fps_field_ref,
             "wan_mode": wan_mode_dropdown_ref,
             "wan_task": wan_task_dropdown_ref,
@@ -538,6 +540,7 @@ def get_training_config_page_content():
             "llm_adapter_lr": llm_adapter_lr_field_ref,
             "max_llama3_seq_len": max_llama3_seq_len_field_ref,
             # Musubi-specific fields
+            "h3_training_mode": h3_training_mode_dropdown_ref,
             "target_fps": target_fps_field_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
@@ -1341,6 +1344,13 @@ def get_training_config_page_content():
                             col=1.7, expand=True, scale=0.8, ref=ltx_mode_dropdown_ref,
                             visible=_should_show_field("ltx_mode"),
                             on_change=_on_ltx_mode_change
+                        ),
+                        create_dropdown(
+                            "H3 mode",
+                            "fl2va",
+                            {"t2va": "t2va", "i2va": "i2va", "fl2va": "fl2va", "ref2va": "ref2va"},
+                            col=1.7, expand=True, scale=0.8, ref=h3_training_mode_dropdown_ref,
+                            visible=_should_show_field("h3_training_mode")
                         ),
                         create_textfield(
                             "target_fps", "25",
