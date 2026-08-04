@@ -461,7 +461,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
-    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = is_anima = is_krea2 = False
+    is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = is_anima = is_krea2 = is_minimax_h3 = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
         is_wan22 = (mt == 'wan22')
@@ -480,6 +480,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         is_hunyuan_video = (mt == 'hunyuan-video')
         is_wan = (mt == 'wan')
         is_anima = (mt == 'anima')
+        is_minimax_h3 = (mt in ('minimaxh3', 'minimax-h3', 'minimax_h3', 'mmh3', 'minimaxh'))
     except Exception:
         pass
 
@@ -500,8 +501,35 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             is_sdxl = is_sdxl or (curv == 'sdxl')
             is_longcat = is_longcat or (curv == 'longcat')
             is_anima = is_anima or (curv == 'anima')
+            is_minimax_h3 = is_minimax_h3 or (curv in ('minimaxh3', 'minimax-h3', 'minimax_h3', 'mmh3', 'minimaxh'))
     except Exception:
         pass
+
+    # MinimaxH3-specific field visibility on load (tokenizer_path, vae_path,
+    # vae_audio_path). The generic _apply_field_visibility triggered via
+    # on_model_type_change sometimes loses these because the trainer dropdown
+    # filter reuses the previous model's vis_config; force them visible here.
+    if is_minimax_h3:
+        try:
+            from flet_app.ui.pages.training_config import (
+                tokenizer_path_field_ref,
+                vae_path_field_ref,
+                vae_audio_path_field_ref,
+                text_encoder_row_ref,
+                model_path_field_ref,
+            )
+            for ref in (tokenizer_path_field_ref, vae_path_field_ref,
+                        vae_audio_path_field_ref, model_path_field_ref):
+                if ref and ref.current:
+                    ref.current.visible = True
+                    if ref.current.page:
+                        ref.current.page.update()
+            if text_encoder_row_ref and text_encoder_row_ref.current:
+                text_encoder_row_ref.current.visible = True
+                if text_encoder_row_ref.current.page:
+                    text_encoder_row_ref.current.page.update()
+        except Exception:
+            pass
 
     # Apply visibility + any provided values
     update_wan_fields_visibility(is_wan22, label_vals.get('min_t'), label_vals.get('max_t'))

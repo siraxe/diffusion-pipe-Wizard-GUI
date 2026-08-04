@@ -495,13 +495,17 @@ def build_toml_config_from_ui(container: Any) -> str:
 
     build_model_section(lines, cfg, _get)
     build_optimizer_section(lines, cfg, _get)
-    build_adapter_section(lines, cfg, _get)
-    build_monitoring_section(lines, monitor_cfg)
 
     # Musubi acceleration section
     model_type = str(cfg.get('Model Type', '')).lower() if cfg.get('Model Type') else ''
     trainer = str(cfg.get('Trainer', '')).lower() if cfg.get('Trainer') else ''
     is_musubi = trainer == 'musubi' or model_type in ('ltx-video-2', 'ltx2', 'wan22', 'wan', '_wan22', 'minimaxh3')
+
+    # For musubi trainer, replace diffusion-pipe [adapter] with musubi [lora] + [checkpoints]
+    if not is_musubi:
+        build_adapter_section(lines, cfg, _get)
+
+    build_monitoring_section(lines, monitor_cfg)
 
     if is_musubi:
         try:
@@ -509,5 +513,72 @@ def build_toml_config_from_ui(container: Any) -> str:
             append_musubi_acceleration_section(lines, _get)
         except ImportError:
             pass
+
+        # Musubi [lora] section — read rank/alpha from the musubi UI fields
+        # (rank/alpha), not the diffusion-pipe a_rank/a_alpha fields.
+        lines.append("")
+        lines.append("[lora]")
+        rank_val = _get('rank', 32)
+        try:
+            rank_val = int(rank_val)
+        except Exception:
+            rank_val = 32
+        alpha_val = _get('alpha', 32)
+        try:
+            alpha_val = int(alpha_val)
+        except Exception:
+            alpha_val = 32
+        lines.append(f"rank = {rank_val}")
+        lines.append(f"alpha = {alpha_val}")
+        factor_val = _get('factor', 4)
+        try:
+            factor_val = int(factor_val)
+            lines.append(f"factor = {factor_val}")
+        except Exception:
+            pass
+        network_dropout_val = _get('network_dropout', 0.0)
+        try:
+            if float(network_dropout_val) > 0:
+                lines.append(f"network_dropout = {network_dropout_val}")
+        except (TypeError, ValueError):
+            pass
+        caption_dropout_val = _get('caption_dropout_rate', 0.0)
+        try:
+            if float(caption_dropout_val) > 0:
+                lines.append(f"caption_dropout_rate = {caption_dropout_val}")
+        except (TypeError, ValueError):
+            pass
+        init_from_existing_lora = _get('init_from_existing', '')
+        if init_from_existing_lora and str(init_from_existing_lora).strip():
+            lines.append(f"init_from_existing = {quote(str(init_from_existing_lora).strip())}")
+
+        # Musubi [checkpoints] section — the runtime (ltx2_run, mmh3_run) reads
+        # mode/interval/save_state/keep_last_n from here.
+        lines.append("")
+        lines.append("[checkpoints]")
+        mode_val = _get('checkpoint_mode', 'steps') or 'steps'
+        lines.append(f"mode = {quote(str(mode_val))}")
+        save_state_val = _get('save_state', False)
+        if not isinstance(save_state_val, bool):
+            save_state_val = str(save_state_val).strip().lower() in ('true', '1', 'yes', 'on')
+        lines.append(f"save_state = {toml_bool(save_state_val)}")
+        interval_val = _get('interval', 50)
+        try:
+            interval_val = int(float(interval_val))
+        except Exception:
+            interval_val = 50
+        lines.append(f"interval = {interval_val}")
+        keep_val = _get('keep_last_n', -1)
+        try:
+            keep_val = int(float(keep_val))
+        except Exception:
+            keep_val = -1
+        lines.append(f"keep_last_n = {keep_val}")
+        precision_val = _get('precision', 'bfloat16') or 'bfloat16'
+        lines.append(f"precision = {quote(str(precision_val))}")
+        convert_to_comfy_val = _get('convert_to_comfy', True)
+        if not isinstance(convert_to_comfy_val, bool):
+            convert_to_comfy_val = str(convert_to_comfy_val).strip().lower() in ('true', '1', 'yes', 'on')
+        lines.append(f"convert_to_comfy = {toml_bool(convert_to_comfy_val)}")
 
     return "\n".join(lines) + "\n"

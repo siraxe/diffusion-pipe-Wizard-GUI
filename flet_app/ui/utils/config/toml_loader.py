@@ -202,10 +202,17 @@ def populate_data_section(toml_data: dict, label_vals: dict) -> None:
 
 
 def populate_checkpoints_section(toml_data: dict, label_vals: dict) -> None:
-    """Populate label_vals from the [checkpoints] section."""
+    """Populate label_vals from the [checkpoints] section.
+
+    Backward compat: when no [checkpoints] section exists (older configs saved by
+    build_toml_config_from_ui), fall back to top-level save_every_n_epochs /
+    save_every_n_steps and infer the mode from which key is present.
+    """
     checkpoints = toml_data.get('checkpoints', {}) or {}
     if not isinstance(checkpoints, dict):
-        return
+        checkpoints = {}
+
+    has_section = bool(checkpoints)
 
     if 'mode' in checkpoints:
         label_vals['checkpoint_mode'] = checkpoints.get('mode')
@@ -218,6 +225,15 @@ def populate_checkpoints_section(toml_data: dict, label_vals: dict) -> None:
     if 'convert_to_comfy' in checkpoints:
         val = checkpoints.get('convert_to_comfy')
         label_vals['convert_to_comfy'] = str(val).lower() if val is not None else 'false'
+
+    # No [checkpoints] section — try top-level keys written by older builders.
+    if not has_section:
+        if 'save_every_n_epochs' in toml_data:
+            label_vals.setdefault('checkpoint_mode', 'epochs')
+            label_vals.setdefault('interval', toml_data.get('save_every_n_epochs'))
+        elif 'save_every_n_steps' in toml_data:
+            label_vals.setdefault('checkpoint_mode', 'steps')
+            label_vals.setdefault('interval', toml_data.get('save_every_n_steps'))
 
 
 def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> None:
