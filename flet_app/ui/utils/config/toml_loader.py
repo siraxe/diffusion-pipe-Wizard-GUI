@@ -637,6 +637,37 @@ def update_ui_from_toml(container: Any, toml_data: dict) -> None:
     # Apply values
     apply_all_values(container, label_vals, page)
 
+    # Re-apply minimaxH3 visibility AFTER apply_all_values. The on_trainer_change
+    # call inside apply_all_values triggers on_model_type_change with the OLD
+    # model type (before the new value is set), which hides model-specific fields.
+    # The subsequent on_model_type_change with the new value sets them visible
+    # again but doesn't always page.update() the individual field refs, so on
+    # first load (esp. when transitioning from diffusion-pipe to musubi) the
+    # tokenizer_path / vae_path / vae_audio_path fields stay hidden until the
+    # user manually re-selects the model.
+    try:
+        mt_val = str(label_vals.get('Model Type', '')).strip().lower()
+        if mt_val in ('minimaxh3', 'minimax-h3', 'minimax_h3', 'mmh3', 'minimaxh'):
+            from flet_app.ui.pages.training_config import (
+                tokenizer_path_field_ref,
+                vae_path_field_ref,
+                vae_audio_path_field_ref,
+                model_path_field_ref,
+                text_encoder_row_ref,
+            )
+            for ref in (tokenizer_path_field_ref, vae_path_field_ref,
+                        vae_audio_path_field_ref, model_path_field_ref):
+                if ref and ref.current:
+                    ref.current.visible = True
+                    if ref.current.page:
+                        ref.current.update()
+            if text_encoder_row_ref and text_encoder_row_ref.current:
+                text_encoder_row_ref.current.visible = True
+                if text_encoder_row_ref.current.page:
+                    text_encoder_row_ref.current.page.update()
+    except Exception:
+        pass
+
     # Bottom bar fields
     try:
         if 'output_dir' in label_vals:
