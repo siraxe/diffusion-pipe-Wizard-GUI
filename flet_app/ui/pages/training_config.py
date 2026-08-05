@@ -58,6 +58,7 @@ first_frame_conditioning_p_field_ref = ft.Ref[ft.TextField]()
 t5_path_field_ref = ft.Ref[ft.TextField]()
 ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 h3_training_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
+h3_target_dropdown_ref = ft.Ref[ft.Dropdown]()
 target_fps_field_ref = ft.Ref[ft.TextField]()
 ltx_2_3_checkbox_ref = ft.Ref[ft.Checkbox]()
 wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -446,6 +447,7 @@ def get_training_config_page_content():
             # Musubi-specific fields (ltx_mode and h3_mode dropdowns)
             "ltx_mode": ltx_mode_dropdown_ref,
             "h3_training_mode": h3_training_mode_dropdown_ref,
+            "h3_target": h3_target_dropdown_ref,
             "target_fps": target_fps_field_ref,
             "wan_mode": wan_mode_dropdown_ref,
             "wan_task": wan_task_dropdown_ref,
@@ -541,6 +543,7 @@ def get_training_config_page_content():
             "max_llama3_seq_len": max_llama3_seq_len_field_ref,
             # Musubi-specific fields
             "h3_training_mode": h3_training_mode_dropdown_ref,
+            "h3_target": h3_target_dropdown_ref,
             "target_fps": target_fps_field_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
@@ -1351,6 +1354,13 @@ def get_training_config_page_content():
                             {"t2va": "t2va", "i2va": "i2va", "fl2va": "fl2va", "ref2va": "ref2va"},
                             col=1.7, expand=True, scale=0.8, ref=h3_training_mode_dropdown_ref,
                             visible=_should_show_field("h3_training_mode")
+                        ),
+                        create_dropdown(
+                            "H3 target",
+                            "all",
+                            {"all": "all", "video": "video", "audio": "audio"},
+                            col=1.7, expand=True, scale=0.8, ref=h3_target_dropdown_ref,
+                            visible=_should_show_field("h3_target")
                         ),
                         create_textfield(
                             "target_fps", "25",

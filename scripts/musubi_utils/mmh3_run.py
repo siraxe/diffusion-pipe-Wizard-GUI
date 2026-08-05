@@ -308,11 +308,19 @@ class MMH3Run:
 
         script = str(self.musubi_root / H3_TRAIN_SCRIPT)
 
+        dit_path = self._resolve_path(self._get(model, "model_path", ""))
+        # Quantized MiniMax-H3 checkpoints encode their scheme in the filename
+        # (e.g. minimax_h3_fl2va_pruned_int8_convrot.safetensors). The training
+        # script requires --int8_convrot_base for those, and --fp8_base must be
+        # omitted to avoid loading them as fp8.
+        dit_name = Path(dit_path).name.lower()
+        is_int8_convrot = "int8" in dit_name or "convrot" in dit_name
+
         cmd: List[str] = [
             "accelerate", "launch",
             "--num_cpu_threads_per_process", "4",
             script,
-            "--dit", self._resolve_path(self._get(model, "model_path", "")),
+            "--dit", dit_path,
             "--dataset_config", self._resolve_path(dataset_config),
             "--mixed_precision", str(
                 self._get(acceleration, "mixed_precision_mode", DEFAULTS["mixed_precision_mode"])
@@ -337,9 +345,14 @@ class MMH3Run:
             cmd.append("--gradient_checkpointing")
 
         # ------------------------------------------------------------------
-        # fp8_base + H2D block swap options
+        # fp8_base / int8_convrot_base + H2D block swap options
+        #
+        # int8/convrot checkpoints force --int8_convrot_base and must NOT get
+        # --fp8_base. Otherwise fall back to the user's fp8_base flag.
         # ------------------------------------------------------------------
-        if self.parse_bool(self._get(acceleration, "fp8_base", False)):
+        if is_int8_convrot:
+            cmd.append("--int8_convrot_base")
+        elif self.parse_bool(self._get(acceleration, "fp8_base", False)):
             cmd.append("--fp8_base")
 
         # blocks_to_swap may live in [optimization], [acceleration], or top-level.

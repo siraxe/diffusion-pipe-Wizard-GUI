@@ -128,6 +128,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     ltx_mode = 'video'  # default
     # target_fps from last_config.toml [training_strategy] section
     target_fps = 25.0  # default
+    # h3_target from last_config.toml [training_strategy] section (MiniMax H3 only)
+    # 'all' = train both video and audio; 'video'/'audio' restrict to one stream
+    h3_target = 'all'
     model_type_lower = ''
     if last_config_path and os.path.exists(last_config_path):
         try:
@@ -138,6 +141,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 use_mask = config.get('training_strategy', {}).get('use_mask', False)
                 ltx_mode = config.get('training_strategy', {}).get('ltx_mode', 'video')
                 target_fps = float(config.get('training_strategy', {}).get('target_fps', 25))
+                h3_target = str(config.get('training_strategy', {}).get('h3_target', 'all')).strip().lower()
                 model_type_lower = str(config.get('model', {}).get('type', '')).lower()
                 # Handle boolean conversion from string
                 if not isinstance(use_mask, bool):
@@ -257,6 +261,11 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 'enable_bucket': enable_bucket,
                 'bucket_no_upscale': False,
             }
+
+            # H3 target mode: when MiniMax H3 trains a single stream, tag the
+            # dataset so the cache/run picks the right target. Skip for 'all'.
+            if is_h3 and h3_target in ('video', 'audio'):
+                dataset_config['h3_target_mode'] = h3_target
 
             # AR bucketing params (enable_ar_bucket/min_ar/max_ar/num_ar_buckets)
             # are written only at [general] level — musubi-tuner schema rejects
@@ -519,6 +528,8 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
             lines.append(f"reference_cache_directory = \"{dataset['reference_cache_directory']}\"")
 
         lines.append(f"cache_directory = \"{dataset['cache_directory']}\"")
+        if 'h3_target_mode' in dataset:
+            lines.append(f"h3_target_mode = \"{dataset['h3_target_mode']}\"")
         lines.append(f"num_repeats = {dataset['num_repeats']}")
         lines.append(f"enable_bucket = {str(dataset.get('enable_bucket', False)).lower()}")
         lines.append(f"bucket_no_upscale = {str(dataset.get('bucket_no_upscale', False)).lower()}")

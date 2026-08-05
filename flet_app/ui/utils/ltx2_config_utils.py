@@ -186,6 +186,8 @@ def build_ltx2_toml_from_ui(training_tab_container, config_name: str = None) -> 
     lines.append(f"ltx_mode = {_quote(ltx_mode_val)}")
     h3_training_mode_val = _get('h3_training_mode', 'fl2va')
     lines.append(f"h3_training_mode = {_quote(h3_training_mode_val)}")
+    h3_target_val = _get('h3_target', 'all')
+    lines.append(f"h3_target = {_quote(h3_target_val)}")
 
     target_fps_val = _get('target_fps', '25')
     lines.append(f"target_fps = {_quote(target_fps_val)}")
@@ -626,6 +628,7 @@ def update_ltx2_ui_from_toml(training_tab_container, toml_data: dict) -> None:
         _set_field_value('first_frame_conditioning_p', training_strategy.get('first_frame_conditioning_p', 0.1))
         _set_field_value('ltx_mode', training_strategy.get('ltx_mode', 'video'))
         _set_field_value('h3_training_mode', training_strategy.get('h3_training_mode', 'fl2va'))
+        _set_field_value('h3_target', training_strategy.get('h3_target', 'all'))
         _set_field_value('target_fps', training_strategy.get('target_fps', '25'))
         _set_field_value('frame_extraction', training_strategy.get('frame_extraction', 'head'))
         separate_audio_buckets = training_strategy.get('separate_audio_buckets', True)

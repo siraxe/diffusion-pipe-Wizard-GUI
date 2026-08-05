@@ -521,6 +521,9 @@ def build_toml_config_from_ui(container: Any) -> str:
             h3_mode = _get('h3_training_mode', 'fl2va')
             if h3_mode:
                 lines.append(f"h3_training_mode = {quote(str(h3_mode))}")
+            h3_target = _get('h3_target', 'all')
+            if h3_target:
+                lines.append(f"h3_target = {quote(str(h3_target))}")
 
         # Musubi [lora] section — read rank/alpha from the musubi UI fields
         # (rank/alpha), not the diffusion-pipe a_rank/a_alpha fields.
