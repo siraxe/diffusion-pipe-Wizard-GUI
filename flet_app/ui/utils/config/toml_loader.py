@@ -245,6 +245,11 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     for k in ('first_frame_conditioning_p', 'ltx_mode', 'target_fps'):
         if k in ts:
             label_vals[k] = ts.get(k)
+    # H3 dropdowns use display labels ('H3 mode', 'H3 target') as control labels
+    if 'h3_training_mode' in ts:
+        label_vals['H3 mode'] = ts.get('h3_training_mode')
+    if 'h3_target' in ts:
+        label_vals['H3 target'] = ts.get('h3_target')
     # Handle t_type dropdown (replaces slider/ic_lora/vace_lora checkboxes)
     # Backward compatibility: if old checkbox keys exist, convert to t_type
     if 't_type' in ts:
