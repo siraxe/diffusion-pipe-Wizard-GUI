@@ -142,6 +142,11 @@ def build_model_section(lines: List[str], cfg: Dict, _get: callable) -> None:
     if trainer:
         lines.append(f"trainer = {quote(trainer)}")
 
+    # Add name field from output_dir (used by mmh3_run.py / ltx2_run.py for checkpoint naming)
+    config_name = cfg.get('config_name') or _get('config_name')
+    if config_name:
+        lines.append(f"name = {quote(config_name)}")
+
     mt_lower = model_source.strip().lower()
 
     # SDXL: checkpoint_path
@@ -402,6 +407,11 @@ def build_toml_config_from_ui(container: Any) -> str:
         raw_output_dir = str(cfg.get('output_dir', 'workspace/output/dir') or '').strip()
 
     resolved_output_dir = _resolve_output_dir(raw_output_dir, project_root)
+
+    # Extract config_name from output_dir (last directory name), same as LTX2 does
+    config_name = os.path.basename(os.path.normpath(resolved_output_dir)) or None
+    if config_name:
+        cfg['config_name'] = config_name.lower()
 
     # Resolve init_from_existing
     init_from_existing_val = ""

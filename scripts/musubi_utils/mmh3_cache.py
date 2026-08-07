@@ -15,6 +15,7 @@ H3 specifics:
 
 import os
 import sys
+import toml
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -36,6 +37,42 @@ class MMH3Cache:
     # ----------------------------------------------------------------------
     # Path / config helpers
     # ----------------------------------------------------------------------
+
+    @staticmethod
+    def _ensure_max_frames_from_frame_buckets(dataset_config_path: str) -> str:
+        """Read dataset TOML and set max_frames = max(frame_buckets/target_frames) per dataset if missing.
+
+        Modifies the original file in place (same pattern as LTX2). Returns the same path.
+        """
+        try:
+            with open(dataset_config_path, 'r') as f:
+                cfg = toml.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load dataset config for max_frames fixup: {e}")
+            return dataset_config_path
+
+        changed = False
+        datasets = cfg.get('datasets', [])
+        for ds in datasets:
+            frame_buckets = ds.get('frame_buckets') or ds.get('target_frames')
+            if isinstance(frame_buckets, list) and len(frame_buckets) > 0:
+                existing_max = ds.get('max_frames')
+                desired_max = max(frame_buckets)
+                if not existing_max or existing_max != desired_max:
+                    ds['max_frames'] = desired_max
+                    changed = True
+
+        if not changed:
+            return dataset_config_path
+
+        try:
+            with open(dataset_config_path, 'w') as f:
+                toml.dump(cfg, f)
+            logger.info(f"Updated H3 dataset config with max_frames from frame_buckets: {dataset_config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to write max_frames back to dataset config (will still cache): {e}")
+
+        return dataset_config_path
 
     @staticmethod
     def _find_project_root() -> Path:
@@ -73,7 +110,7 @@ class MMH3Cache:
         dataset_config: str,
         vae: str,
         audio_vae: str,
-        batch_size: int = 2,
+        batch_size: int = 1,
         device: str = "cuda",
     ) -> List[str]:
         """minimax_h3_cache_latents.py --dataset_config --vae --audio_vae"""
@@ -129,6 +166,15 @@ class MMH3Cache:
             return "int8"
         return "none"
 
+    @staticmethod
+    def _extra_flag_present(config: Dict, flag_name: str) -> bool:
+        """Detect --flag or --flag=... in the top-level extra_flags string."""
+        extra = str(config.get("extra_flags", "") or "").strip()
+        if not extra:
+            return False
+        tokens = extra.split()
+        return any(t == flag_name or t.startswith(f"{flag_name}=") for t in tokens)
+
     def build_all_cache_commands(
         self,
         config: Dict,
@@ -141,6 +187,9 @@ class MMH3Cache:
         Returns a dict keyed by cache stage ('latents', 'text_encoder').
         Stages missing required model paths are skipped (not emitted).
         """
+        # Ensure max_frames is set from frame_buckets before caching
+        dataset_config = self._ensure_max_frames_from_frame_buckets(dataset_config)
+
         model = config.get("model", {})
         training_strategy = config.get("training_strategy", {})
 
@@ -153,6 +202,17 @@ class MMH3Cache:
         task = self._get(training_strategy, "h3_training_mode", "fl2va")
 
         quantization = self._resolve_quantization(config)
+
+        # Guidance-consistent H3 training reads the empty-text branch from
+        # cache, so the cache must be written with --cache_guidance_empty.
+        # Auto-enable it when --h3_guidance_distillation_scale shows up in
+        # extra_flags so users don't have to set a second flag.
+        enable_auto_cache_guidance_empty = False  # toggle this to true/false
+
+        if enable_auto_cache_guidance_empty:
+            cache_guidance_empty = self._extra_flag_present(config, "--h3_guidance_distillation_scale")
+        else:
+            cache_guidance_empty = False
 
         commands: Dict[str, List[str]] = {}
 
@@ -172,7 +232,10 @@ class MMH3Cache:
                 tokenizer=tokenizer_path,
                 task=task,
                 text_encoder_quantization=quantization,
+                cache_guidance_empty=cache_guidance_empty,
             )
+            if cache_guidance_empty:
+                logger.info("Detected --h3_guidance_distillation_scale in extra_flags; enabling --cache_guidance_empty for text-encoder cache")
         else:
             logger.warning("H3 text-encoder cache skipped: text_encoder_path and tokenizer_path are required")
 

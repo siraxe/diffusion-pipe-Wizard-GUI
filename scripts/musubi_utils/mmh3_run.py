@@ -16,7 +16,84 @@ import logging
 from typing import Dict, List, Optional
 from pathlib import Path
 
+try:
+    import safetensors.torch
+except ImportError:
+    safetensors = None
+
 logger = logging.getLogger(__name__)
+
+
+def is_comfy_format_lora(file_path: str) -> bool:
+    """Check if a LoRA file is in ComfyUI format by examining the keys."""
+    if safetensors is None:
+        logger.warning("safetensors not available, cannot detect ComfyUI format")
+        return False
+
+    try:
+        state_dict = safetensors.torch.load_file(file_path)
+        if not state_dict:
+            return False
+
+        for key in list(state_dict.keys())[:5]:
+            if key.startswith('diffusion_model.'):
+                return True
+            if key.startswith('lora_unet_model_'):
+                return False
+
+        for key in state_dict.keys():
+            if '.lora_A.' in key or '.lora_B.' in key:
+                return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking LoRA format for {file_path}: {e}")
+        return False
+
+
+def convert_comfy_to_training_with_rank(file_path: str, target_rank: int) -> Optional[str]:
+    """Convert ComfyUI format LoRA to training format with optional rank conversion."""
+    import subprocess
+
+    try:
+        input_file = Path(file_path).resolve()
+        if not input_file.exists():
+            logger.error(f"Source file does not exist: {file_path}")
+            return None
+
+        output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
+
+        convert_script = Path(__file__).parent.parent.parent / 'scripts' / 'convert_comfy_to_training_lora.py'
+
+        if not convert_script.exists():
+            logger.error(f"Conversion script not found: {convert_script}")
+            return None
+
+        logger.info(f"Converting ComfyUI LoRA with rank conversion: {file_path} -> rank {target_rank}")
+
+        cmd = [
+            str(sys.executable),
+            str(convert_script),
+            str(input_file),
+            '--target_rank', str(target_rank),
+            '-o', str(output_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+        if result.returncode == 0:
+            logger.info(f"Successfully created converted checkpoint: {output_path}")
+            return str(output_path)
+        else:
+            logger.error(f"Conversion failed: {result.stderr}")
+            return None
+
+    except subprocess.TimeoutExpired:
+        logger.error("Conversion timed out after 3 minutes")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to convert ComfyUI LoRA {file_path}: {e}")
+        return None
 
 # H3-specific script names under diffusion-trainers/musubi-tuner/
 H3_TRAIN_SCRIPT = "minimax_h3_train_network.py"
@@ -196,6 +273,141 @@ class MMH3Run:
                 return v if isinstance(v, dict) else {}
 
         return {}
+
+    # ==========================================================================
+    # LoRA Rank Detection & Conversion Helpers
+    # ==========================================================================
+
+    def get_lora_rank(self, file_path: str) -> int:
+        """Detect the rank of a LoRA checkpoint."""
+        if safetensors is None:
+            logger.warning("safetensors not available, cannot detect LoRA rank")
+            return 0
+
+        try:
+            state_dict = safetensors.torch.load_file(file_path)
+            if not state_dict:
+                return 0
+
+            for key in state_dict.keys():
+                if key.endswith('.lora_down.weight'):
+                    return state_dict[key].shape[0]
+                elif key.endswith('.lora_A.weight'):
+                    return state_dict[key].shape[0]
+                elif key.endswith('.lokr_w1_b'):
+                    return state_dict[key].shape[1]
+                elif key.endswith('.lokr_w2_a'):
+                    return state_dict[key].shape[0]
+                elif key.endswith('.lokr_w1_a') or key.endswith('.lokr_w2_b'):
+                    shape = state_dict[key].shape
+                    return min(shape)
+
+            return 0
+        except Exception as e:
+            logger.warning(f"Error detecting LoRA rank for {file_path}: {e}")
+            return 0
+
+    def rerank_training_format_lora(self, file_path: str, target_rank: int) -> Optional[str]:
+        """Rerank a training format LoRA checkpoint to a different rank."""
+        import subprocess
+
+        try:
+            input_file = Path(file_path).resolve()
+            if not input_file.exists():
+                logger.error(f"Source file does not exist: {file_path}")
+                return None
+
+            output_path = input_file.parent / f"{input_file.stem}_rank{target_rank}{input_file.suffix}"
+
+            sys_path = self.project_root / 'scripts'
+            rerank_script = sys_path / "rerank_lora.py"
+
+            if not rerank_script.exists():
+                logger.error(f"Reranking script not found: {rerank_script}")
+                return None
+
+            cmd = [
+                str(sys.executable),
+                str(rerank_script),
+                str(input_file),
+                '--target_rank', str(target_rank),
+                '-o', str(output_path),
+                '--device', 'cuda'
+            ]
+
+            logger.info(f"Reranking checkpoint: {file_path} -> rank {target_rank}")
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+            if result.returncode == 0:
+                logger.info(f"Successfully reranked checkpoint: {output_path}")
+                return str(output_path)
+            else:
+                logger.error(f"Reranking failed: {result.stderr}")
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error("Reranking timed out after 3 minutes")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to rerank LoRA {file_path}: {e}")
+            return None
+
+    def _build_initialization(self, config: Dict, lora: Dict) -> List[str]:
+        """Builds flags for initializing from existing checkpoints."""
+        cmd = []
+
+        init_checkpoint = lora.get('init_from_existing', config.get('init_from_existing', ''))
+        if not (init_checkpoint and str(init_checkpoint).lower() not in ('', 'null', 'none')):
+            return cmd
+
+        # Path resolution
+        if not os.path.isabs(init_checkpoint):
+            init_checkpoint = str(self.project_root / init_checkpoint)
+
+        # Check if path is a directory and try to find .safetensors file inside
+        if os.path.isdir(init_checkpoint):
+            dir_path = init_checkpoint
+            safetensors_files = [f for f in os.listdir(dir_path) if f.endswith('.safetensors')]
+            if safetensors_files:
+                init_checkpoint = str(Path(dir_path) / safetensors_files[0])
+                logger.info(f"Directory detected, using found safetensors file: {init_checkpoint}")
+            else:
+                logger.warning(f"Directory detected but no .safetensors file found inside: {dir_path}")
+
+        target_rank = lora.get('rank', DEFAULTS['rank'])
+
+        if os.path.exists(init_checkpoint):
+            # Check 1: ComfyUI format detection (convert regardless of rank)
+            if is_comfy_format_lora(init_checkpoint):
+                logger.info(f"Detected ComfyUI format checkpoint, converting to training format (rank {target_rank})")
+                converted_path = convert_comfy_to_training_with_rank(init_checkpoint, target_rank)
+
+                if converted_path:
+                    init_checkpoint = converted_path
+                    logger.info(f"Using converted checkpoint: {init_checkpoint}")
+                else:
+                    logger.warning(f"ComfyUI conversion failed, using original checkpoint (may cause errors)")
+            # Check 2: Rank mismatch (only for training format)
+            else:
+                checkpoint_rank = self.get_lora_rank(init_checkpoint)
+
+                if checkpoint_rank > 0 and checkpoint_rank != target_rank:
+                    logger.info(f"Rank mismatch detected, reranking from {checkpoint_rank} to {target_rank}")
+                    converted_path = self.rerank_training_format_lora(init_checkpoint, target_rank)
+
+                    if converted_path:
+                        init_checkpoint = converted_path
+                        logger.info(f"Using converted checkpoint: {init_checkpoint}")
+                    else:
+                        logger.warning(f"Reranking failed, using original checkpoint (may cause errors)")
+                else:
+                    logger.info(f"Checkpoint rank {checkpoint_rank} matches target rank {target_rank}")
+        else:
+            logger.warning(f"Checkpoint file does not exist: {init_checkpoint}")
+
+        cmd.extend(["--network_weights", init_checkpoint])
+        return cmd
 
     # ----------------------------------------------------------------------
     # Cache Commands
@@ -442,6 +654,12 @@ class MMH3Run:
         if network_args:
             cmd.append("--network_args")
             cmd.append(" ".join(network_args))
+
+        # ------------------------------------------------------------------
+        # Init from existing checkpoint
+        # ------------------------------------------------------------------
+        init_flags = self._build_initialization(config, lora)
+        cmd.extend(init_flags)
 
         # ------------------------------------------------------------------
         # Optimizer + LR + scheduler
