@@ -143,6 +143,8 @@ def open_unified_popup_dialog(
     # Caption fields and timers (kept across refresh while dialog open)
     caption_tf: Optional[ft.TextField] = None
     neg_caption_tf: Optional[ft.TextField] = None
+    caption_ext_tf: Optional[ft.TextField] = None
+    caption_expanded: dict = {"val": False}  # stays on until Contract is pressed
     caption_timer: Optional[threading.Timer] = None
     neg_caption_timer: Optional[threading.Timer] = None
     _padding_value: str = "80"
@@ -647,7 +649,7 @@ def open_unified_popup_dialog(
 
     def refresh():
         nonlocal index
-        nonlocal caption_tf, neg_caption_tf, caption_timer, neg_caption_timer
+        nonlocal caption_tf, neg_caption_tf, caption_ext_tf, caption_timer, neg_caption_timer
         nonlocal overlay_visible, overlay_visual, overlay_control, overlay_hover_container, overlay_current_rotate
         nonlocal target_overlay_visible, target_overlay_image
         nonlocal monitor_thread
@@ -749,13 +751,26 @@ def open_unified_popup_dialog(
         else:
             neg_caption_tf.value = neg_text
 
+        if caption_ext_tf is None:
+            caption_ext_tf = create_textfield(
+                label="Captions_ext",
+                value=cap_text,
+                expand=True,
+                multiline=True,
+                min_lines=20,
+                max_lines=20,
+            )
+        else:
+            caption_ext_tf.value = cap_text
+
         # Debounced save handlers
         def on_caption_change(e: ft.ControlEvent):
             nonlocal caption_timer
             if caption_timer:
                 caption_timer.cancel()
             def _save():
-                txt = caption_tf.value.strip() if caption_tf and caption_tf.value else ""
+                src = caption_ext_tf if caption_expanded["val"] else caption_tf
+                txt = src.value.strip() if src and src.value else ""
                 if is_img:
                     ipu.save_caption_for_image(path, txt, 'caption')
                 else:
@@ -777,6 +792,7 @@ def open_unified_popup_dialog(
             neg_caption_timer.start()
 
         caption_tf.on_change = on_caption_change
+        caption_ext_tf.on_change = on_caption_change
         neg_caption_tf.on_change = on_neg_caption_change
 
         # Build independent overlay layer the same size as media area
@@ -1023,9 +1039,36 @@ def open_unified_popup_dialog(
         media_stack = media_stack_inner
 
         # Arrange media + caption fields
+        cap_container = ft.Container(caption_tf, col={'md': 9, 'sm': 12}, visible=not caption_expanded["val"])
+        cap_ext_container = ft.Container(caption_ext_tf, col={'md': 9, 'sm': 12}, visible=caption_expanded["val"])
+
+        def _toggle_caption_expand(e):
+            expanded = not caption_expanded["val"]
+            caption_expanded["val"] = expanded
+            if expanded:
+                caption_ext_tf.value = caption_tf.value or ""
+            else:
+                caption_tf.value = caption_ext_tf.value or ""
+            cap_container.visible = not expanded
+            cap_ext_container.visible = expanded
+            expand_caption_btn.text = "Contract" if expanded else "Expand"
+            try:
+                if fields_row.page:
+                    fields_row.update()
+            except Exception:
+                pass
+
+        expand_caption_btn = ft.ElevatedButton(
+            "Contract" if caption_expanded["val"] else "Expand",
+            on_click=_toggle_caption_expand,
+            style=BTN_STYLE2,
+        )
+        neg_col = ft.Column([neg_caption_tf, expand_caption_btn], spacing=4, tight=True)
+
         fields_row = ft.ResponsiveRow([
-            ft.Container(caption_tf, col={'md': 8, 'sm': 12}),
-            ft.Container(neg_caption_tf, col={'md': 4, 'sm': 12}),
+            cap_container,
+            cap_ext_container,
+            ft.Container(neg_col, col={'md': 3, 'sm': 12}),
         ], spacing=10)
 
         # Scaling and area editor controls — LEFT COLUMN (match legacy layout)
