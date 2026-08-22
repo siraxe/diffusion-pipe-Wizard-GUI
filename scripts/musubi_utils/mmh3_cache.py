@@ -205,14 +205,8 @@ class MMH3Cache:
 
         # Guidance-consistent H3 training reads the empty-text branch from
         # cache, so the cache must be written with --cache_guidance_empty.
-        # Auto-enable it when --h3_guidance_distillation_scale shows up in
-        # extra_flags so users don't have to set a second flag.
-        enable_auto_cache_guidance_empty = False  # toggle this to true/false
-
-        if enable_auto_cache_guidance_empty:
-            cache_guidance_empty = self._extra_flag_present(config, "--h3_guidance_distillation_scale")
-        else:
-            cache_guidance_empty = False
+        # Pass the flag through when the user sets it in extra_flags.
+        cache_guidance_empty = self._extra_flag_present(config, "--cache_guidance_empty")
 
         commands: Dict[str, List[str]] = {}
 
@@ -235,7 +229,7 @@ class MMH3Cache:
                 cache_guidance_empty=cache_guidance_empty,
             )
             if cache_guidance_empty:
-                logger.info("Detected --h3_guidance_distillation_scale in extra_flags; enabling --cache_guidance_empty for text-encoder cache")
+                logger.info("Detected --cache_guidance_empty in extra_flags; enabling it for text-encoder cache")
         else:
             logger.warning("H3 text-encoder cache skipped: text_encoder_path and tokenizer_path are required")
 

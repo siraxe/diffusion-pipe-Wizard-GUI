@@ -32,7 +32,7 @@ from flet_app.ui.flet_hotkeys import is_d_key_pressed_global # Import global D k
 # If a global reference is truly needed, it should be imported or managed carefully.
 
 # Process tracking for stopping script execution
-current_caption_process = {"proc": None}
+current_caption_process = {"proc": None, "stopped": False}
 
 def _get_selected_filenames(thumbnails_grid_control: ft.GridView) -> list[str]:
     """
@@ -967,6 +967,47 @@ async def on_bucket_or_model_change(e: ft.ControlEvent, selected_dataset_ref, bu
             )
         e.page.update()
 
+
+def _apply_modify_results(output_json_path: str, dataset_folder_path: str, captioned_items: list, thumbnails_grid_control, dataset_type: str, pfi_path: str):
+    """Read the modify-caption output JSON and overwrite individual .txt files, then clean up."""
+    updated = 0
+    if os.path.exists(output_json_path):
+        try:
+            with open(output_json_path, "r", encoding="utf-8") as f:
+                captions_data = json.load(f)
+            # captions_data is a list of {"caption": ..., "media_path": ...}
+            caption_by_path = {}
+            if isinstance(captions_data, list):
+                for item in captions_data:
+                    if isinstance(item, dict):
+                        caption_by_path[item.get("media_path", "")] = item.get("caption", "")
+            elif isinstance(captions_data, dict):
+                caption_by_path = captions_data
+
+            for media_path, txt_path in captioned_items:
+                rel = os.path.relpath(media_path, dataset_folder_path)
+                # Try both forward-slash and backslash keys
+                new_cap = caption_by_path.get(rel) or caption_by_path.get(rel.replace(os.sep, "/"))
+                if new_cap:
+                    with open(txt_path, "w", encoding="utf-8") as wf:
+                        wf.write(new_cap.strip())
+                    updated += 1
+        except Exception as ex:
+            print(f"[Modify] Error reading output JSON: {ex}")
+        # Clean up output JSON
+        try:
+            os.remove(output_json_path)
+        except Exception:
+            pass
+    # Clean up per-file instructions JSON
+    try:
+        os.remove(pfi_path)
+    except Exception:
+        pass
+    print(f"[Modify] Updated {updated} caption file(s)")
+    update_thumbnail_caption_status(thumbnails_grid_control, dataset_folder_path, dataset_type)
+
+
 async def on_add_captions_click_with_model(e: ft.ControlEvent,
                                      caption_model_dropdown: ft.Dropdown,
                                      captions_checkbox: ft.Checkbox,
@@ -1062,6 +1103,130 @@ async def on_add_captions_click_with_model(e: ft.ControlEvent,
         if e.page:
             e.page.snack_bar = ft.SnackBar(content=ft.Text("Captioning all videos in the dataset..."), open=True)
             e.page.update()
+
+    # Detect modification-style captioning strategy
+    _instruction_text = cap_command_textfield.value.strip()
+    _modify_prefixes = ("transform", "change", "modify")
+    if any(_instruction_text.lower().startswith(p) for p in _modify_prefixes):
+        media_files = get_media_files(dataset_folder_path, dataset_type)
+        # Collect only media files that already have a .txt caption
+        captioned_items = []
+        for mf in media_files:
+            base_fn, _ = os.path.splitext(os.path.basename(mf))
+            txt_path = os.path.join(dataset_folder_path, f"{base_fn}.txt")
+            if os.path.exists(txt_path):
+                captioned_items.append((mf, txt_path))
+
+        if not captioned_items:
+            try:
+                processed_output_field_ref.value += "[Modify] No existing captions found to modify.\n"
+                processed_output_field_ref.visible = True
+                set_bottom_app_bar_height_func()
+                processed_output_field_ref.update() if processed_output_field_ref.page else None
+            except Exception:
+                pass
+            if e.page:
+                e.page.snack_bar = ft.SnackBar(content=ft.Text("No existing captions found to modify."), open=True)
+                e.page.update()
+            return
+
+        # Backup existing captions into old_captions/ subdir
+        backup_dir = os.path.join(dataset_folder_path, "old_captions")
+        os.makedirs(backup_dir, exist_ok=True)
+        backed_up = 0
+        for _, txt_path in captioned_items:
+            dst = os.path.join(backup_dir, os.path.basename(txt_path))
+            if not os.path.exists(dst):
+                shutil.copy2(txt_path, dst)
+                backed_up += 1
+
+        try:
+            processed_output_field_ref.value += f"[Modify] Detected {len(captioned_items)} objects with captions, modifying\n"
+            processed_output_field_ref.value += f"[Modify] Backed up {backed_up} caption(s) to old_captions/\n"
+            processed_output_field_ref.visible = True
+            set_bottom_app_bar_height_func()
+            processed_output_field_ref.update() if processed_output_field_ref.page else None
+        except Exception:
+            pass
+        print(f"Detected {len(captioned_items)} objects with captions, modifying")
+
+        # Change Delete button to Stop
+        dataset_delete_captions_button_control.text = "Stop"
+        dataset_delete_captions_button_control.on_click = lambda evt: stop_captioning(
+            evt,
+            dataset_add_captions_button_control,
+            dataset_delete_captions_button_control,
+            thumbnails_grid_control,
+            selected_dataset_ref,
+            processed_progress_bar_ref,
+            processed_output_field_ref,
+            set_bottom_app_bar_height_func,
+            update_thumbnails_func
+        )
+        dataset_delete_captions_button_control.tooltip = "Stop captioning process"
+        dataset_delete_captions_button_control.disabled = False
+        dataset_delete_captions_button_control.update()
+
+        if e.page:
+            e.page.update()
+
+        # Build per-file instructions map and selected-files list
+        _placeholders = ["XYZ", "{caption}", "{old_caption}", "{old}"]
+        per_file_map = {}
+        selected_basenames = []
+        for media_path, txt_path in captioned_items:
+            with open(txt_path, "r", encoding="utf-8", errors="replace") as f:
+                old_caption = f.read().strip()
+            per_instruction = _instruction_text
+            for ph in _placeholders:
+                per_instruction = per_instruction.replace(ph, old_caption)
+            basename = os.path.basename(media_path)
+            per_file_map[basename] = per_instruction
+            selected_basenames.append(basename)
+
+        # Write the per-file instructions JSON to a temp file in the dataset folder
+        pfi_path = os.path.join(dataset_folder_path, "_modify_instructions.json")
+        with open(pfi_path, "w", encoding="utf-8") as f:
+            json.dump(per_file_map, f, ensure_ascii=False, indent=2)
+
+        # Build a single command for all files
+        modify_output_json = os.path.join(dataset_folder_path, "_modify_output.json")
+        command = build_caption_command(
+            dataset_folder_path=dataset_folder_path,
+            output_json_path=modify_output_json,
+            selected_model=selected_model,
+            use_8bit=((selected_model or "").lower() == "llava_next_7b" and captions_checkbox.value),
+            instruction=_instruction_text,  # fallback; per-file map overrides per file
+            max_new_tokens=int(max_tokens_textfield.value.strip() or 100),
+            selected_files=selected_basenames,
+            custom_model_path=custom_model_path,
+        )
+        # Append per-file-instructions and override flags
+        command += f' --per-file-instructions "{pfi_path}" --override'
+
+        try:
+            processed_output_field_ref.value += f"[Modify] Running single-pass captioning for {len(captioned_items)} files...\n"
+            processed_output_field_ref.update() if processed_output_field_ref.page else None
+        except Exception:
+            pass
+
+        if e.page:
+            e.page.update()
+            # Run a single captioning process for all files
+            e.page.run_task(
+                run_dataset_script_command,
+                command,
+                e.page,
+                dataset_add_captions_button_control,
+                processed_progress_bar_ref,
+                processed_output_field_ref,
+                "Add Captions",
+                set_bottom_app_bar_height_func,
+                delete_button_ref=dataset_delete_captions_button_control,
+                thumbnails_grid_control=thumbnails_grid_control,
+                on_success_callback=lambda: _apply_modify_results(modify_output_json, dataset_folder_path, captioned_items, thumbnails_grid_control, dataset_type, pfi_path),
+            )
+        return
 
     # Verify local model presence to avoid online downloads
     if (selected_model or "").lower() == "llava_next_7b":
@@ -1393,6 +1558,9 @@ def stop_captioning(e: ft.ControlEvent,
                     processed_output_field_ref,
                     set_bottom_app_bar_height_func,
                     update_thumbnails_func):
+    # Signal modify-captions loop to stop between files
+    current_caption_process["stopped"] = True
+
     # Try to kill by PID file (more reliable for spawned processes)
     pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../scripts/caption_pid.txt')
     killed = False

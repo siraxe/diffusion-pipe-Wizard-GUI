@@ -229,6 +229,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         # Override to audio if ltx_mode is audio
         if ltx_mode == 'audio':
             dir_dataset_type = 'audio'
+        # H3 audio-only training needs an audio target carrier
+        if is_h3 and h3_target == 'audio':
+            dir_dataset_type = 'audio'
 
         # For multiple resolutions, create a dataset entry for each resolution
         for resolution in resolution_list:
@@ -262,22 +265,33 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 'bucket_no_upscale': False,
             }
 
-            # H3 target mode: when MiniMax H3 trains a single stream, tag the
-            # dataset so the cache/run picks the right target. Skip for 'all'.
-            if is_h3 and h3_target in ('video', 'audio'):
-                dataset_config['h3_target_mode'] = h3_target
-
             # AR bucketing params (enable_ar_bucket/min_ar/max_ar/num_ar_buckets)
             # are written only at [general] level — musubi-tuner schema rejects
             # them inside [[datasets]] entries.
 
-            # Set directory type based on detected content
-            if dir_dataset_type == 'image':
+            # Directory keys. MiniMax H3 uses the explicit target schema
+            # (target_*_directory + target_modalities); its loader rejects the
+            # legacy h3_target_mode and plain image/video/audio_directory keys.
+            if is_h3:
+                if dir_dataset_type == 'image':
+                    dataset_config['target_image_directory'] = dir_path
+                    dataset_config['target_modalities'] = ['image']
+                elif dir_dataset_type == 'audio':
+                    dataset_config['target_audio_directory'] = dir_path
+                    dataset_config['target_modalities'] = ['audio']
+                else:
+                    dataset_config['target_video_directory'] = dir_path
+                    # 'video' trains the video stream only; anything else
+                    # trains the combined audio-video stream.
+                    dataset_config['target_modalities'] = ['video'] if h3_target == 'video' else ['video', 'audio']
+            elif dir_dataset_type == 'image':
                 dataset_config['image_directory'] = dir_path
             elif dir_dataset_type == 'audio':
                 dataset_config['audio_directory'] = dir_path
             else:
                 dataset_config['video_directory'] = dir_path
+
+            if dir_dataset_type not in ('image', 'audio'):
                 dataset_config['target_frames'] = dir_frame_buckets
                 dataset_config['frame_extraction'] = dir_frame_extraction
                 if dir_frame_extraction == 'slide':
@@ -502,13 +516,25 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
         if 'resolution' in dataset:
             lines.append(f"resolution = {_format_list(dataset['resolution'])}")
 
-        # Check if this is an image, audio, or video dataset based on which directory key exists
+        # Directory keys: MiniMax H3 datasets use target_*_directory + target_modalities
+        if 'target_video_directory' in dataset:
+            lines.append(f"target_video_directory = \"{dataset['target_video_directory']}\"")
+        elif 'target_image_directory' in dataset:
+            lines.append(f"target_image_directory = \"{dataset['target_image_directory']}\"")
+        elif 'target_audio_directory' in dataset:
+            lines.append(f"target_audio_directory = \"{dataset['target_audio_directory']}\"")
+        if 'target_modalities' in dataset:
+            lines.append(f"target_modalities = {_format_list(dataset['target_modalities'])}")
+
         if 'image_directory' in dataset:
             lines.append(f"image_directory = \"{dataset['image_directory']}\"")
         elif 'audio_directory' in dataset:
             lines.append(f"audio_directory = \"{dataset['audio_directory']}\"")
         elif 'video_directory' in dataset:
             lines.append(f"video_directory = \"{dataset['video_directory']}\"")
+
+        # Video-only extras (applies to both video_directory and target_video_directory)
+        if 'video_directory' in dataset or 'target_video_directory' in dataset:
             if 'target_frames' in dataset:
                 lines.append(f"target_frames = {_format_list(dataset['target_frames'])}")
             if 'frame_extraction' in dataset:
@@ -528,8 +554,6 @@ def _write_musubi_toml(output_path: str, config: dict, dataset_type: str = 'vide
             lines.append(f"reference_cache_directory = \"{dataset['reference_cache_directory']}\"")
 
         lines.append(f"cache_directory = \"{dataset['cache_directory']}\"")
-        if 'h3_target_mode' in dataset:
-            lines.append(f"h3_target_mode = \"{dataset['h3_target_mode']}\"")
         lines.append(f"num_repeats = {dataset['num_repeats']}")
         lines.append(f"enable_bucket = {str(dataset.get('enable_bucket', False)).lower()}")
         lines.append(f"bucket_no_upscale = {str(dataset.get('bucket_no_upscale', False)).lower()}")

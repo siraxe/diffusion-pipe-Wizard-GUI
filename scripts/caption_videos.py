@@ -470,6 +470,7 @@ def caption_media(
     override: bool,
     max_new_tokens: int,
     selected_files: list[str] = None, # New parameter
+    per_file_instructions: dict[str, str] = None,
 ) -> None:
     """Caption videos and images using the provided captioning model.
     Args:
@@ -483,6 +484,7 @@ def caption_media(
         output_format: Format to save the captions in
         override: Whether to override existing captions
         selected_files: List of specific filenames to caption. If provided, only these files will be processed.
+        per_file_instructions: Dict mapping filename basename to custom instruction string.
     """
 
     # Get list of all media files in the input path
@@ -566,6 +568,12 @@ def caption_media(
             # Update progress description to show current file
             progress.update(task, description=f"Captioning [bold blue]{media_file.name}[/]")
 
+            # Apply per-file instruction override if available
+            _saved_instruction = None
+            if per_file_instructions and media_file.name in per_file_instructions:
+                _saved_instruction = captioner.instruction
+                captioner.instruction = per_file_instructions[media_file.name]
+
             try:
                 # Generate caption for the media
                 caption = captioner.caption(
@@ -583,6 +591,10 @@ def caption_media(
 
             except Exception as e:
                 console.print(f"[bold red]Error captioning [bold blue]{media_file}[/]: {e}[/]")
+
+            # Restore original instruction if it was overridden
+            if _saved_instruction is not None:
+                captioner.instruction = _saved_instruction
 
             # Advance progress bar
             progress.advance(task)
@@ -863,6 +875,11 @@ def main(  # noqa: PLR0913
         "--selected-files",
         help="Comma-separated list of specific filenames (basename only) to caption. If provided, only these files will be processed and their captions will be overwritten.",
     ),
+    per_file_instructions: str = typer.Option(
+        None,
+        "--per-file-instructions",
+        help="Path to a JSON file mapping media filename (basename) to a per-file instruction string. When provided, each file uses its own instruction instead of the global --instruction.",
+    ),
 ) -> None:
     """Auto-caption videos and images using vision-language models.
 
@@ -878,6 +895,13 @@ def main(  # noqa: PLR0913
 
     # Parse selected files if provided
     selected_files_list = [f.strip() for f in selected_files.split(",")] if selected_files else None
+
+    # Parse per-file instructions JSON if provided
+    per_file_instruction_map = None
+    if per_file_instructions:
+        with open(per_file_instructions, "r", encoding="utf-8") as _pfi:
+            per_file_instruction_map = json.load(_pfi)
+        console.print(f"Loaded per-file instructions for {len(per_file_instruction_map)} file(s).")
 
     # Determine output path and format
     if output is None:
@@ -921,6 +945,7 @@ def main(  # noqa: PLR0913
         override=override,
         max_new_tokens=max_new_tokens,
         selected_files=selected_files_list, # Pass the parsed list
+        per_file_instructions=per_file_instruction_map,
     )
 
 

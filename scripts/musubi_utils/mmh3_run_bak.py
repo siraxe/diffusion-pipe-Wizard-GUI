@@ -1,3 +1,13 @@
+"""
+MiniMax H3 Training Command Builder
+
+Constructs accelerate-launch commands for MiniMax H3 (T2VA / FL2VA) training,
+latent caching, and text-encoder caching via the musubi-tuner H3 scripts.
+
+This module currently ONLY builds and formats commands — it does not execute
+them. Pair with a dispatcher when wiring into the training flow.
+"""
+
 from __future__ import annotations
 
 import os
@@ -10,8 +20,6 @@ try:
     import safetensors.torch
 except ImportError:
     safetensors = None
-
-from .base import CommandBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +95,10 @@ def convert_comfy_to_training_with_rank(file_path: str, target_rank: int) -> Opt
         logger.error(f"Failed to convert ComfyUI LoRA {file_path}: {e}")
         return None
 
+# H3-specific script names under diffusion-trainers/musubi-tuner/
 H3_TRAIN_SCRIPT = "minimax_h3_train_network.py"
+H3_CACHE_LATENTS_SCRIPT = "minimax_h3_cache_latents.py"
+H3_CACHE_TEXT_SCRIPT = "minimax_h3_cache_text_encoder_outputs.py"
 
 # Defaults pulled from minimax_h3.md
 DEFAULTS = {
@@ -107,8 +118,30 @@ DEFAULTS = {
 }
 
 
-class MMH3Run(CommandBuilder):
-    """Builds MiniMax H3 training commands (no execution)."""
+class MMH3Run:
+    """Builds MiniMax H3 commands (no execution)."""
+
+    def __init__(self, project_root: Optional[str] = None):
+        self.project_root = Path(project_root) if project_root else self._find_project_root()
+        self.musubi_root = self.project_root / "diffusion-trainers" / "musubi-tuner"
+
+    @staticmethod
+    def _find_project_root() -> Path:
+        current = Path.cwd()
+        for parent in [current] + list(current.parents):
+            if (parent / "flet_app").exists() or (parent / "diffusion-trainers").exists():
+                return parent
+        return Path.cwd()
+
+    def _resolve_path(self, path: str) -> str:
+        if not path:
+            return ""
+
+        p = Path(path)
+        if not p.is_absolute():
+            p = self.project_root / p
+
+        return str(p)
 
     # ----------------------------------------------------------------------
     # Helpers
@@ -116,6 +149,15 @@ class MMH3Run(CommandBuilder):
 
     @staticmethod
     def _get_any(d: Dict, keys: List[str], default=None):
+        """
+        Get the first non-empty value from a dict using multiple possible keys.
+
+        This is intentionally tolerant of:
+        - trailing spaces in keys
+        - case differences in keys
+        - empty string values
+        - None values
+        """
         if not isinstance(d, dict):
             return default
 
@@ -151,6 +193,16 @@ class MMH3Run(CommandBuilder):
         return MMH3Run._get_any(d, [key], default)
 
     @staticmethod
+    def parse_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+
+        if value is None:
+            return False
+
+        return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    @staticmethod
     def _to_int(value, default: int = 0) -> int:
         """
         Safe int conversion.
@@ -179,6 +231,20 @@ class MMH3Run(CommandBuilder):
 
     @staticmethod
     def _normalize_ckpt_mode(value) -> str:
+        """
+        Normalize checkpoint mode.
+
+        Accepted epoch-like values:
+        - epoch
+        - epochs
+        - ep
+
+        Accepted step-like values:
+        - step
+        - steps
+        - iteration
+        - iterations
+        """
         raw = str(value or "steps").strip().lower()
 
         if raw in {"epoch", "epochs", "ep"}:
@@ -190,20 +256,13 @@ class MMH3Run(CommandBuilder):
         return "steps"
 
     @staticmethod
-    def _extra_flag_present(config: Dict, *flag_names: str) -> bool:
-        """Detect any of --flag or --flag=... in the top-level extra_flags string."""
-        extra = str(config.get("extra_flags", "") or "").strip() if isinstance(config, dict) else ""
-        if not extra:
-            return False
-        tokens = extra.split()
-        return any(
-            t == flag_name or t.startswith(f"{flag_name}=")
-            for flag_name in flag_names
-            for t in tokens
-        )
-
-    @staticmethod
     def _find_section(config: Dict, name: str) -> Dict:
+        """
+        Find a config section by name, tolerating trailing spaces and case differences.
+
+        Example:
+            "checkpoints", "checkpoints ", "Checkpoints"
+        """
         if not isinstance(config, dict):
             return {}
 
@@ -351,6 +410,70 @@ class MMH3Run(CommandBuilder):
         return cmd
 
     # ----------------------------------------------------------------------
+    # Cache Commands
+    # ----------------------------------------------------------------------
+
+    def build_cache_latents_command(
+        self,
+        dataset_config: str,
+        video_vae: str,
+        audio_vae: str,
+        batch_size: int = 1,
+        device: str = "cuda",
+    ) -> List[str]:
+        """
+        minimax_h3_cache_latents.py --dataset_config --vae --audio_vae
+        """
+        script = str(self.musubi_root / H3_CACHE_LATENTS_SCRIPT)
+
+        return [
+            sys.executable,
+            script,
+            "--dataset_config", self._resolve_path(dataset_config),
+            "--vae", self._resolve_path(video_vae),
+            "--audio_vae", self._resolve_path(audio_vae),
+            "--device", device,
+            "--batch_size", str(batch_size),
+        ]
+
+    def build_cache_text_encoder_command(
+        self,
+        dataset_config: str,
+        text_encoder: str,
+        tokenizer: str,
+        task: str = "t2va",
+        batch_size: int = 1,
+        device: str = "cuda",
+        cache_guidance_empty: bool = False,
+        text_encoder_quantization: str = "none",
+    ) -> List[str]:
+        """
+        minimax_h3_cache_text_encoder_outputs.py --dataset_config --text_encoder --tokenizer --task
+        """
+        script = str(self.musubi_root / H3_CACHE_TEXT_SCRIPT)
+
+        cmd = [
+            sys.executable,
+            script,
+            "--dataset_config", self._resolve_path(dataset_config),
+            "--text_encoder", self._resolve_path(text_encoder),
+            "--tokenizer", self._resolve_path(tokenizer),
+            "--task", task,
+            "--device", device,
+            "--batch_size", str(batch_size),
+        ]
+
+        if cache_guidance_empty:
+            cmd.append("--cache_guidance_empty")
+
+        if text_encoder_quantization:
+            quant = str(text_encoder_quantization).strip().lower()
+            if quant in ("int8", "nf4"):
+                cmd.extend(["--text_encoder_quantization", quant])
+
+        return cmd
+
+    # ----------------------------------------------------------------------
     # Training Command
     # ----------------------------------------------------------------------
 
@@ -363,6 +486,23 @@ class MMH3Run(CommandBuilder):
         reset_optimizer: bool = False,
         reset_optimizer_params: bool = False,
     ) -> List[str]:
+        """
+        Build the full accelerate launch training command for MiniMax H3.
+
+        Expected config sections:
+            model
+            optimization
+            acceleration
+            training_strategy
+            checkpoints
+            lora
+            validation
+
+        All sections are optional except model.
+
+        slider_config / reset_optimizer / reset_optimizer_params are accepted to
+        match the LTX2Run/WAN22Run API; H3 doesn't use them yet.
+        """
         model = self._find_section(config, "model")
         optimization = self._find_section(config, "optimization")
         acceleration = self._find_section(config, "acceleration")
@@ -381,29 +521,23 @@ class MMH3Run(CommandBuilder):
         script = str(self.musubi_root / H3_TRAIN_SCRIPT)
 
         dit_path = self._resolve_path(self._get(model, "model_path", ""))
+        # Quantized MiniMax-H3 checkpoints encode their scheme in the filename
+        # (e.g. minimax_h3_fl2va_pruned_int8_convrot.safetensors). The training
+        # script requires --int8_convrot_base for those, and --fp8_base must be
+        # omitted to avoid loading them as fp8.
         dit_name = Path(dit_path).name.lower()
         is_int8_convrot = "int8" in dit_name or "convrot" in dit_name
-
-        mixed_precision = str(
-            self._get(acceleration, "mixed_precision_mode", DEFAULTS["mixed_precision_mode"])
-        )
 
         cmd: List[str] = [
             "accelerate", "launch",
             "--num_cpu_threads_per_process", "4",
             script,
-            "--mixed_precision", mixed_precision,
             "--dit", dit_path,
             "--dataset_config", self._resolve_path(dataset_config),
+            "--mixed_precision", str(
+                self._get(acceleration, "mixed_precision_mode", DEFAULTS["mixed_precision_mode"])
+            ),
         ]
-
-        # ------------------------------------------------------------------
-        # Base weights: only LoRA adapter files; the H3 training script
-        # rejects full checkpoints here (expects lora_unet_* keys).
-        # ------------------------------------------------------------------
-        adapter_path = str(self._get(model, "adapter", "") or "").strip()
-        if adapter_path and adapter_path.lower() not in ("null", "none"):
-            cmd.extend(["--base_weights", self._resolve_path(adapter_path)])
 
         # ------------------------------------------------------------------
         # Attention backend: --flash_attn or --sdpa (default sdpa)
@@ -422,6 +556,12 @@ class MMH3Run(CommandBuilder):
         ):
             cmd.append("--gradient_checkpointing")
 
+        # ------------------------------------------------------------------
+        # fp8_base / int8_convrot_base + H2D block swap options
+        #
+        # int8/convrot checkpoints force --int8_convrot_base and must NOT get
+        # --fp8_base. Otherwise fall back to the user's fp8_base flag.
+        # ------------------------------------------------------------------
         if is_int8_convrot:
             cmd.append("--int8_convrot_base")
         elif self.parse_bool(self._get(acceleration, "fp8_base", False)):
@@ -470,36 +610,10 @@ class MMH3Run(CommandBuilder):
         h3_mode = self._get(training_strategy, "h3_training_mode", DEFAULTS["h3_training_mode"])
         if h3_mode:
             h3_mode_str = str(h3_mode).strip().lower()
-            # i2va and t2va use the same FL2VA checkpoint
-            if h3_mode_str in ("i2va", "t2va"):
+            # i2va uses the same FL2VA checkpoint as t2va/fl2va
+            if h3_mode_str == "i2va":
                 h3_mode_str = "fl2va"
             cmd.extend(["--h3_training_mode", h3_mode_str])
-
-            # Ref2VA with a plain BF16 checkpoint: apply the doc-recommended
-            # frozen-base reductions. Skipped for the pre-quantized ConvRot
-            # checkpoint or when the user supplied the flags via extra_flags.
-            if (
-                h3_mode_str in ("ref2va", "ref2va_omni")
-                and not is_int8_convrot
-            ):
-                has_fp8 = self.parse_bool(self._get(acceleration, "fp8_base", False))
-                has_user_flags = self._extra_flag_present(config, "--h3_convrot_int8", "--h3_convrot_int8_fwd", "--h3_adaln_rank")
-
-                # --h3_adaln_rank 16: compact AdaLN projections (~13B->~77M params).
-                # Compatible with --fp8_base (replaces FP8's AdaLN quantization).
-                if not has_user_flags:
-                    cmd.extend(["--h3_adaln_rank", "16"])
-                    logger.info("Ref2VA with BF16 base: added --h3_adaln_rank 16")
-
-                # --h3_convrot_int8 --h3_convrot_int8_fwd bf16: quantize ConvRot
-                # at load, keep BF16 forward. Only when NOT using --fp8_base
-                # (they are alternative base-weight strategies).
-                if (
-                    not has_fp8
-                    and not self._extra_flag_present(config, "--h3_convrot_int8", "--h3_convrot_int8_fwd")
-                ):
-                    cmd.extend(["--h3_convrot_int8", "--h3_convrot_int8_fwd", "bf16"])
-                    logger.info("Ref2VA with BF16 base: added --h3_convrot_int8 --h3_convrot_int8_fwd bf16")
 
         # Optional experimental guidance-distillation scale
         gds = self._get(training_strategy, "h3_guidance_distillation_scale", None)
@@ -507,14 +621,6 @@ class MMH3Run(CommandBuilder):
             gds_str = str(gds).strip().lower()
             if gds_str not in ("", "0", "0.0", "false", "none"):
                 cmd.extend(["--h3_guidance_distillation_scale", str(gds).strip()])
-
-        # ------------------------------------------------------------------
-        # Slider training: --slider when h3_slider = true (or t_type = 'slider')
-        # ------------------------------------------------------------------
-        h3_slider = self._get(training_strategy, "h3_slider", self._get(training_strategy, "slider", False))
-        t_type = str(self._get(training_strategy, "t_type", "")).strip().lower()
-        if self.parse_bool(h3_slider) or t_type == "slider":
-            cmd.append("--slider")
 
         # ------------------------------------------------------------------
         # LoRA network configuration
@@ -559,10 +665,6 @@ class MMH3Run(CommandBuilder):
         # Optimizer + LR + scheduler
         # ------------------------------------------------------------------
         opt_type = self._get(optimization, "optimizer_type", DEFAULTS["optimizer_type"])
-        if str(opt_type).strip().lower() == 'automagic':
-            # musubi-tuner's H3 trainer expects 'automagic3' (its bundled
-            # Automagic3 optimizer), not the upstream 'automagic' package.
-            opt_type = 'automagic3'
         learning_rate = self._get(optimization, "learning_rate", DEFAULTS["learning_rate"])
         scheduler = str(self._get(optimization, "scheduler_type", DEFAULTS["scheduler_type"])).strip().lower()
         grad_accumulation = self._to_int(
@@ -592,54 +694,96 @@ class MMH3Run(CommandBuilder):
         except (TypeError, ValueError):
             pass
 
-        save_state_value = self._get(checkpoints, "save_state", None)
+        # ------------------------------------------------------------------
+        # Save state
+        #
+        # Fixed:
+        # - read from checkpoints section
+        # - fallback to top-level config
+        # - support common aliases
+        # - tolerate trailing spaces / boolean strings
+        # ------------------------------------------------------------------
+        save_state_keys = [
+            "save_state",
+            "save_state_enabled",
+            "save_optimizer_state",
+        ]
+
+        save_state_value = self._get_any(checkpoints, save_state_keys, None)
 
         if save_state_value is None:
-            save_state_value = self._get(config, "save_state", None)
+            save_state_value = self._get_any(config, save_state_keys, None)
 
         if save_state_value is None:
-            save_state_value = self._get(optimization, "save_state", None)
+            save_state_value = self._get_any(optimization, save_state_keys, None)
 
         if save_state_value is None:
-            save_state_value = self._get(acceleration, "save_state", False)
+            save_state_value = self._get_any(acceleration, save_state_keys, False)
 
         if self.parse_bool(save_state_value):
             cmd.append("--save_state")
 
-        explicit_ckpt_mode = self._get(checkpoints, "mode", None)
+        # ------------------------------------------------------------------
+        # Max train steps/epochs + save_every + keep_last_n
+        #
+        # Fixed:
+        # - normalize mode
+        # - read save_every_n_steps / save_every_n_epochs directly
+        # - fallback to interval
+        # - do not force 50 when an explicit valid value exists
+        # - prefer correct max_train_epochs / max_steps based on mode
+        # ------------------------------------------------------------------
+        explicit_ckpt_mode = self._get_any(
+            checkpoints,
+            ["mode", "ckpt_mode", "checkpoint_mode", "save_mode"],
+            None,
+        )
 
         if explicit_ckpt_mode is None:
             # Infer mode if the user did not explicitly set one.
-            if self._get(
+            if self._get_any(
                 checkpoints,
-                "save_every_n_epochs",
+                [
+                    "save_every_n_epochs",
+                    "save_every_n_epoch",
+                    "save_every_epochs",
+                    "save_every_epoch",
+                ],
                 None,
             ) is not None:
                 ckpt_mode = "epochs"
 
-            elif self._get(
+            elif self._get_any(
                 checkpoints,
-                "save_every_n_steps",
+                [
+                    "save_every_n_steps",
+                    "save_every_n_step",
+                    "save_every_steps",
+                    "save_every_step",
+                ],
                 None,
             ) is not None:
                 ckpt_mode = "steps"
 
             elif (
-                self._get(optimization, "max_train_epochs", None) is not None
-                and self._get(optimization, "max_steps", None) is None
+                self._get_any(optimization, ["max_train_epochs", "max_epochs"], None) is not None
+                and self._get_any(optimization, ["max_steps", "max_train_steps"], None) is None
             ):
                 ckpt_mode = "epochs"
 
-            elif self._get(
+            # Backward compat: configs saved by build_toml_config_from_ui have no
+            # [checkpoints] section and only top-level save_every_n_epochs / _steps.
+            # Infer mode from which top-level key is present.
+            elif self._get_any(
                 config,
-                "save_every_n_epochs",
+                ["save_every_n_epochs", "save_every_n_epoch"],
                 None,
             ) is not None:
                 ckpt_mode = "epochs"
 
-            elif self._get(
+            elif self._get_any(
                 config,
-                "save_every_n_steps",
+                ["save_every_n_steps", "save_every_n_step"],
                 None,
             ) is not None:
                 ckpt_mode = "steps"
@@ -650,47 +794,140 @@ class MMH3Run(CommandBuilder):
             ckpt_mode = self._normalize_ckpt_mode(explicit_ckpt_mode)
 
         if ckpt_mode == "epochs":
-            interval_value = self._get(checkpoints, "interval", None)
+            interval_value = self._get_any(
+                checkpoints,
+                [
+                    "save_every_n_epochs",
+                    "save_every_n_epoch",
+                    "save_every_epochs",
+                    "save_every_epoch",
+                    "save_every",
+                    "interval",
+                    # Fallbacks, in case the config only has step-style keys.
+                    "save_every_n_steps",
+                    "save_every_n_step",
+                    "save_every_steps",
+                    "save_every_step",
+                ],
+                None,
+            )
 
             if interval_value is None:
-                interval_value = self._get(checkpoints, "save_every_n_epochs", None)
-
-            if interval_value is None:
-                interval_value = self._get(config, "save_every_n_epochs", None)
+                interval_value = self._get_any(
+                    config,
+                    [
+                        "save_every_n_epochs",
+                        "save_every_n_epoch",
+                        "save_every_epochs",
+                        "save_every_epoch",
+                        "save_every",
+                        "interval",
+                    ],
+                    None,
+                )
 
             interval = self._to_int(interval_value, 50)
 
-            total_value = self._get(optimization, "max_train_epochs", None)
+            # Epochs mode: only look for epoch-style totals. Don't fall back to
+            # max_steps — that's a different unit and would produce
+            # --max_train_epochs 2000 when the user actually has max_steps=2000.
+            total_value = self._get_any(
+                optimization,
+                [
+                    "max_train_epochs",
+                    "max_epochs",
+                    "epochs",
+                ],
+                None,
+            )
 
             if total_value is None:
-                total_value = self._get(config, "max_train_epochs", None)
+                total_value = self._get_any(
+                    config,
+                    [
+                        "max_train_epochs",
+                        "max_epochs",
+                        "epochs",
+                    ],
+                    None,
+                )
 
             if total_value is None:
+                # No epoch-style total anywhere. Refuse to silently misinterpret
+                # max_steps as epochs — fall back to a high default so the run
+                # doesn't end prematurely. User can override via [checkpoints].mode.
                 total_value = 100
 
             steps_or_epochs = self._to_int(total_value, 100)
 
-            keep_value = self._get(checkpoints, "keep_last_n", -1)
-            if keep_value == -1:
-                keep_value = self._get(checkpoints, "keep_last_n_epochs", -1)
+            keep_value = self._get_any(
+                checkpoints,
+                [
+                    "keep_last_n_epochs",
+                    "keep_last_n_epoch",
+                    "keep_last_n",
+                    "keep_last",
+                ],
+                -1,
+            )
             keep_last_n = self._to_int(keep_value, -1)
 
         else:
-            interval_value = self._get(checkpoints, "interval", None)
+            interval_value = self._get_any(
+                checkpoints,
+                [
+                    "save_every_n_steps",
+                    "save_every_n_step",
+                    "save_every_steps",
+                    "save_every_step",
+                    "save_every",
+                    "interval",
+                    # Fallbacks, in case the config only has epoch-style keys.
+                    "save_every_n_epochs",
+                    "save_every_n_epoch",
+                    "save_every_epochs",
+                    "save_every_epoch",
+                ],
+                None,
+            )
 
             if interval_value is None:
-                interval_value = self._get(checkpoints, "save_every_n_steps", None)
-
-            if interval_value is None:
-                interval_value = self._get(config, "save_every_n_steps", None)
+                interval_value = self._get_any(
+                    config,
+                    [
+                        "save_every_n_steps",
+                        "save_every_n_step",
+                        "save_every_steps",
+                        "save_every_step",
+                        "save_every",
+                        "interval",
+                    ],
+                    None,
+                )
 
             interval = self._to_int(interval_value, 50)
 
             # Steps mode: only look for step-style totals.
-            total_value = self._get(optimization, "max_steps", None)
+            total_value = self._get_any(
+                optimization,
+                [
+                    "max_steps",
+                    "max_train_steps",
+                    "steps",
+                ],
+                None,
+            )
 
             if total_value is None:
-                total_value = self._get(config, "max_steps", None)
+                total_value = self._get_any(
+                    config,
+                    [
+                        "max_steps",
+                        "max_train_steps",
+                        "steps",
+                    ],
+                    None,
+                )
 
             if total_value is None:
                 # No step-style total anywhere. Don't silently use max_train_epochs.
@@ -698,11 +935,22 @@ class MMH3Run(CommandBuilder):
 
             steps_or_epochs = self._to_int(total_value, 2000)
 
-            keep_value = self._get(checkpoints, "keep_last_n", -1)
-            if keep_value == -1:
-                keep_value = self._get(checkpoints, "keep_last_n_steps", -1)
+            keep_value = self._get_any(
+                checkpoints,
+                [
+                    "keep_last_n_steps",
+                    "keep_last_n_step",
+                    "keep_last_n",
+                    "keep_last",
+                ],
+                -1,
+            )
             keep_last_n = self._to_int(keep_value, -1)
 
+        # Add checkpoint flags.
+        #
+        # If interval is explicitly 0 or negative, omit the save-every flag.
+        # This allows users to disable periodic checkpointing without forcing 50.
         if ckpt_mode == "epochs":
             cmd.extend([
                 "--max_train_epochs", str(steps_or_epochs),
@@ -772,11 +1020,7 @@ class MMH3Run(CommandBuilder):
         # ------------------------------------------------------------------
         extra = self._get(config, "extra_flags", "")
         if extra and str(extra).strip():
-            tokens = str(extra).strip().split()
-            # Cache-only flags consumed by mmh3_cache; the training script
-            # does not accept them.
-            cache_only = {"--cache_guidance_empty"}
-            cmd.extend(t for t in tokens if t not in cache_only)
+            cmd.extend(str(extra).strip().split())
 
         return cmd
 
@@ -786,6 +1030,9 @@ class MMH3Run(CommandBuilder):
 
     @staticmethod
     def format_command(cmd: List[str]) -> str:
+        """
+        Pretty-print a command list as a backslash-continued multi-line shell string.
+        """
         lines = []
         i = 0
 
@@ -807,6 +1054,58 @@ class MMH3Run(CommandBuilder):
             lines[-1] = lines[-1].rstrip(" \\")
 
         return "\n".join(lines)
+
+    def print_all_commands(
+        self,
+        config: Dict,
+        dataset_config: str,
+        video_vae: Optional[str] = None,
+        audio_vae: Optional[str] = None,
+        tokenizer: Optional[str] = None,
+        resume: Optional[str] = None,
+    ) -> None:
+        """
+        Build and print all H3 commands (cache + train) to stdout.
+
+        video_vae, audio_vae, and tokenizer fall back to model section keys
+        (video_vae_path / audio_vae_path / tokenizer_path) if not passed explicitly.
+        """
+        model = self._find_section(config, "model")
+
+        text_encoder = self._get(model, "text_encoder_path", "")
+        video_vae = self._get(model, "vae_path", video_vae or "")
+        audio_vae = self._get(model, "vae_audio_path", audio_vae or "")
+        tokenizer = self._get(model, "tokenizer_path", tokenizer or "")
+
+        print("=" * 78)
+        print("MiniMax H3 — cache latents")
+        print("=" * 78)
+
+        if video_vae and audio_vae:
+            cmd = self.build_cache_latents_command(dataset_config, video_vae, audio_vae)
+            print(self.format_command(cmd))
+        else:
+            print("[skipped] video_vae and audio_vae paths are required")
+
+        print()
+        print("=" * 78)
+        print("MiniMax H3 — cache text encoder outputs")
+        print("=" * 78)
+
+        if text_encoder and tokenizer:
+            cmd = self.build_cache_text_encoder_command(dataset_config, text_encoder, tokenizer)
+            print(self.format_command(cmd))
+        else:
+            print("[skipped] text_encoder_path and tokenizer_path are required")
+
+        print()
+        print("=" * 78)
+        print("MiniMax H3 — train network")
+        print("=" * 78)
+
+        cmd = self.build_training_command(config, dataset_config, resume=resume)
+        print(self.format_command(cmd))
+        print()
 
 
 # ----------------------------------------------------------------------
@@ -831,7 +1130,26 @@ def format_training_command(
     )
 
 
+def print_all_commands(
+    config: Dict,
+    dataset_config: str,
+    video_vae: Optional[str] = None,
+    audio_vae: Optional[str] = None,
+    tokenizer: Optional[str] = None,
+    resume: Optional[str] = None,
+) -> None:
+    MMH3Run().print_all_commands(
+        config,
+        dataset_config,
+        video_vae,
+        audio_vae,
+        tokenizer,
+        resume,
+    )
+
+
 if __name__ == "__main__":
+    # Demo: build commands from a minimal sample config to verify structure.
     sample_config = {
         "model": {
             "model_path": "models/MiniMax-H3/diffusion_models/minimax_h3_fl2va_bf16.safetensors",
@@ -879,6 +1197,4 @@ if __name__ == "__main__":
         },
     }
 
-    runner = MMH3Run()
-    cmd = runner.build_training_command(sample_config, "dataset.toml")
-    print(runner.format_command(cmd))
+    print_all_commands(sample_config, "dataset.toml")
