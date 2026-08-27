@@ -2,6 +2,11 @@ import os
 import sys
 from pathlib import Path
 
+# Silence huggingface `tokenizers` fork warnings (and avoid potential
+# deadlocks) in spawned training/cache processes. Must be set before any
+# tokenizer parallelism is used; inherited by all child processes.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 # Allow running this file directly or as a module
 if __package__ in (None, ""):
     repo_root = Path(__file__).resolve().parent.parent

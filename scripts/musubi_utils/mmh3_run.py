@@ -88,6 +88,7 @@ def convert_comfy_to_training_with_rank(file_path: str, target_rank: int) -> Opt
         return None
 
 H3_TRAIN_SCRIPT = "minimax_h3_train_network.py"
+H3_SLIDER_TRAIN_SCRIPT = "minimax_h3_train_slider.py"
 
 # Defaults pulled from minimax_h3.md
 DEFAULTS = {
@@ -777,6 +778,63 @@ class MMH3Run(CommandBuilder):
             # does not accept them.
             cache_only = {"--cache_guidance_empty"}
             cmd.extend(t for t in tokens if t not in cache_only)
+
+        # ------------------------------------------------------------------
+        # H3 txt slider training: adapt this command for
+        # minimax_h3_train_slider.py. No dataset caching is needed — the
+        # prompts/latents come from the slider TOML itself.
+        # ------------------------------------------------------------------
+        txt_slider_active = (
+            slider_config is not None
+            and str(self._get(training_strategy, "h3_training_mode", "")).strip().lower() == "txt_slider"
+        )
+        if txt_slider_active:
+            normal_script = str(self.musubi_root / H3_TRAIN_SCRIPT)
+            if normal_script in cmd:
+                cmd[cmd.index(normal_script)] = str(self.musubi_root / H3_SLIDER_TRAIN_SCRIPT)
+
+            # The slider trainer uses the slider TOML as its dataset config.
+            if "--dataset_config" in cmd:
+                idx = cmd.index("--dataset_config")
+                del cmd[idx:idx + 2]
+
+            cmd.extend(["--slider_config", self._resolve_path(slider_config)])
+
+            # Text slider mode requires --h3_training_mode fl2va.
+            if "--h3_training_mode" in cmd:
+                cmd[cmd.index("--h3_training_mode") + 1] = "fl2va"
+            else:
+                cmd.extend(["--h3_training_mode", "fl2va"])
+
+            # Text encoder for prompt encoding (required in text mode).
+            if "--text_encoder" not in cmd:
+                te_path = str(self._get(model, "text_encoder_path", "") or "").strip()
+                if te_path and te_path.lower() not in ("null", "none"):
+                    cmd.extend(["--text_encoder", self._resolve_path(te_path)])
+                tok_path = str(self._get(model, "tokenizer_path", "") or "").strip()
+                if tok_path and tok_path.lower() not in ("null", "none"):
+                    cmd.extend(["--tokenizer", self._resolve_path(tok_path)])
+                te_quant = str(self._get(model, "text_encoder_quantization", "nvfp4") or "nvfp4").strip().lower()
+                if te_quant and te_quant != "none":
+                    cmd.extend(["--text_encoder_quantization", te_quant])
+                blocks_to_stream = self._to_int(
+                    self._get(model, "h3_text_encoder_blocks_to_stream", 50), 50
+                )
+                if blocks_to_stream > 0:
+                    cmd.extend(["--h3_text_encoder_blocks_to_stream", str(blocks_to_stream)])
+
+            # Frozen-base preservation loss (recommended for txt slider mode).
+            if not self._extra_flag_present(config, "--h3_base_preservation_loss_weight"):
+                preserve_weight = self._get(training_strategy, "h3_base_preservation_loss_weight", 0.02)
+                try:
+                    if float(preserve_weight) > 0:
+                        cmd.extend(["--h3_base_preservation_loss_weight", str(preserve_weight)])
+                        preserve_prob = self._get(training_strategy, "h3_base_preservation_probability", 0.25)
+                        cmd.extend(["--h3_base_preservation_probability", str(preserve_prob)])
+                except (TypeError, ValueError):
+                    pass
+
+            logger.info("H3 txt slider mode: using %s with %s", H3_SLIDER_TRAIN_SCRIPT, slider_config)
 
         return cmd
 

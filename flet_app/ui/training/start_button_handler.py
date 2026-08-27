@@ -495,26 +495,33 @@ async def run_ltx2_training_flow(
         else:
             add_warning_message(training_console_text, f"\n[Resume] No state found\n")
 
-    match mode:
-        case 'trust_cache':
-            add_info_message(training_console_text, f"\n[Info] Trust-cache mode: Skipping latents/text_encoder caching\n")
-            add_info_message(training_console_text, f"\n[Info] Running sample prompts caching...\n")
-            if training_console_text.page:
-                training_console_text.update()
-            await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'], reset_button_on_complete=False)
+    # H3 txt slider training needs no dataset caching — prompts/latents
+    # come from the slider TOML itself.
+    if txt_slider_config_path:
+        add_info_message(training_console_text, "\n[Info] Txt slider mode: Skipping cache commands...\n")
+        if training_console_text.page:
+            training_console_text.update()
+    else:
+        match mode:
+            case 'trust_cache':
+                add_info_message(training_console_text, f"\n[Info] Trust-cache mode: Skipping latents/text_encoder caching\n")
+                add_info_message(training_console_text, f"\n[Info] Running sample prompts caching...\n")
+                if training_console_text.page:
+                    training_console_text.update()
+                await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, cache_types=['sample_prompts'], reset_button_on_complete=False)
 
-        case 'cache_only':
-            add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running all cache commands\n")
-            if training_console_text.page:
-                training_console_text.update()
-            await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=True)
-            return  # Stop after caching
+            case 'cache_only':
+                add_info_message(training_console_text, f"\n[Info] Cache-only mode: Running all cache commands\n")
+                if training_console_text.page:
+                    training_console_text.update()
+                await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=True)
+                return  # Stop after caching
 
-        case 'full':
-            add_info_message(training_console_text, f"\n[Info] Running cache commands before training...\n")
-            if training_console_text.page:
-                training_console_text.update()
-            await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=False)
+            case 'full':
+                add_info_message(training_console_text, f"\n[Info] Running cache commands before training...\n")
+                if training_console_text.page:
+                    training_console_text.update()
+                await run_cache_commands(runner, dataset_config, main_container, training_tab_container, page, training_console_text, slider_config_path, reset_button_on_complete=False)
 
     # Detect VACE mode: check t_type dropdown value
     # ltx2_run.py will auto-detect and use the correct training script/flags
@@ -529,10 +536,11 @@ async def run_ltx2_training_flow(
             vace_dataset_config = vace_config_path
             add_info_message(training_console_text, f"\n[Info] VACE mode detected - using {os.path.basename(vace_config_path)}\n")
 
-    # Build training command (use VACE config if detected)
+    # Build training command (use VACE config if detected; txt slider
+    # config takes precedence over the regular slider config)
     cmd = runner.get_training_command(
         vace_dataset_config or dataset_config,
-        slider_config_path, resume_path, reset_optimizer, reset_optimizer_params
+        txt_slider_config_path or slider_config_path, resume_path, reset_optimizer, reset_optimizer_params
     )
 
     # Print the training command for reference (sorted and formatted)
