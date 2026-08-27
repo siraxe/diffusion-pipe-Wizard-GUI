@@ -54,6 +54,61 @@ def detect_dataset_type(directory_path: str) -> str:
         return 'empty'
 
 
+def _parse_slider_prompt_items(value):
+    """Parse a txt-slider prompt field into items.
+
+    Bracketed groups become individual items:
+        "[person], [woman], [man]" -> ["person", "woman", "man"]
+        "skinny"                   -> ["skinny"]
+    Unbracketed leftovers are split on commas (e.g. "red, orange").
+    """
+    text = str(value or '').strip()
+    if not text:
+        return []
+    items = [m.strip() for m in re.findall(r'\[([^\[\]]*)\]', text) if m.strip()]
+    if not items:
+        return [text]
+    remainder = re.sub(r'\[[^\[\]]*\]', '', text)
+    for chunk in remainder.split(','):
+        chunk = chunk.strip()
+        if chunk and chunk not in items:
+            items.append(chunk)
+    return items
+
+
+def _combine_slider_targets(pos_items, neg_items, cls_items):
+    """Combine parsed prompt items into (positive, negative, target_class) tuples.
+
+    - Fields sharing the same list length are zipped pairwise
+      (all three equal -> each target gets its own pos/neg/class).
+    - Single-item fields broadcast across the result.
+    - Remaining lists of differing lengths are combined as a cross product.
+    """
+    if len(pos_items) == len(neg_items) > 1:
+        pairs = list(zip(pos_items, neg_items))
+        if len(cls_items) == 1:
+            return [(p, n, cls_items[0]) for p, n in pairs]
+        if len(cls_items) == len(pairs):
+            return [(p, n, c) for (p, n), c in zip(pairs, cls_items)]
+        return [(p, n, c) for p, n in pairs for c in cls_items]
+    if len(neg_items) == len(cls_items) > 1:
+        pairs = list(zip(neg_items, cls_items))
+        if len(pos_items) == 1:
+            return [(pos_items[0], n, c) for n, c in pairs]
+        if len(pos_items) == len(pairs):
+            return [(p, n, c) for p, (n, c) in zip(pos_items, pairs)]
+        return [(p, n, c) for p in pos_items for n, c in pairs]
+    if len(pos_items) == len(cls_items) > 1:
+        pairs = list(zip(pos_items, cls_items))
+        if len(neg_items) == 1:
+            return [(p, neg_items[0], c) for p, c in pairs]
+        if len(neg_items) == len(pairs):
+            return [(p, n, c) for (p, c), n in zip(pairs, neg_items)]
+        return [(p, n, c) for p, c in pairs for n in neg_items]
+    # No shared list lengths: cross product (scalars broadcast naturally).
+    return [(p, n, c) for p in pos_items for n in neg_items for c in cls_items]
+
+
 def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: str = None, output_path: str = None):
     """
     Convert last_data_config.toml to last_data_musubi_config.toml format.
@@ -476,9 +531,14 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 ws_dir = os.path.dirname(output_path)
                 txt_slider_config_path = os.path.join(ws_dir, 'last_data_musubi_txt_slider_config.toml')
 
-                positive_val = str(training_strategy_ts.get('positive', 'a very sunny scene') or 'a very sunny scene')
-                negative_val = str(training_strategy_ts.get('negative', 'a very foggy scene') or 'a very foggy scene')
-                target_class_val = str(training_strategy_ts.get('target_class', 'cinematic scene') or 'cinematic scene')
+                positive_items = _parse_slider_prompt_items(training_strategy_ts.get('positive', 'a very sunny scene')) or ['a very sunny scene']
+                negative_items = _parse_slider_prompt_items(training_strategy_ts.get('negative', 'a very foggy scene')) or ['a very foggy scene']
+                class_items = _parse_slider_prompt_items(training_strategy_ts.get('target_class', 'cinematic scene')) or ['cinematic scene']
+
+                # Bracketed lists: fields with the same count are zipped
+                # pairwise (each target gets its own pos/neg/class), single
+                # values broadcast, mismatched counts cross-product.
+                target_combos = _combine_slider_targets(positive_items, negative_items, class_items)
 
                 txt_slider_lines = [
                     'mode = "text"',
@@ -487,17 +547,20 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                     'latent_frames = 2',
                     'latent_height = 12',
                     'latent_width = 20',
-                    '',
-                    '[[targets]]',
-                    f'positive = "{positive_val}"',
-                    f'negative = "{negative_val}"',
-                    f'target_class = "{target_class_val}"',
                 ]
+                for pos_val, neg_val, class_val in target_combos:
+                    txt_slider_lines += [
+                        '',
+                        '[[targets]]',
+                        f'positive = "{pos_val}"',
+                        f'negative = "{neg_val}"',
+                        f'target_class = "{class_val}"',
+                    ]
 
                 with open(txt_slider_config_path, 'w') as f:
                     f.write('\n'.join(txt_slider_lines) + '\n')
 
-                logger.info(f"Created txt slider config: {txt_slider_config_path}")
+                logger.info(f"Created txt slider config with {len(target_combos)} target(s): {txt_slider_config_path}")
         except Exception as e:
             logger.error(f"Error creating txt slider config: {e}")
 
