@@ -447,6 +447,13 @@ async def run_ltx2_training_flow(
     if slider_config_path:
         add_info_message(training_console_text, f"\n[Info] Slider config created at: {slider_config_path}\n")
 
+    # Check if txt_slider config was created (H3 mode = txt_slider)
+    txt_slider_config_path = musubi_result.get('txt_slider_config_path')
+    if txt_slider_config_path:
+        add_info_message(training_console_text, f"\n[Info] Txt slider config created at: {txt_slider_config_path}\n")
+        add_info_message(training_console_text, "\nslider training started\n")
+        print("slider training started", flush=True)
+
     # TODO: Implement musubi training using musubi_config_path
     # The musubi config has been created at: musubi_config_path
     add_info_message(training_console_text, f"\n[Info] Musubi config created at: {musubi_config_path}\n")

@@ -59,6 +59,9 @@ t5_path_field_ref = ft.Ref[ft.TextField]()
 ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 h3_training_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 h3_target_dropdown_ref = ft.Ref[ft.Dropdown]()
+target_class_field_ref = ft.Ref[ft.TextField]()
+positive_field_ref = ft.Ref[ft.TextField]()
+negative_field_ref = ft.Ref[ft.TextField]()
 target_fps_field_ref = ft.Ref[ft.TextField]()
 ltx_2_3_checkbox_ref = ft.Ref[ft.Checkbox]()
 wan_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
@@ -240,6 +243,11 @@ def _on_t_type_change(e):
     sync_dependent_field_visibility()
 
 
+def _on_h3_mode_change(e):
+    """Handle H3 mode dropdown change - show/hide txt_slider fields."""
+    sync_dependent_field_visibility()
+
+
 def _on_adapter_change(e):
     """Handle adapter dropdown change - show/hide factor field for lokr."""
     sync_dependent_field_visibility()
@@ -306,6 +314,15 @@ def sync_dependent_field_visibility():
             sample_each_field_ref.current.visible = should_show_slider_fields
             if sample_each_field_ref.current.page:
                 sample_each_field_ref.current.update()
+
+        # target_class / positive / negative (visible only when H3 mode is txt_slider)
+        h3_mode = h3_training_mode_dropdown_ref.current.value if h3_training_mode_dropdown_ref and h3_training_mode_dropdown_ref.current else None
+        should_show_txt_slider_fields = (h3_mode == "txt_slider") and _should_show_field("target_class", current_model)
+        for txt_slider_ref in (target_class_field_ref, positive_field_ref, negative_field_ref):
+            if txt_slider_ref and txt_slider_ref.current:
+                txt_slider_ref.current.visible = should_show_txt_slider_fields
+                if txt_slider_ref.current.page:
+                    txt_slider_ref.current.page.update()
     except Exception:
         pass
 
@@ -448,6 +465,9 @@ def get_training_config_page_content():
             "ltx_mode": ltx_mode_dropdown_ref,
             "h3_training_mode": h3_training_mode_dropdown_ref,
             "h3_target": h3_target_dropdown_ref,
+            "target_class": target_class_field_ref,
+            "positive": positive_field_ref,
+            "negative": negative_field_ref,
             "target_fps": target_fps_field_ref,
             "wan_mode": wan_mode_dropdown_ref,
             "wan_task": wan_task_dropdown_ref,
@@ -544,6 +564,9 @@ def get_training_config_page_content():
             # Musubi-specific fields
             "h3_training_mode": h3_training_mode_dropdown_ref,
             "h3_target": h3_target_dropdown_ref,
+            "target_class": target_class_field_ref,
+            "positive": positive_field_ref,
+            "negative": negative_field_ref,
             "target_fps": target_fps_field_ref,
             "sample_slider_range": sample_slider_range_field_ref,
             "i2v_type": i2v_type_dropdown_ref,
@@ -1351,9 +1374,10 @@ def get_training_config_page_content():
                         create_dropdown(
                             "H3 mode",
                             "fl2va",
-                            {"t2va": "t2va", "i2va": "i2va", "fl2va": "fl2va", "ref2va": "ref2va"},
-                            col=1.7, expand=True, scale=0.8, ref=h3_training_mode_dropdown_ref,
-                            visible=_should_show_field("h3_training_mode")
+                            {"t2va": "t2va", "i2va": "i2va", "fl2va": "fl2va", "ref2va": "ref2va", "txt_slider": "txt slider", "img_slider": "img slider"},
+                            col=2.5, expand=True, scale=0.8, ref=h3_training_mode_dropdown_ref,
+                            visible=_should_show_field("h3_training_mode"),
+                            on_change=_on_h3_mode_change
                         ),
                         create_dropdown(
                             "H3 target",
@@ -1361,6 +1385,13 @@ def get_training_config_page_content():
                             {"all": "all", "video": "video", "audio": "audio"},
                             col=1.7, expand=True, scale=0.8, ref=h3_target_dropdown_ref,
                             visible=_should_show_field("h3_target")
+                        ),
+                        create_textfield(
+                            "target_class", "cinematic scene",
+                            hint_text="Target class (txt slider mode)",
+                            expand=True, col=3.5 ,
+                            ref=target_class_field_ref,
+                            visible=False  # Only visible when H3 mode is txt_slider
                         ),
                         create_textfield(
                             "target_fps", "25",
@@ -1415,6 +1446,26 @@ def get_training_config_page_content():
                             expand=True, col=1.5, scale=0.8,
                             ref=reference_downscale_field_ref,
                             visible=False  # Only visible when ic_lora is checked
+                        ),
+                    ], spacing=2),
+                    # txt_slider prompts row: positive (full width)
+                    ft.ResponsiveRow(controls=[
+                        create_textfield(
+                            "positive", "a very sunny scene",
+                            hint_text="Positive prompt",
+                            expand=True, col=12 ,
+                            ref=positive_field_ref,
+                            visible=False  # Only visible when H3 mode is txt_slider
+                        ),
+                    ], spacing=2),
+                    # txt_slider prompts row: negative (full width)
+                    ft.ResponsiveRow(controls=[
+                        create_textfield(
+                            "negative", "a very foggy scene",
+                            hint_text="Negative prompt",
+                            expand=True, col=12 ,
+                            ref=negative_field_ref,
+                            visible=False  # Only visible when H3 mode is txt_slider
                         ),
                     ], spacing=2),
                     ft.ResponsiveRow(controls=[

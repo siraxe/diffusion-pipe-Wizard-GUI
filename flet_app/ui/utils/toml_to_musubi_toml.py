@@ -462,6 +462,45 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         except Exception as e:
             logger.error(f"Error creating slider config: {e}")
 
+    # Check if H3 txt_slider mode is enabled and create txt slider config
+    txt_slider_config_path = None
+    if last_config_path and os.path.exists(last_config_path):
+        try:
+            with open(last_config_path, 'r') as f:
+                last_config_ts = toml.load(f)
+
+            training_strategy_ts = last_config_ts.get('training_strategy', {}) or {}
+            h3_mode_ts = str(training_strategy_ts.get('h3_training_mode', '')).strip().lower()
+
+            if h3_mode_ts == 'txt_slider':
+                ws_dir = os.path.dirname(output_path)
+                txt_slider_config_path = os.path.join(ws_dir, 'last_data_musubi_txt_slider_config.toml')
+
+                positive_val = str(training_strategy_ts.get('positive', 'a very sunny scene') or 'a very sunny scene')
+                negative_val = str(training_strategy_ts.get('negative', 'a very foggy scene') or 'a very foggy scene')
+                target_class_val = str(training_strategy_ts.get('target_class', 'cinematic scene') or 'cinematic scene')
+
+                txt_slider_lines = [
+                    'mode = "text"',
+                    'target_modality = "video"',
+                    'guidance_strength = 1.0',
+                    'latent_frames = 2',
+                    'latent_height = 12',
+                    'latent_width = 20',
+                    '',
+                    '[[targets]]',
+                    f'positive = "{positive_val}"',
+                    f'negative = "{negative_val}"',
+                    f'target_class = "{target_class_val}"',
+                ]
+
+                with open(txt_slider_config_path, 'w') as f:
+                    f.write('\n'.join(txt_slider_lines) + '\n')
+
+                logger.info(f"Created txt slider config: {txt_slider_config_path}")
+        except Exception as e:
+            logger.error(f"Error creating txt slider config: {e}")
+
     # For return value, use first directory's settings (for backwards compatibility)
     first_dir_resolution = [[512, 512]]
     first_dir_frame_buckets = global_frame_buckets
@@ -480,6 +519,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         'video_directory': video_directory,
         'cache_directory': first_cache_dir,
         'slider_config_path': slider_config_path,
+        'txt_slider_config_path': txt_slider_config_path,
         'resolutions': first_dir_resolution,
         'target_frames': first_dir_frame_buckets if dataset_type != 'image' else None,
         'dataset_type': dataset_type,

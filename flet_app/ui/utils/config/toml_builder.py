@@ -534,6 +534,10 @@ def build_toml_config_from_ui(container: Any) -> str:
             h3_target = _get('h3_target', 'all')
             if h3_target:
                 lines.append(f"h3_target = {quote(str(h3_target))}")
+            for key, default in (('target_class', 'cinematic scene'), ('positive', 'a very sunny scene'), ('negative', 'a very foggy scene')):
+                val = _get(key, default)
+                if val:
+                    lines.append(f"{key} = {quote(str(val))}")
 
         # Musubi [lora] section — read rank/alpha from the musubi UI fields
         # (rank/alpha), not the diffusion-pipe a_rank/a_alpha fields.
