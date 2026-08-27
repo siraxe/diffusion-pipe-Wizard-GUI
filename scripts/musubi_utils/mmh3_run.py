@@ -471,8 +471,9 @@ class MMH3Run(CommandBuilder):
         h3_mode = self._get(training_strategy, "h3_training_mode", DEFAULTS["h3_training_mode"])
         if h3_mode:
             h3_mode_str = str(h3_mode).strip().lower()
-            # i2va and t2va use the same FL2VA checkpoint
-            if h3_mode_str in ("i2va", "t2va"):
+            # i2va and t2va use the same FL2VA checkpoint; slider variants are
+            # presented as fl2va (the slider trainer requires it)
+            if h3_mode_str in ("i2va", "t2va", "img_slider", "txt_slider"):
                 h3_mode_str = "fl2va"
             cmd.extend(["--h3_training_mode", h3_mode_str])
 
@@ -835,6 +836,36 @@ class MMH3Run(CommandBuilder):
                     pass
 
             logger.info("H3 txt slider mode: using %s with %s", H3_SLIDER_TRAIN_SCRIPT, slider_config)
+
+        # ------------------------------------------------------------------
+        # H3 img slider training (reference mode): adapt this command for
+        # minimax_h3_train_slider.py. Targets come from filename-matched
+        # positive/negative latent caches, so the normal dataset caching
+        # still runs; the slider TOML replaces the dataset config.
+        # ------------------------------------------------------------------
+        img_slider_active = (
+            slider_config is not None
+            and str(self._get(training_strategy, "h3_training_mode", "")).strip().lower() == "img_slider"
+        )
+        if img_slider_active:
+            normal_script = str(self.musubi_root / H3_TRAIN_SCRIPT)
+            if normal_script in cmd:
+                cmd[cmd.index(normal_script)] = str(self.musubi_root / H3_SLIDER_TRAIN_SCRIPT)
+
+            # The slider trainer uses the slider TOML as its dataset config.
+            if "--dataset_config" in cmd:
+                idx = cmd.index("--dataset_config")
+                del cmd[idx:idx + 2]
+
+            cmd.extend(["--slider_config", self._resolve_path(slider_config)])
+
+            # Reference slider mode requires --h3_training_mode fl2va.
+            if "--h3_training_mode" in cmd:
+                cmd[cmd.index("--h3_training_mode") + 1] = "fl2va"
+            else:
+                cmd.extend(["--h3_training_mode", "fl2va"])
+
+            logger.info("H3 img slider mode: using %s with %s", H3_SLIDER_TRAIN_SCRIPT, slider_config)
 
         return cmd
 

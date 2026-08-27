@@ -75,6 +75,19 @@ class MMH3Cache:
         return dataset_config_path
 
     @staticmethod
+    def _dataset_has_video_targets(dataset_config_path: str) -> bool:
+        """True if any dataset entry has video targets (vs image/audio-only)."""
+        try:
+            with open(dataset_config_path, 'r') as f:
+                cfg = toml.load(f)
+        except Exception:
+            return True  # unreadable config: keep the fl2va default
+        for ds in cfg.get('datasets', []):
+            if ds.get('target_video_directory') or ds.get('video_directory'):
+                return True
+        return False
+
+    @staticmethod
     def _find_project_root() -> Path:
         current = Path.cwd()
         for parent in [current] + list(current.parents):
@@ -198,8 +211,17 @@ class MMH3Cache:
         text_encoder_path = self._get(model, "text_encoder_path", "")
         tokenizer_path = self._get(model, "tokenizer_path", "")
 
-        # Use h3_training_mode from config to determine cache task type
-        task = self._get(training_strategy, "h3_training_mode", "fl2va")
+        # Use h3_training_mode from config to determine cache task type.
+        # Slider variants are not cache tasks: img_slider (reference mode)
+        # caches as plain fl2va; txt_slider needs no caching at all.
+        raw_task = str(self._get(training_strategy, "h3_training_mode", "fl2va")).strip().lower()
+        task = "fl2va" if raw_task in ("img_slider", "txt_slider") else raw_task
+        # Image targets have no first/last frames for FL2VA conditioning; the
+        # img slider on an image-only dataset caches as plain text (t2va) and
+        # trains with the fl2va flag (the DiT consumes cached hidden states as-is).
+        if task == "fl2va" and raw_task == "img_slider" and not self._dataset_has_video_targets(dataset_config):
+            task = "t2va"
+            logger.info("H3 img slider: image-only dataset, caching text encoder with --task t2va")
 
         quantization = self._resolve_quantization(config)
 

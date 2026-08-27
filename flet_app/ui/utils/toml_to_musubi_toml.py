@@ -236,10 +236,58 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
     ic_lora_enabled = (t_type == 'ic_lora')
     vace_lora_enabled = (t_type == 'vace_lora')
 
+    # H3 training mode (MiniMax H3 only). img_slider trains a reference-mode
+    # slider on filename-matched positive/negative latent caches.
+    h3_training_mode = ''
+    if last_config_path and os.path.exists(last_config_path):
+        try:
+            with open(last_config_path, 'r') as f:
+                last_config_h3 = toml.load(f)
+            h3_training_mode = str(last_config_h3.get('training_strategy', {}).get('h3_training_mode', '')).strip().lower()
+        except Exception:
+            pass
+    img_slider_enabled = is_h3 and h3_training_mode == 'img_slider'
+
     # Build the musubi config - create one dataset entry per directory
     datasets_list = []
 
-    for dir_info in directories:
+    # H3 img slider: also cache each directory's paired 'control' subdirectory
+    # so the reference-mode slider TOML can point at <dir>/cache_musubi
+    # (positive) and <dir>/control/cache_musubi (negative). The synthetic
+    # entries inherit their parent directory's per-dataset settings
+    # (resolutions, frame buckets, ...) so both caches match.
+    build_directories = directories
+    if img_slider_enabled:
+        build_directories = []
+        for dir_entry in directories:
+            build_directories.append(dir_entry)
+            control_dir = os.path.join(dir_entry.get('path', ''), 'control')
+            if control_dir and os.path.isdir(control_dir) and detect_dataset_type(control_dir) != 'empty':
+                # The H3 loader only enumerates media that has a caption file,
+                # but reference-mode sliders ignore the negative captions
+                # (conditioning comes from the positive cache). Create
+                # placeholder captions for any control item missing one.
+                created_captions = 0
+                for filename in os.listdir(control_dir):
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext not in VIDEO_EXTENSIONS and ext not in IMAGE_EXTENSIONS:
+                        continue
+                    caption_path = os.path.splitext(os.path.join(control_dir, filename))[0] + '.txt'
+                    if not os.path.exists(caption_path):
+                        with open(caption_path, 'w') as f:
+                            f.write('negative')
+                        created_captions += 1
+                if created_captions:
+                    logger.info(f"H3 img slider: created {created_captions} placeholder caption(s) in {control_dir}")
+
+                control_entry = {k: v for k, v in dir_entry.items() if k != 'path'}
+                control_entry['path'] = control_dir
+                control_entry['num_repeats'] = 1
+                build_directories.append(control_entry)
+            else:
+                logger.warning(f"H3 img slider: control directory missing or empty: {control_dir}")
+
+    for dir_info in build_directories:
         dir_path = dir_info.get('path', '')
         dir_num_repeats = dir_info.get('num_repeats', 1)
 
@@ -288,6 +336,11 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         if is_h3 and h3_target == 'audio':
             dir_dataset_type = 'audio'
 
+        # H3 img slider pairs need exactly one plain cache dir per directory
+        # (the slider TOML points at <dir>/cache_musubi without res suffixes)
+        if img_slider_enabled:
+            resolution_list = resolution_list[:1]
+
         # For multiple resolutions, create a dataset entry for each resolution
         for resolution in resolution_list:
             # cache_directory = path + /cache_musubi (or musubi_cache_positive for slider mode, or cache_ic_lora for ic_lora mode, or cache_vace for vace_lora mode)
@@ -301,7 +354,8 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 cache_directory = os.path.join(dir_path, "cache_musubi") if dir_path else ""
 
             # For multiple resolutions, append resolution to cache directory to make them unique
-            if is_multi_resolution:
+            # (skipped for H3 img slider: the slider TOML expects plain cache dirs)
+            if is_multi_resolution and not img_slider_enabled:
                 res_suffix = f"{resolution[0]}x{resolution[1]}"
                 unique_cache_dir = f"{cache_directory}_{res_suffix}"
             else:
@@ -564,6 +618,53 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         except Exception as e:
             logger.error(f"Error creating txt slider config: {e}")
 
+    # Check if H3 img_slider mode is enabled and create the reference-mode
+    # (paired caches) slider config. Positive targets come from the selected
+    # dataset dir's cache (<dir>/cache_musubi), negative targets from its
+    # paired control dir (<dir>/control/cache_musubi).
+    img_slider_config_path = None
+    if last_config_path and os.path.exists(last_config_path) and h3_training_mode == 'img_slider' and directories:
+        try:
+            with open(last_config_path, 'r') as f:
+                last_config_img = toml.load(f)
+
+            training_strategy_img = last_config_img.get('training_strategy', {}) or {}
+            ws_dir = os.path.dirname(output_path)
+            img_slider_config_path = os.path.join(ws_dir, 'last_data_musubi_img_slider_config.toml')
+
+            main_dir = directories[0].get('path', '')
+            if not main_dir:
+                raise ValueError("H3 img slider requires a selected dataset directory")
+
+            positive_cache_dir = os.path.join(main_dir, 'cache_musubi')
+            negative_cache_dir = os.path.join(main_dir, 'control', 'cache_musubi')
+
+            # h3_target 'all' trains the combined audio-video stream
+            target_modality = {'video': 'video', 'audio': 'audio'}.get(h3_target, 'av')
+
+            sample_slider_range_str = str(training_strategy_img.get('sample_slider_range', '-2.0, -1.0, 0.0, 1.0, 2.0'))
+            slider_values = [float(x.strip()) for x in sample_slider_range_str.split(',') if x.strip()] or [-2.0, -1.0, 0.0, 1.0, 2.0]
+
+            img_slider_lines = [
+                'mode = "reference"',
+                f'target_modality = "{target_modality}"',
+                'guidance_strength = 1.0',
+                '',
+                '# Filename-matched H3 latent caches: positive (main dataset) vs negative (control)',
+                f'positive_cache_dir = "{positive_cache_dir}"',
+                f'negative_cache_dir = "{negative_cache_dir}"',
+                '',
+                f'sample_slider_range = [ {", ".join(str(v) for v in slider_values)} ]',
+            ]
+
+            with open(img_slider_config_path, 'w') as f:
+                f.write('\n'.join(img_slider_lines) + '\n')
+
+            logger.info(f"Created img slider config: {img_slider_config_path}")
+        except Exception as e:
+            logger.error(f"Error creating img slider config: {e}")
+            img_slider_config_path = None
+
     # For return value, use first directory's settings (for backwards compatibility)
     first_dir_resolution = [[512, 512]]
     first_dir_frame_buckets = global_frame_buckets
@@ -583,6 +684,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         'cache_directory': first_cache_dir,
         'slider_config_path': slider_config_path,
         'txt_slider_config_path': txt_slider_config_path,
+        'img_slider_config_path': img_slider_config_path,
         'resolutions': first_dir_resolution,
         'target_frames': first_dir_frame_buckets if dataset_type != 'image' else None,
         'dataset_type': dataset_type,

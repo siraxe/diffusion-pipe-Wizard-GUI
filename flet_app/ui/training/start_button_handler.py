@@ -454,6 +454,11 @@ async def run_ltx2_training_flow(
         add_info_message(training_console_text, "\nslider training started\n")
         print("slider training started", flush=True)
 
+    # Check if img_slider config was created (H3 mode = img_slider)
+    img_slider_config_path = musubi_result.get('img_slider_config_path')
+    if img_slider_config_path:
+        add_info_message(training_console_text, f"\n[Info] Img slider config created at: {img_slider_config_path}\n")
+
     # TODO: Implement musubi training using musubi_config_path
     # The musubi config has been created at: musubi_config_path
     add_info_message(training_console_text, f"\n[Info] Musubi config created at: {musubi_config_path}\n")
@@ -536,11 +541,11 @@ async def run_ltx2_training_flow(
             vace_dataset_config = vace_config_path
             add_info_message(training_console_text, f"\n[Info] VACE mode detected - using {os.path.basename(vace_config_path)}\n")
 
-    # Build training command (use VACE config if detected; txt slider
-    # config takes precedence over the regular slider config)
+    # Build training command (use VACE config if detected; H3 slider configs
+    # take precedence over the regular slider config)
     cmd = runner.get_training_command(
         vace_dataset_config or dataset_config,
-        txt_slider_config_path or slider_config_path, resume_path, reset_optimizer, reset_optimizer_params
+        img_slider_config_path or txt_slider_config_path or slider_config_path, resume_path, reset_optimizer, reset_optimizer_params
     )
 
     # Print the training command for reference (sorted and formatted)
