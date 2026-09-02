@@ -60,6 +60,7 @@ ltx_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 h3_training_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 h3_target_dropdown_ref = ft.Ref[ft.Dropdown]()
 target_class_field_ref = ft.Ref[ft.TextField]()
+latent_fhw_field_ref = ft.Ref[ft.TextField]()
 positive_field_ref = ft.Ref[ft.TextField]()
 negative_field_ref = ft.Ref[ft.TextField]()
 target_fps_field_ref = ft.Ref[ft.TextField]()
@@ -318,7 +319,7 @@ def sync_dependent_field_visibility():
         # target_class / positive / negative (visible only when H3 mode is txt_slider)
         h3_mode = h3_training_mode_dropdown_ref.current.value if h3_training_mode_dropdown_ref and h3_training_mode_dropdown_ref.current else None
         should_show_txt_slider_fields = (h3_mode == "txt_slider") and _should_show_field("target_class", current_model)
-        for txt_slider_ref in (target_class_field_ref, positive_field_ref, negative_field_ref):
+        for txt_slider_ref in (target_class_field_ref, latent_fhw_field_ref, positive_field_ref, negative_field_ref):
             if txt_slider_ref and txt_slider_ref.current:
                 txt_slider_ref.current.visible = should_show_txt_slider_fields
                 if txt_slider_ref.current.page:
@@ -466,6 +467,7 @@ def get_training_config_page_content():
             "h3_training_mode": h3_training_mode_dropdown_ref,
             "h3_target": h3_target_dropdown_ref,
             "target_class": target_class_field_ref,
+            "latent_FHW": latent_fhw_field_ref,
             "positive": positive_field_ref,
             "negative": negative_field_ref,
             "target_fps": target_fps_field_ref,
@@ -565,6 +567,7 @@ def get_training_config_page_content():
             "h3_training_mode": h3_training_mode_dropdown_ref,
             "h3_target": h3_target_dropdown_ref,
             "target_class": target_class_field_ref,
+            "latent_FHW": latent_fhw_field_ref,
             "positive": positive_field_ref,
             "negative": negative_field_ref,
             "target_fps": target_fps_field_ref,
@@ -1391,6 +1394,27 @@ def get_training_config_page_content():
                             hint_text="Target class (txt slider mode)",
                             expand=True, col=3.5 ,
                             ref=target_class_field_ref,
+                            visible=False  # Only visible when H3 mode is txt_slider
+                        ),
+                        create_textfield(
+                            "latent_FHW", "2,12,20",
+                            hint_text="Latent F,H,W; frames auto-round up to 5n+2 (2,7,12..), H/W to even",
+                            tooltip=(
+                                "Latent grid for txt slider training: frames,height,width\n"
+                                "Latents are synthetic zeros, so this only sets the DiT token grid size.\n"
+                                "\n"
+                                "Pixels = H/W x 16 (24x40 = 384x640)\n"
+                                "Valid frame counts are 5n+2 latents = 5,22,39,56... real frames @24fps\n"
+                                "Typed values are auto-rounded UP: frames 5 -> 7, odd H/W -> even\n"
+                                "\n"
+                                "Bigger grid = trains at your generation resolution, better GPU use, slower steps.\n"
+                                "Examples:\n"
+                                "  2,12,20 = 5 frames @ 192x320 (fast default)\n"
+                                "  7,24,40 = 22 frames @ 384x640\n"
+                                "  12,24,40 = 39 frames @ 384x640"
+                            ),
+                            expand=True, col=2, scale=0.8,
+                            ref=latent_fhw_field_ref,
                             visible=False  # Only visible when H3 mode is txt_slider
                         ),
                         create_textfield(

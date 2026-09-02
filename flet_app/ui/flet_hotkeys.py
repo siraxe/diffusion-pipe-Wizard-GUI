@@ -16,6 +16,7 @@ PLAY_PAUSE_KEY = " "  # Spacebar
 NEXT_KEY = "]"
 PREV_KEY = "["
 D_KEY = "D" # Define D key
+SWITCH_CONTROL_KEY = "p"  # Toggle control/original view in the unified media popup
 
 def global_hotkey_handler(page, e):
     """

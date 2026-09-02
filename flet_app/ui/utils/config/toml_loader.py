@@ -250,8 +250,8 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
         label_vals['H3 mode'] = ts.get('h3_training_mode')
     if 'h3_target' in ts:
         label_vals['H3 target'] = ts.get('h3_target')
-    # txt_slider prompt fields (target_class, positive, negative)
-    for k in ('target_class', 'positive', 'negative'):
+    # txt_slider prompt fields (target_class, positive, negative) + latent dims
+    for k in ('target_class', 'positive', 'negative', 'latent_FHW'):
         if k in ts:
             label_vals[k] = ts.get(k)
     # Handle t_type dropdown (replaces slider/ic_lora/vace_lora checkboxes)

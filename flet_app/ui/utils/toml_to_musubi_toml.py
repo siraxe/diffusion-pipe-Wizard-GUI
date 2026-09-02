@@ -594,13 +594,36 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 # values broadcast, mismatched counts cross-product.
                 target_combos = _combine_slider_targets(positive_items, negative_items, class_items)
 
+                # latent_FHW = "frames,height,width" (latent space). Video VAE
+                # compresses 16x spatially and the DiT needs 2x2 patches, so
+                # height/width must be even. Frames are rounded up to the valid
+                # 5n+2 grid (2,7,12,17,... = 5,22,39,56 real frames) and H/W up
+                # to even. "2,12,20" = 5 frames @ 192x320.
+                latent_fhw = [2, 12, 20]
+                raw_fhw = training_strategy_ts.get('latent_FHW', '2,12,20')
+                try:
+                    parsed_fhw = [int(x.strip()) for x in str(raw_fhw).split(',') if x.strip()]
+                    if len(parsed_fhw) != 3 or any(v <= 0 for v in parsed_fhw):
+                        raise ValueError('expected 3 positive integers')
+                    # ceil((frames - 2) / 5) in integer arithmetic
+                    grid_frames = max(2, 5 * ((parsed_fhw[0] - 2 + 4) // 5) + 2)
+                    adjusted_fhw = [grid_frames, parsed_fhw[1] + parsed_fhw[1] % 2, parsed_fhw[2] + parsed_fhw[2] % 2]
+                    if adjusted_fhw != parsed_fhw:
+                        logger.info(
+                            f"latent_FHW {raw_fhw!r} rounded up to {','.join(str(v) for v in adjusted_fhw)} "
+                            f"(frames -> 5n+2 grid, H/W -> even)"
+                        )
+                    latent_fhw = adjusted_fhw
+                except ValueError as fhw_err:
+                    logger.warning(f"Invalid latent_FHW {raw_fhw!r} ({fhw_err}), using 2,12,20")
+
                 txt_slider_lines = [
                     'mode = "text"',
                     'target_modality = "video"',
                     'guidance_strength = 1.0',
-                    'latent_frames = 2',
-                    'latent_height = 12',
-                    'latent_width = 20',
+                    f'latent_frames = {latent_fhw[0]}',
+                    f'latent_height = {latent_fhw[1]}',
+                    f'latent_width = {latent_fhw[2]}',
                 ]
                 for pos_val, neg_val, class_val in target_combos:
                     txt_slider_lines += [

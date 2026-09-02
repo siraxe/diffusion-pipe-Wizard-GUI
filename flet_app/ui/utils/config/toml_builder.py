@@ -538,6 +538,10 @@ def build_toml_config_from_ui(container: Any) -> str:
                 val = _get(key, default)
                 if val:
                     lines.append(f"{key} = {quote(str(val))}")
+            if h3_mode == 'txt_slider':
+                latent_fhw = _get('latent_FHW', '2,12,20')
+                if latent_fhw:
+                    lines.append(f"latent_FHW = {quote(str(latent_fhw))}")
 
         # Musubi [lora] section — read rank/alpha from the musubi UI fields
         # (rank/alpha), not the diffusion-pipe a_rank/a_alpha fields.

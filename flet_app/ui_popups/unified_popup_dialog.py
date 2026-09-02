@@ -1,5 +1,6 @@
 import os
 import platform
+import shutil
 import tempfile
 import subprocess
 import threading
@@ -9,7 +10,7 @@ from typing import List, Optional
 import flet as ft
 
 from flet_app.settings import settings
-from flet_app.ui.flet_hotkeys import PLAY_PAUSE_KEY, NEXT_KEY, PREV_KEY
+from flet_app.ui.flet_hotkeys import PLAY_PAUSE_KEY, NEXT_KEY, PREV_KEY, SWITCH_CONTROL_KEY
 from flet_app.ui._styles import (
     IMAGE_PLAYER_DIALOG_WIDTH,
     IMAGE_PLAYER_DIALOG_HEIGHT,
@@ -102,6 +103,65 @@ def _open_in_photoshop_stacked(page: ft.Page, original_path: str, control_path: 
     # JSX builder moved to image_editor_bridge to keep code DRY
 
 
+def move_media_to_deleted(media_path: str) -> List[str]:
+    """
+    Soft-delete a media item by moving it (plus its caption files and control pair)
+    into a '_deleted' folder located next to the media:
+
+    - Main media          -> <media_dir>/_deleted/
+    - Control pair image  -> <media_dir>/_deleted/control/
+    - Caption .txt/_neg.txt -> <media_dir>/_deleted/
+
+    Returns the list of moved source paths.
+    """
+    moved: List[str] = []
+
+    try:
+        # Normalize: if deleting a control image, resolve to its original pair first
+        target = media_path
+        if "/control/" in media_path.replace("\\", "/"):
+            target = ipu.get_original_image_path(media_path)
+
+        base, _ = os.path.splitext(target)
+        media_dir = os.path.dirname(target)
+        deleted_dir = os.path.join(media_dir, "_deleted")
+
+        def _mv(src: str, subdir: str = "") -> None:
+            try:
+                if not src or not os.path.exists(src):
+                    return
+                dst_dir = os.path.join(deleted_dir, subdir) if subdir else deleted_dir
+                os.makedirs(dst_dir, exist_ok=True)
+                dst = os.path.join(dst_dir, os.path.basename(src))
+                if os.path.exists(dst):
+                    # Avoid overwriting anything already in _deleted
+                    stem, ext = os.path.splitext(os.path.basename(src))
+                    counter = 1
+                    while os.path.exists(dst):
+                        dst = os.path.join(dst_dir, f"{stem}_dup{counter}{ext}")
+                        counter += 1
+                shutil.move(src, dst)
+                moved.append(src)
+            except Exception as ex:
+                print(f"[DeleteMedia] failed to move {src}: {ex}")
+
+        # Caption files travel with the media
+        _mv(base + ".txt")
+        _mv(base + "_neg.txt")
+
+        # Control pair goes to _deleted/control
+        control_path = ipu.get_control_image_path(target)
+        if control_path:
+            _mv(control_path, subdir="control")
+
+        # Main media last
+        _mv(target)
+    except Exception as ex:
+        print(f"[DeleteMedia] error: {ex}")
+
+    return moved
+
+
 def open_unified_popup_dialog(
     page: ft.Page,
     media_path: str,
@@ -145,6 +205,7 @@ def open_unified_popup_dialog(
     neg_caption_tf: Optional[ft.TextField] = None
     caption_ext_tf: Optional[ft.TextField] = None
     caption_expanded: dict = {"val": False}  # stays on until Contract is pressed
+    caption_field_focused: dict = {"val": False}  # True while a caption TextField has focus (suppresses hotkeys)
     caption_timer: Optional[threading.Timer] = None
     neg_caption_timer: Optional[threading.Timer] = None
     _padding_value: str = "80"
@@ -672,7 +733,7 @@ def open_unified_popup_dialog(
         # Placeholder switch button; visibility and handler set later after control detection
         switch_top_btn = ft.IconButton(
             ft.Icons.COMPARE,
-            tooltip="Show control",
+            tooltip=f"Show control ({SWITCH_CONTROL_KEY})",
             visible=False,
         )
         prefix_controls = [prev_btn, next_btn, ps_btn, switch_top_btn]  # may be overridden for video
@@ -726,6 +787,13 @@ def open_unified_popup_dialog(
             except Exception:
                 cap_text, neg_text = "", ""
 
+        # Focus tracking so letter hotkeys (e.g. 'p') don't fire while typing captions
+        def _mark_caption_focus(e=None):
+            caption_field_focused["val"] = True
+
+        def _mark_caption_blur(e=None):
+            caption_field_focused["val"] = False
+
         # Build or update caption fields
         if caption_tf is None:
             caption_tf = create_textfield(
@@ -736,6 +804,8 @@ def open_unified_popup_dialog(
                 min_lines=3,
                 max_lines=5,
             )
+            caption_tf.on_focus = _mark_caption_focus
+            caption_tf.on_blur = _mark_caption_blur
         else:
             caption_tf.value = cap_text
 
@@ -748,6 +818,8 @@ def open_unified_popup_dialog(
                 min_lines=3,
                 max_lines=5,
             )
+            neg_caption_tf.on_focus = _mark_caption_focus
+            neg_caption_tf.on_blur = _mark_caption_blur
         else:
             neg_caption_tf.value = neg_text
 
@@ -760,6 +832,8 @@ def open_unified_popup_dialog(
                 min_lines=20,
                 max_lines=20,
             )
+            caption_ext_tf.on_focus = _mark_caption_focus
+            caption_ext_tf.on_blur = _mark_caption_blur
         else:
             caption_ext_tf.value = cap_text
 
@@ -1841,7 +1915,7 @@ def open_unified_popup_dialog(
                         is_showing_control_now = refresh._switch_state[base_image_path].get('is_showing_control', False)
                         switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control_now else None
                         switch_top_btn.style = None
-                        switch_top_btn.tooltip = "Showing control" if is_showing_control_now else "Show control"
+                        switch_top_btn.tooltip = f"Showing control ({SWITCH_CONTROL_KEY})" if is_showing_control_now else f"Show control ({SWITCH_CONTROL_KEY})"
                         if switch_top_btn.page:
                             switch_top_btn.update()
                     except Exception:
@@ -1857,7 +1931,9 @@ def open_unified_popup_dialog(
                 switch_top_btn.on_click = on_switch_click_video
                 switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control else None
                 switch_top_btn.style = None
-                switch_top_btn.tooltip = "Showing control" if is_showing_control else "Show control"
+                switch_top_btn.tooltip = f"Showing control ({SWITCH_CONTROL_KEY})" if is_showing_control else f"Show control ({SWITCH_CONTROL_KEY})"
+                # Expose the toggle for the 'p' hotkey
+                refresh._on_switch_control = on_switch_click_video
                 if switch_top_btn.page:
                     switch_top_btn.update()
             except Exception:
@@ -2038,7 +2114,7 @@ def open_unified_popup_dialog(
                         is_showing_control_now = refresh._switch_state[base_image_path].get('is_showing_control', False)
                         switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control_now else None
                         switch_top_btn.style = None
-                        switch_top_btn.tooltip = "Showing control" if is_showing_control_now else "Show control"
+                        switch_top_btn.tooltip = f"Showing control ({SWITCH_CONTROL_KEY})" if is_showing_control_now else f"Show control ({SWITCH_CONTROL_KEY})"
                         if switch_top_btn.page:
                             switch_top_btn.update()
                     except Exception:
@@ -2056,7 +2132,9 @@ def open_unified_popup_dialog(
                 # Visual indicator when control is active (color only) and clear any outline
                 switch_top_btn.icon_color = ft.Colors.AMBER if is_showing_control else None
                 switch_top_btn.style = None
-                switch_top_btn.tooltip = "Showing control" if is_showing_control else "Show control"
+                switch_top_btn.tooltip = f"Showing control ({SWITCH_CONTROL_KEY})" if is_showing_control else f"Show control ({SWITCH_CONTROL_KEY})"
+                # Expose the toggle for the 'p' hotkey
+                refresh._on_switch_control = on_switch_click
                 if switch_top_btn.page:
                     switch_top_btn.update()
             except Exception:
@@ -2138,6 +2216,77 @@ def open_unified_popup_dialog(
             fields_row,
             editing_row,
         ], spacing=10, tight=True)
+        # Add delete icon right before the 3-dot edit menu; moves media (and its
+        # control pair + captions) to a _deleted folder instead of hard-deleting.
+        delete_btn = ft.IconButton(
+            ft.Icons.DELETE_OUTLINE,
+            tooltip="Delete (move to _deleted)",
+            icon_color=ft.Colors.RED_400,
+        )
+
+        def _on_delete_click(e):
+            nonlocal index
+            try:
+                _hide_context_menu()
+            except Exception:
+                pass
+            try:
+                if not items:
+                    return
+                current_path = items[index]
+                if current_path and os.path.exists(current_path):
+                    moved = move_media_to_deleted(current_path)
+                    if os.path.exists(current_path):
+                        # Main file could not be moved (e.g. locked by the player) - keep it in the list
+                        try:
+                            page.snack_bar = ft.SnackBar(ft.Text(
+                                "Delete failed: file is locked or in use."), open=True)
+                            page.update()
+                        except Exception:
+                            pass
+                        return
+                    count_msg = f"{len(moved)} file(s)"
+                else:
+                    count_msg = "file not found"
+                # Drop the item from the playlist either way
+                items.pop(index)
+                if not items:
+                    try:
+                        dialog.hide_dialog()
+                    except Exception:
+                        pass
+                    try:
+                        page.snack_bar = ft.SnackBar(ft.Text(
+                            f"Deleted {os.path.basename(current_path)} (moved to _deleted; {count_msg})."), open=True)
+                        page.update()
+                    except Exception:
+                        pass
+                    return
+                # Stay on the same index (now the next item); wrap if we removed the last one
+                if index >= len(items):
+                    index = len(items) - 1
+                # Reset control toggle state like navigation does
+                try:
+                    if hasattr(refresh, '_switch_state'):
+                        refresh._switch_state.clear()
+                except Exception:
+                    pass
+                refresh()
+                try:
+                    page.snack_bar = ft.SnackBar(ft.Text(
+                        f"Deleted {os.path.basename(current_path)} (moved to _deleted; {count_msg})."), open=True)
+                    page.update()
+                except Exception:
+                    pass
+            except Exception as ex:
+                try:
+                    page.snack_bar = ft.SnackBar(ft.Text(f"Delete failed: {ex}"), open=True)
+                    page.update()
+                except Exception:
+                    pass
+
+        delete_btn.on_click = _on_delete_click
+
         # Add edit icon on right side next to X; clicking opens the same dropdown
         edit_menu_btn = ft.IconButton(ft.Icons.MORE_VERT, tooltip="Edit menu")
         def _on_edit_menu_click(e):
@@ -2159,7 +2308,7 @@ def open_unified_popup_dialog(
             content=content_container,
             title=title,
             title_prefix_controls=prefix_controls,
-            title_suffix_controls=[edit_menu_btn],
+            title_suffix_controls=[delete_btn, edit_menu_btn],
             new_width=DIALOG_WIDTH,
             page=page,
         )
@@ -2169,6 +2318,15 @@ def open_unified_popup_dialog(
                 key = getattr(e, 'key', None)
                 if not key:
                     return
+                # Suppress dialog hotkeys while typing in caption text fields
+                if caption_field_focused.get("val", False):
+                    return
+                # Suppress while the context menu is open (its rename field may be in use)
+                try:
+                    if context_menu_ctrl is not None and getattr(context_menu_ctrl, 'visible', False):
+                        return
+                except Exception:
+                    pass
                 # Spacebar controls video playback only
                 if key == PLAY_PAUSE_KEY and (not is_img) and local_video_player is not None:
                     if local_video_player.is_playing():
@@ -2191,6 +2349,14 @@ def open_unified_popup_dialog(
                     go(-1)
                 elif key == NEXT_KEY:
                     go(1)
+                elif str(key).lower() == SWITCH_CONTROL_KEY:
+                    # 'p' toggles control/original view (same as the "Show control" button)
+                    try:
+                        _switch_fn = getattr(refresh, '_on_switch_control', None)
+                        if callable(_switch_fn):
+                            _switch_fn(None)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         # Register appropriate dialog hotkey handler flags per media type
@@ -2238,7 +2404,7 @@ def open_unified_popup_dialog(
             try:
                 switch_top_btn.icon_color = None
                 switch_top_btn.style = None
-                switch_top_btn.tooltip = "Show control"
+                switch_top_btn.tooltip = f"Show control ({SWITCH_CONTROL_KEY})"
                 if switch_top_btn.page:
                     switch_top_btn.update()
             except Exception:
