@@ -156,7 +156,7 @@ def build_model_section(lines: List[str], cfg: Dict, _get: callable) -> None:
             lines.append(f"checkpoint_path = {quote(ckpt)}")
 
     # Base model paths (skip for SDXL and LTX)
-    skip_path_models = ('sdxl', 'ltx-video', 'ltx', 'ltx-video-2', 'minimaxh3')
+    skip_path_models = ('sdxl', 'ltx-video', 'ltx', 'ltx-video-2', 'minimaxh3', 'minimax_h3')
     if mt_lower not in skip_path_models:
         diff_path = _get('diffusers_path', None)
         if diff_path and str(diff_path).strip():
@@ -172,9 +172,9 @@ def build_model_section(lines: List[str], cfg: Dict, _get: callable) -> None:
     lines.append("")
     lines.append(f"dtype = {quote(_get('dtype', 'bfloat16'))}")
 
-    # transformer_dtype (flux2/klein/krea2 use diffusion_model_dtype instead)
+    # transformer_dtype (flux2/klein/krea2/minimax_h3 use diffusion_model_dtype instead)
     t_dtype = str(_get('transformer_dtype', 'float8'))
-    _diffusion_dtype_models = ('flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'krea2')
+    _diffusion_dtype_models = ('flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'krea2', 'minimax_h3')
     dtype_field = 'diffusion_model_dtype' if mt_lower in _diffusion_dtype_models else 'transformer_dtype'
     if t_dtype.strip().lower() == 'none':
         lines.append(f"#{dtype_field} = 'float8'")
@@ -538,10 +538,30 @@ def build_toml_config_from_ui(container: Any) -> str:
                 val = _get(key, default)
                 if val:
                     lines.append(f"{key} = {quote(str(val))}")
-            if h3_mode == 'txt_slider':
+            if h3_mode in ('txt_slider', 'visual_slider'):
                 latent_fhw = _get('latent_FHW', '2,12,20')
                 if latent_fhw:
                     lines.append(f"latent_FHW = {quote(str(latent_fhw))}")
+            if h3_mode == 'visual_slider':
+                # H3 visual slider conditioning knobs (written unquoted as TOML floats)
+                g_strength = _get('g_strength', 2.0)
+                try:
+                    g_strength = float(g_strength)
+                except (TypeError, ValueError):
+                    g_strength = 2.0
+                cond_extp = _get('cond_extp', 0.0)
+                try:
+                    cond_extp = float(cond_extp)
+                except (TypeError, ValueError):
+                    cond_extp = 0.0
+                img_dir_scale = _get('img_dir_scale', 4.0)
+                try:
+                    img_dir_scale = max(1.0, float(img_dir_scale))
+                except (TypeError, ValueError):
+                    img_dir_scale = 4.0
+                lines.append(f"h3_slider_guidance_strength = {g_strength}")
+                lines.append(f"h3_conditioning_extrapolation = {cond_extp}")
+                lines.append(f"h3_img_dir_scale = {img_dir_scale}")
 
         # Musubi [lora] section — read rank/alpha from the musubi UI fields
         # (rank/alpha), not the diffusion-pipe a_rank/a_alpha fields.

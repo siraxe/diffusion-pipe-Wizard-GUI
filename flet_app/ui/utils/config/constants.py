@@ -16,7 +16,7 @@ LTX_MODEL_TYPES: Set[str] = {'ltx-video', 'ltx', 'ltx-video-2', 'ltx2'}
 WAN_MODEL_TYPES: Set[str] = {'_wan22', 'wan22', 'wan'}
 
 # Models that don't use diffusers_path/transformer_path
-SKIP_PATH_MODELS: Set[str] = {'sdxl', 'ltx-video', 'ltx', 'ltx-video-2', 'ltx2', 'minimaxh3'}
+SKIP_PATH_MODELS: Set[str] = {'sdxl', 'ltx-video', 'ltx', 'ltx-video-2', 'ltx2', 'minimaxh3', 'minimax_h3'}
 
 # =============================================================================
 # Trainer Types

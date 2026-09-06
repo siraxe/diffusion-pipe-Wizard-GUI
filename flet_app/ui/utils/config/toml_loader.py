@@ -60,6 +60,10 @@ def populate_model_section(toml_data: dict, label_vals: dict) -> None:
 
     if 'model_path' in model:
         label_vals['model_path'] = collapse_model_path(model.get('model_path', ''))
+    if 'adapter' in model:
+        # [model] adapter -> adapter_path UI field (MiniMax H3 base weights,
+        # mapped to --base_weights by mmh3_run.py)
+        label_vals['adapter_path'] = collapse_model_path(model.get('adapter', ''))
     if 'text_encoder_path' in model:
         label_vals['text_encoder_path'] = collapse_model_path(model.get('text_encoder_path', ''))
     if 'training_mode' in model:
@@ -254,6 +258,13 @@ def populate_training_strategy_section(toml_data: dict, label_vals: dict) -> Non
     for k in ('target_class', 'positive', 'negative', 'latent_FHW'):
         if k in ts:
             label_vals[k] = ts.get(k)
+    # H3 visual_slider conditioning knobs (TOML keys -> short UI labels)
+    if 'h3_slider_guidance_strength' in ts:
+        label_vals['g_strength'] = ts.get('h3_slider_guidance_strength')
+    if 'h3_conditioning_extrapolation' in ts:
+        label_vals['cond_extp'] = ts.get('h3_conditioning_extrapolation')
+    if 'h3_img_dir_scale' in ts:
+        label_vals['img_dir_scale'] = ts.get('h3_img_dir_scale')
     # Handle t_type dropdown (replaces slider/ic_lora/vace_lora checkboxes)
     # Backward compatibility: if old checkbox keys exist, convert to t_type
     if 't_type' in ts:
@@ -654,22 +665,30 @@ def update_ui_from_toml(container: Any, toml_data: dict) -> None:
     # first load (esp. when transitioning from diffusion-pipe to musubi) the
     # tokenizer_path / vae_path / vae_audio_path fields stay hidden until the
     # user manually re-selects the model.
+    # Only applies to the musubi variant — diffusion-pipe minimax_h3 uses the
+    # diffusion_model/vae/audio_vae/text_encoders fields instead.
     try:
         mt_val = str(label_vals.get('Model Type', '')).strip().lower()
-        if mt_val in ('minimaxh3', 'minimax-h3', 'minimax_h3', 'mmh3', 'minimaxh'):
+        h3_trainer = str(toml_data.get('model', {}).get('trainer', label_vals.get('Trainer', '')) or '').strip().lower()
+        if mt_val in ('minimaxh3', 'minimax-h3', 'minimax_h3', 'mmh3', 'minimaxh') and h3_trainer == 'musubi':
             from flet_app.ui.pages.training_config import (
                 tokenizer_path_field_ref,
                 vae_path_field_ref,
                 vae_audio_path_field_ref,
                 model_path_field_ref,
+                adapter_path_field_ref,
                 text_encoder_row_ref,
             )
             for ref in (tokenizer_path_field_ref, vae_path_field_ref,
-                        vae_audio_path_field_ref, model_path_field_ref):
+                        vae_audio_path_field_ref, model_path_field_ref,
+                        adapter_path_field_ref):
                 if ref and ref.current:
                     ref.current.visible = True
                     if ref.current.page:
                         ref.current.update()
+            # adapter_path shares the model_path row (half width each)
+            if model_path_field_ref and model_path_field_ref.current:
+                model_path_field_ref.current.col = 6
             if text_encoder_row_ref and text_encoder_row_ref.current:
                 text_encoder_row_ref.current.visible = True
                 if text_encoder_row_ref.current.page:

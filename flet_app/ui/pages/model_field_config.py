@@ -158,6 +158,7 @@ MODEL_CONFIG = {
         "aliases": ["minimaxh3", "minimax-h3", "minimax_h3", "mmh3"],
         "show_fields": {
             "model_path": True,
+            "adapter_path": True,
             "diffusers_path": False,
             "transformer_path": False,
             "transformer_path_full": False,
@@ -218,7 +219,8 @@ MODEL_CONFIG = {
             "nf4_te": True,
         },
         "defaults": {
-            "model_path": "models/MiniMax-H3/minimax_h3_fl2va_bf16.safetensors",
+            "model_path": "models/MiniMax-H3/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "adapter_path": "models/MiniMax-H3/minimax_h3_training_adapter_v2.safetensors",
             "text_encoder_path": "models/text_encoders/qwen3vl_32b_minimax_h3_bf16.safetensors",
             "vae_path": "models/vae/minimax_h3_video_vae_fp16.safetensors",
             "vae_audio_path": "models/vae/minimax_h3_audio_vae_fp32.safetensors",
@@ -874,6 +876,45 @@ MODEL_CONFIG = {
         },
         "timestep_sm": "logit_normal",
     },
+    # MiniMax H3 for the diffusion-pipe trainer (musubi variant is "minimaxH3").
+    # Uses ComfyUI-format files; audio VAE reuses the vae_audio_path UI field
+    # (written as `audio_vae` in the TOML).
+    "minimax_h3": {
+        "aliases": ["minimax_h3"],
+        "show_fields": {
+            "checkpoint_path": False,
+            "diffusers_path": False,
+            "transformer_path": False,
+            "transformer_path_full": False,
+            "text_encoder_path": False,
+            "vae_path": False,
+            "llm_path": False,
+            "ckpt_path": False,
+            "clip_path": False,
+            "llama3_path": False,
+            "byt5_path": False,
+            "t5_path": False,
+            "single_file_path": False,
+            "diffusion_model": True,
+            "vae": True,
+            "vae_audio_path": True,
+            "text_encoders": True,
+            "shift": True,
+            "image_shift": True,
+            "cfg": True,
+        },
+        "defaults": {
+            "diffusion_model": "models/MiniMax-H3/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "vae": "models/vae/minimax_h3_video_vae_fp16.safetensors",
+            "vae_audio_path": "models/vae/minimax_h3_audio_vae_fp32.safetensors",
+            "text_encoders": "models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+            "shift": "8",
+            "image_shift": "1",
+            "cfg": "4",
+        },
+        "timestep_sm": "uniform",
+        "transformer_dtype": "None",
+    },
 }
 
 
@@ -882,30 +923,43 @@ def normalize_model_name(model_name):
     return str(model_name).strip().lower() if model_name else ""
 
 
-def get_model_key(normalized_name):
-    """Get the config key for a normalized model name by checking aliases."""
+# Normalized aliases for MiniMax H3, shared by the musubi ("minimaxH3") and
+# diffusion-pipe ("minimax_h3") variants. The trainer disambiguates them.
+_MINIMAX_H3_ALIASES = {"minimaxh3", "minimax-h3", "minimax_h3", "mmh3"}
+
+
+def get_model_key(normalized_name, trainer=None):
+    """Get the config key for a normalized model name by checking aliases.
+
+    Args:
+        normalized_name: Lowercased model name.
+        trainer: Optional trainer ('diffusion-pipe' or 'musubi'). Required to
+            disambiguate MiniMax H3, which exists for both trainers.
+    """
+    if normalized_name in _MINIMAX_H3_ALIASES and trainer is not None:
+        return "minimaxH3" if str(trainer).strip().lower() == "musubi" else "minimax_h3"
     for key, config in MODEL_CONFIG.items():
         if normalized_name in config.get("aliases", []):
             return key
     return None
 
 
-def get_model_config(model_name):
+def get_model_config(model_name, trainer=None):
     """Get the full config dict for a model name."""
     normalized = normalize_model_name(model_name)
-    key = get_model_key(normalized)
+    key = get_model_key(normalized, trainer)
     return MODEL_CONFIG.get(key) if key else None
 
 
-def get_field_visibility(model_name):
+def get_field_visibility(model_name, trainer=None):
     """Get the show_fields dict for a model."""
-    config = get_model_config(model_name)
+    config = get_model_config(model_name, trainer)
     return config.get("show_fields", {}) if config else {}
 
 
-def get_field_defaults(model_name):
+def get_field_defaults(model_name, trainer=None):
     """Get the defaults dict for a model."""
-    config = get_model_config(model_name)
+    config = get_model_config(model_name, trainer)
     return config.get("defaults", {}) if config else {}
 
 
@@ -913,6 +967,7 @@ def get_field_defaults(model_name):
 DEFAULT_FIELD_VISIBILITY = {
     # Path fields
     "model_path": False,
+    "adapter_path": False,
     "diffusers_path": False,
     "transformer_path": False,
     "transformer_path_full": False,
@@ -992,12 +1047,14 @@ DEFAULT_FIELD_VISIBILITY = {
     "vae": False,
     "text_encoders": False,
     "shift": False,
+    "image_shift": False,
+    "cfg": False,
     "z_image_diffusion_model": False,
 }
 
-def get_complete_field_visibility(model_name):
+def get_complete_field_visibility(model_name, trainer=None):
     """Get field visibility dict with defaults for any missing fields."""
-    config = get_model_config(model_name)
+    config = get_model_config(model_name, trainer)
     if not config:
         return DEFAULT_FIELD_VISIBILITY.copy()
 
@@ -1006,17 +1063,17 @@ def get_complete_field_visibility(model_name):
     return result
 
 
-def get_timestep_sm_default(model_name):
+def get_timestep_sm_default(model_name, trainer=None):
     """Get the default timestep_sm value for a model."""
-    config = get_model_config(model_name)
+    config = get_model_config(model_name, trainer)
     if config:
         return config.get("timestep_sm", None)
     return None
 
 
-def get_transformer_dtype_default(model_name):
+def get_transformer_dtype_default(model_name, trainer=None):
     """Get the default transformer_dtype value for a model."""
-    config = get_model_config(model_name)
+    config = get_model_config(model_name, trainer)
     if config:
         return config.get("transformer_dtype", None)
     return None
@@ -1038,6 +1095,7 @@ RESETTABLE_FIELDS = [
     "single_file_path",
     "t5_path",
     "model_path",
+    "adapter_path",
     "vae_audio_path",
     "tokenizer_path",
     "llm_adapter_lr",
@@ -1046,6 +1104,8 @@ RESETTABLE_FIELDS = [
     "vae",
     "text_encoders",
     "shift",
+    "image_shift",
+    "cfg",
     # Z_image-specific fields
     "z_image_diffusion_model",
     "z_image_vae",

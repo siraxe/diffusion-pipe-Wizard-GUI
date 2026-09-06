@@ -459,6 +459,11 @@ async def run_ltx2_training_flow(
     if img_slider_config_path:
         add_info_message(training_console_text, f"\n[Info] Img slider config created at: {img_slider_config_path}\n")
 
+    # Check if visual_slider config was created (H3 mode = visual_slider)
+    visual_slider_config_path = musubi_result.get('visual_slider_config_path')
+    if visual_slider_config_path:
+        add_info_message(training_console_text, f"\n[Info] Visual slider config created at: {visual_slider_config_path}\n")
+
     # TODO: Implement musubi training using musubi_config_path
     # The musubi config has been created at: musubi_config_path
     add_info_message(training_console_text, f"\n[Info] Musubi config created at: {musubi_config_path}\n")
@@ -474,6 +479,30 @@ async def run_ltx2_training_flow(
     # Run using musubi_run wrapper
     runner = create_runner(last_config_path)
     dataset_config = musubi_config_path
+
+    # A slider mode whose slider TOML could not be generated must abort here:
+    # falling through would run pointless dataset caching and launch plain
+    # training on an empty dataset instead of the slider run.
+    h3_mode_val = str((runner.get_config().get('training_strategy', {}) or {}).get('h3_training_mode', '')).strip().lower()
+    expected_slider_path = {
+        'txt_slider': txt_slider_config_path,
+        'visual_slider': visual_slider_config_path,
+        'img_slider': img_slider_config_path,
+    }.get(h3_mode_val)
+    if h3_mode_val in ('txt_slider', 'visual_slider', 'img_slider') and not expected_slider_path:
+        reason = (
+            "the dataset directory has no filename-matched image pairs between itself "
+            "and its control/ subfolder (case-insensitive, e.g. CONTROL/)"
+            if h3_mode_val == 'visual_slider'
+            else "the slider config generation failed; check the conversion log above"
+        )
+        add_warning_message(
+            training_console_text,
+            f"\n[Error] H3 {h3_mode_val} mode: slider config was not created - {reason}.\n"
+            "Fix the dataset layout and start again; skipping caching/training.\n"
+        )
+        reset_to_start_button(main_container, training_tab_container, page)
+        return
 
     # Check if training is supported for this model
     if not runner.run_handler:
@@ -500,10 +529,11 @@ async def run_ltx2_training_flow(
         else:
             add_warning_message(training_console_text, f"\n[Resume] No state found\n")
 
-    # H3 txt slider training needs no dataset caching — prompts/latents
-    # come from the slider TOML itself.
-    if txt_slider_config_path:
-        add_info_message(training_console_text, "\n[Info] Txt slider mode: Skipping cache commands...\n")
+    # H3 txt/visual slider training needs no dataset caching — prompts (and
+    # the visual slider's Qwen picture presentations) come from the slider
+    # TOML itself.
+    if txt_slider_config_path or visual_slider_config_path:
+        add_info_message(training_console_text, "\n[Info] Slider mode: Skipping cache commands...\n")
         if training_console_text.page:
             training_console_text.update()
     else:
@@ -545,7 +575,8 @@ async def run_ltx2_training_flow(
     # take precedence over the regular slider config)
     cmd = runner.get_training_command(
         vace_dataset_config or dataset_config,
-        img_slider_config_path or txt_slider_config_path or slider_config_path, resume_path, reset_optimizer, reset_optimizer_params
+        img_slider_config_path or visual_slider_config_path or txt_slider_config_path or slider_config_path,
+        resume_path, reset_optimizer, reset_optimizer_params
     )
 
     # Print the training command for reference (sorted and formatted)

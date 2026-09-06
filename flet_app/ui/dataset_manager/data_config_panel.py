@@ -41,6 +41,23 @@ def _fmt_list_of_lists(list_of_lists):
     return json.dumps(list_of_lists)
 
 
+def _normalize_int_list_text(raw):
+    """Normalize user text into a valid TOML int array.
+
+    Saves the field verbatim otherwise, so typing '368,736' (no brackets)
+    would write invalid TOML that downstream tomllib parsing rejects.
+    '368,736' / '[368, 736]' / '368 736' -> '[368, 736]'.
+    Text without any numbers is returned unchanged.
+    """
+    text = (raw or '').strip()
+    if not text:
+        return text
+    nums = re.findall(r'-?\d+', text)
+    if not nums:
+        return text
+    return '[' + ', '.join(nums) + ']'
+
+
 # ======================================================================================
 # Data Configuration Panel Creation
 # ======================================================================================
@@ -301,10 +318,11 @@ def create_data_config_panel(upload_button=None):
                 except Exception:
                     pass
 
-            # Collect values from fields
-            resolutions_raw = (resolutions_field.value or "").strip()
+            # Collect values from fields (normalize list text so unbracketed
+            # input like '368,736' is saved as valid TOML)
+            resolutions_raw = _normalize_int_list_text((resolutions_field.value or "").strip())
             ar_buckets_raw = (ar_buckets_field.value or "").strip()
-            frame_buckets_raw = (frame_buckets_field.value or "").strip()
+            frame_buckets_raw = _normalize_int_list_text((frame_buckets_field.value or "").strip())
             enable_ar_bucket_val = bool(enable_ar_bucket_field.value)
             min_ar_val = float(min_ar_field.value) if (min_ar_field.value or "").strip() != "" else 0.0
             max_ar_val = float(max_ar_field.value) if (max_ar_field.value or "").strip() != "" else 0.0

@@ -164,6 +164,38 @@ def append_model_specific_lines(lines, get_value, model_type: str):
             lines.append(f"    {{path = '{expanded_te}', type = 'krea2'}}")
             lines.append(f"]")
 
+    # minimax_h3 (diffusion-pipe): ComfyUI-format files + audio VAE + cfg.
+    # The audio VAE lives in the vae_audio_path UI field but is written as
+    # `audio_vae` (the diffusion-pipe key). (The musubi variant is 'minimaxh3'.)
+    if mt == 'minimax_h3':
+        diffusion_model = get_value('diffusion_model', None)
+        if diffusion_model and str(diffusion_model).strip():
+            expanded_dm_path = expand_model_path(str(diffusion_model))
+            lines.append(f"diffusion_model = '{expanded_dm_path}'")
+        vae = get_value('vae', None)
+        if vae and str(vae).strip():
+            expanded_vae = expand_model_path(str(vae))
+            lines.append(f"vae = '{expanded_vae}'")
+        audio_vae = get_value('vae_audio_path', None)
+        if _has(audio_vae):
+            lines.append(f"audio_vae = '{expand_model_path(str(audio_vae))}'")
+        text_encoders = get_value('text_encoders', None)
+        if text_encoders and str(text_encoders).strip():
+            expanded_te = expand_model_path(str(text_encoders))
+            lines.append(f"text_encoders = [")
+            lines.append(f"    {{path = '{expanded_te}', type = 'minimax'}}")
+            lines.append(f"]")
+        shift = get_value('shift', None)
+        if _has(shift):
+            lines.append(f"shift = {shift}")
+        image_shift = get_value('image_shift', None)
+        if _has(image_shift):
+            lines.append(f"image_shift = {image_shift}")
+        cfg_val = get_value('cfg', None)
+        if _has(cfg_val):
+            lines.append(f"# CFG-augmented training to preserve distillation. Use either this or a training adapter (not both).")
+            lines.append(f"cfg = {cfg_val}")
+
     # hidream
     if mt == 'hidream':
         fs = get_value('flux_shift', True)
@@ -252,6 +284,11 @@ def append_model_specific_lines(lines, get_value, model_type: str):
         model_path = get_value('model_path', None)
         if _has(model_path):
             lines.append(f"model_path = '{expand_model_path(str(model_path))}'")
+        # Optional base-weights adapter for H3 training (mmh3_run maps it to
+        # the --base_weights flag when the file exists).
+        adapter_path = get_value('adapter_path', None)
+        if _has(adapter_path):
+            lines.append(f"adapter = '{expand_model_path(str(adapter_path))}'")
         vae_audio_path = get_value('vae_audio_path', None)
         if _has(vae_audio_path):
             lines.append(f"vae_audio_path = '{expand_model_path(str(vae_audio_path))}'")
@@ -310,13 +347,47 @@ def populate_label_vals_from_model(model_dict: dict, label_vals: dict) -> str:
             label_vals['max_t'] = model_dict.get('max_t')
         if 'ckpt_path' in model_dict:
             label_vals['ckpt_path'] = collapse_model_path(model_dict.get('ckpt_path'))
-    elif mt_lower == 'minimaxh3':
-        if 'model_path' in model_dict:
-            label_vals['model_path'] = collapse_model_path(model_dict.get('model_path'))
-        if 'vae_audio_path' in model_dict:
-            label_vals['vae_audio_path'] = collapse_model_path(model_dict.get('vae_audio_path'))
-        if 'tokenizer_path' in model_dict:
-            label_vals['tokenizer_path'] = collapse_model_path(model_dict.get('tokenizer_path'))
+    elif mt_lower in ('minimaxh3', 'minimax_h3'):
+        # 'minimax_h3' (diffusion-pipe) and 'minimaxH3' (musubi) both land here.
+        # Disambiguate by TOML keys: diffusion-pipe uses
+        # diffusion_model / vae / audio_vae / text_encoders, musubi uses
+        # model_path / vae_audio_path / tokenizer_path.
+        if 'diffusion_model' in model_dict or 'audio_vae' in model_dict:
+            # diffusion-pipe minimax_h3
+            if 'diffusion_model' in model_dict:
+                label_vals['diffusion_model'] = collapse_model_path(model_dict.get('diffusion_model'))
+            if 'vae' in model_dict:
+                label_vals['vae'] = collapse_model_path(model_dict.get('vae'))
+            if 'audio_vae' in model_dict:
+                # audio_vae TOML key -> vae_audio_path UI field
+                label_vals['vae_audio_path'] = collapse_model_path(model_dict.get('audio_vae'))
+            if 'text_encoders' in model_dict:
+                text_encoders_val = model_dict.get('text_encoders')
+                if isinstance(text_encoders_val, list) and len(text_encoders_val) > 0:
+                    first_encoder = text_encoders_val[0]
+                    if isinstance(first_encoder, dict) and 'path' in first_encoder:
+                        label_vals['text_encoders'] = collapse_model_path(first_encoder['path'])
+                    elif isinstance(first_encoder, str):
+                        label_vals['text_encoders'] = collapse_model_path(first_encoder)
+                elif isinstance(text_encoders_val, str):
+                    label_vals['text_encoders'] = collapse_model_path(text_encoders_val)
+            if 'shift' in model_dict:
+                label_vals['shift'] = model_dict.get('shift')
+            if 'image_shift' in model_dict:
+                label_vals['image_shift'] = model_dict.get('image_shift')
+            if 'cfg' in model_dict:
+                label_vals['cfg'] = model_dict.get('cfg')
+        else:
+            # musubi minimaxH3
+            if 'model_path' in model_dict:
+                label_vals['model_path'] = collapse_model_path(model_dict.get('model_path'))
+            if 'adapter' in model_dict:
+                # [model] adapter -> adapter_path UI field (base weights for --base_weights)
+                label_vals['adapter_path'] = collapse_model_path(model_dict.get('adapter'))
+            if 'vae_audio_path' in model_dict:
+                label_vals['vae_audio_path'] = collapse_model_path(model_dict.get('vae_audio_path'))
+            if 'tokenizer_path' in model_dict:
+                label_vals['tokenizer_path'] = collapse_model_path(model_dict.get('tokenizer_path'))
     elif mt_lower == 'auraflow':
         if 'max_sequence_length' in model_dict:
             label_vals['max_sequence_length'] = model_dict.get('max_sequence_length')
@@ -461,6 +532,19 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
             return v
         return str(v).strip().lower() in ('1', 'true', 'yes', 'on')
 
+    # Resolve the trainer (TOML value takes precedence; fall back to the
+    # dropdown's current value). MiniMax H3 exists for both trainers, so the
+    # visibility handling below needs to know which variant is loading.
+    trainer_val = str(label_vals.get('Trainer', '') or '').strip().lower()
+    if not trainer_val:
+        try:
+            from flet_app.ui.pages.training_config import trainer_dropdown_ref
+            if getattr(trainer_dropdown_ref, 'current', None) and getattr(trainer_dropdown_ref.current, 'value', None):
+                trainer_val = str(trainer_dropdown_ref.current.value).strip().lower()
+        except Exception:
+            pass
+    is_musubi_trainer = (trainer_val == 'musubi')
+
     is_wan22 = is_auraflow = is_chroma = is_flux = is_flux2 = is_sd3 = is_ltx = is_ltx2 = is_lumina = is_sdxl = is_longcat = is_hunyuan_video = is_wan = is_z_image = is_anima = is_krea2 = is_minimax_h3 = False
     try:
         mt = str(label_vals.get('Model Type', '')).strip().lower()
@@ -484,6 +568,9 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     except Exception:
         pass
 
+    is_minimax_h3_musubi = is_minimax_h3 and is_musubi_trainer
+    is_minimax_h3_dpipe = is_minimax_h3 and not is_musubi_trainer
+
     try:
         if getattr(model_type_dropdown_ref, 'current', None) and getattr(model_type_dropdown_ref.current, 'value', None):
             curv = str(model_type_dropdown_ref.current.value).strip().lower()
@@ -505,11 +592,15 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     except Exception:
         pass
 
-    # MinimaxH3-specific field visibility on load (tokenizer_path, vae_path,
-    # vae_audio_path). The generic _apply_field_visibility triggered via
-    # on_model_type_change sometimes loses these because the trainer dropdown
-    # filter reuses the previous model's vis_config; force them visible here.
-    if is_minimax_h3:
+    is_minimax_h3_musubi = is_minimax_h3 and is_musubi_trainer
+    is_minimax_h3_dpipe = is_minimax_h3 and not is_musubi_trainer
+
+    # MinimaxH3 (musubi) field visibility on load (tokenizer_path, vae_path,
+    # vae_audio_path, adapter_path). The generic _apply_field_visibility
+    # triggered via on_model_type_change sometimes loses these because the
+    # trainer dropdown filter reuses the previous model's vis_config; force
+    # them visible here.
+    if is_minimax_h3_musubi:
         try:
             from flet_app.ui.pages.training_config import (
                 tokenizer_path_field_ref,
@@ -517,13 +608,18 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
                 vae_audio_path_field_ref,
                 text_encoder_row_ref,
                 model_path_field_ref,
+                adapter_path_field_ref,
             )
             for ref in (tokenizer_path_field_ref, vae_path_field_ref,
-                        vae_audio_path_field_ref, model_path_field_ref):
+                        vae_audio_path_field_ref, model_path_field_ref,
+                        adapter_path_field_ref):
                 if ref and ref.current:
                     ref.current.visible = True
                     if ref.current.page:
                         ref.current.page.update()
+            # adapter_path shares the model_path row (half width each)
+            if model_path_field_ref and model_path_field_ref.current:
+                model_path_field_ref.current.col = 6
             if text_encoder_row_ref and text_encoder_row_ref.current:
                 text_encoder_row_ref.current.visible = True
                 if text_encoder_row_ref.current.page:
@@ -605,7 +701,7 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     try:
         from flet_app.ui.pages.training_config import update_flux2_fields_visibility
         update_flux2_fields_visibility(
-            is_flux2 or is_krea2,
+            is_flux2 or is_krea2 or is_minimax_h3_dpipe,
             label_vals.get('diffusion_model'),
             label_vals.get('vae'),
             label_vals.get('text_encoders'),
@@ -613,3 +709,26 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
         )
     except Exception:
         pass
+
+    # MiniMax H3 (diffusion-pipe): audio VAE (vae_audio_path field), image_shift
+    # and cfg live outside the shared flux2 row fields, force them visible + valued.
+    if is_minimax_h3_dpipe:
+        try:
+            from flet_app.ui.pages.training_config import (
+                vae_audio_path_field_ref,
+                image_shift_field_ref,
+                cfg_field_ref,
+            )
+            for ref, val in (
+                (vae_audio_path_field_ref, label_vals.get('vae_audio_path')),
+                (image_shift_field_ref, label_vals.get('image_shift')),
+                (cfg_field_ref, label_vals.get('cfg')),
+            ):
+                if ref and ref.current:
+                    ref.current.visible = True
+                    if val is not None:
+                        ref.current.value = str(val)
+                    if ref.current.page:
+                        ref.current.page.update()
+        except Exception:
+            pass

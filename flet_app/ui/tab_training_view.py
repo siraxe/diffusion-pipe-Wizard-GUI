@@ -153,6 +153,41 @@ async def save_training_config_to_toml(training_tab_container):
                             config = _toml_reader.load(f)
             except Exception:
                 pass
+            # Fallback: dataset TOMLs are hand-editable and an unbracketed list
+            # (e.g. 'resolutions = 368,736') makes the whole file unparseable.
+            # Recover the per-dataset settings from raw text so they still reach
+            # last_data_config.toml (multi-resolution etc.).
+            if not config and dataset_name:
+                try:
+                    import re as _re
+                    from flet_app.ui.dataset_manager.dataset_utils import _get_dataset_base_dir as _get_base_dir
+                    base_dir_fb, _ = _get_base_dir(dataset_name)
+                    toml_path_fb = os.path.join(os.path.dirname(os.path.join(base_dir_fb, str(dataset_name))), f"{dataset_name}.toml")
+                    if os.path.exists(toml_path_fb):
+                        with open(toml_path_fb, 'r', encoding='utf-8') as f:
+                            raw_text = f.read()
+                        # List fields: parse every int out of the raw value
+                        for key in ('resolutions', 'frame_buckets'):
+                            if _re.search(r'^[ \t]*#[ \t]*' + key + r'[ \t]*=', raw_text, _re.MULTILINE):
+                                continue  # commented out in the file
+                            m = _re.search(r'^[ \t]*' + key + r'[ \t]*=[ \t]*(.*)$', raw_text, _re.MULTILINE)
+                            if m:
+                                nums = [int(v) for v in _re.findall(r'-?\d+', m.group(1))]
+                                if nums:
+                                    config[key] = nums
+                        # Scalar AR settings
+                        m = _re.search(r'^[ \t]*enable_ar_bucket[ \t]*=[ \t]*(true|false)', raw_text, _re.MULTILINE)
+                        if m:
+                            config['enable_ar_bucket'] = (m.group(1) == 'true')
+                        for key in ('min_ar', 'max_ar'):
+                            m = _re.search(r'^[ \t]*' + key + r'[ \t]*=[ \t]*([0-9.]+)', raw_text, _re.MULTILINE)
+                            if m:
+                                config[key] = float(m.group(1))
+                        m = _re.search(r'^[ \t]*num_ar_buckets[ \t]*=[ \t]*([0-9]+)', raw_text, _re.MULTILINE)
+                        if m:
+                            config['num_ar_buckets'] = int(m.group(1))
+                except Exception:
+                    pass
             return config
 
         lines = []

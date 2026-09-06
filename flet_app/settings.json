@@ -24,7 +24,8 @@
         "wan",
         "wan22",
         "z_image",
-        "krea2"
+        "krea2",
+        "minimax_h3"
     ],
     "captions": {
         "llava_next_7b": "LLaVA-NeXT-7B",

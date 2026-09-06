@@ -17,7 +17,7 @@ dependencies:
     - toml==0.10.2
     - decord==0.6
     - transformers==4.57.1
-    - diffusers==0.35.1
+    - diffusers==0.40.0
     - datasets==3.6.0
     - voluptuous==0.15.2
     - pillow==11.0.0
@@ -48,7 +48,7 @@ dependencies:
     - optimum-quanto==0.2.7
 
     - torch==2.8.0
-    - torchao==0.10.0
+    - torchao==0.18.0
     - torchaudio==2.8.0
     - torchdiffeq==0.2.5
     - torchsde==0.2.6

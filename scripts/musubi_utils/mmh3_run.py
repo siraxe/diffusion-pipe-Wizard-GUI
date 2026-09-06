@@ -401,10 +401,18 @@ class MMH3Run(CommandBuilder):
         # ------------------------------------------------------------------
         # Base weights: only LoRA adapter files; the H3 training script
         # rejects full checkpoints here (expects lora_unet_* keys).
+        # Only used when specified and the file actually exists.
         # ------------------------------------------------------------------
         adapter_path = str(self._get(model, "adapter", "") or "").strip()
         if adapter_path and adapter_path.lower() not in ("null", "none"):
-            cmd.extend(["--base_weights", self._resolve_path(adapter_path)])
+            resolved_adapter = self._resolve_path(adapter_path)
+            if os.path.isfile(resolved_adapter):
+                cmd.extend(["--base_weights", resolved_adapter])
+            else:
+                logger.warning(
+                    "Base weights adapter not found, skipping --base_weights: %s",
+                    resolved_adapter,
+                )
 
         # ------------------------------------------------------------------
         # Attention backend: --flash_attn or --sdpa (default sdpa)
@@ -473,7 +481,7 @@ class MMH3Run(CommandBuilder):
             h3_mode_str = str(h3_mode).strip().lower()
             # i2va and t2va use the same FL2VA checkpoint; slider variants are
             # presented as fl2va (the slider trainer requires it)
-            if h3_mode_str in ("i2va", "t2va", "img_slider", "txt_slider"):
+            if h3_mode_str in ("i2va", "t2va", "img_slider", "txt_slider", "visual_slider"):
                 h3_mode_str = "fl2va"
             cmd.extend(["--h3_training_mode", h3_mode_str])
 
@@ -667,6 +675,14 @@ class MMH3Run(CommandBuilder):
             if total_value is None:
                 total_value = self._get(config, "max_train_epochs", None)
 
+            # Epochs mode: fall back to max_steps (the UI's total field) so we
+            # don't silently train to a default of 100 epochs.
+            if total_value is None:
+                total_value = self._get(optimization, "max_steps", None)
+
+            if total_value is None:
+                total_value = self._get(config, "max_steps", None)
+
             if total_value is None:
                 total_value = 100
 
@@ -781,13 +797,14 @@ class MMH3Run(CommandBuilder):
             cmd.extend(t for t in tokens if t not in cache_only)
 
         # ------------------------------------------------------------------
-        # H3 txt slider training: adapt this command for
+        # H3 txt/visual slider training: adapt this command for
         # minimax_h3_train_slider.py. No dataset caching is needed — the
-        # prompts/latents come from the slider TOML itself.
+        # prompts/latents (and the visual slider's Qwen picture presentations)
+        # come from the slider TOML itself.
         # ------------------------------------------------------------------
         txt_slider_active = (
             slider_config is not None
-            and str(self._get(training_strategy, "h3_training_mode", "")).strip().lower() == "txt_slider"
+            and str(self._get(training_strategy, "h3_training_mode", "")).strip().lower() in ("txt_slider", "visual_slider")
         )
         if txt_slider_active:
             normal_script = str(self.musubi_root / H3_TRAIN_SCRIPT)
@@ -807,7 +824,7 @@ class MMH3Run(CommandBuilder):
             else:
                 cmd.extend(["--h3_training_mode", "fl2va"])
 
-            # Text encoder for prompt encoding (required in text mode).
+            # Text encoder for prompt encoding (required in text and visual modes).
             if "--text_encoder" not in cmd:
                 te_path = str(self._get(model, "text_encoder_path", "") or "").strip()
                 if te_path and te_path.lower() not in ("null", "none"):
@@ -835,7 +852,7 @@ class MMH3Run(CommandBuilder):
                 except (TypeError, ValueError):
                     pass
 
-            logger.info("H3 txt slider mode: using %s with %s", H3_SLIDER_TRAIN_SCRIPT, slider_config)
+            logger.info("H3 txt/visual slider mode: using %s with %s", H3_SLIDER_TRAIN_SCRIPT, slider_config)
 
         # ------------------------------------------------------------------
         # H3 img slider training (reference mode): adapt this command for

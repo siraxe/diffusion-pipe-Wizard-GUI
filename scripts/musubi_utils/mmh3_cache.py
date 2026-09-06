@@ -213,9 +213,11 @@ class MMH3Cache:
 
         # Use h3_training_mode from config to determine cache task type.
         # Slider variants are not cache tasks: img_slider (reference mode)
-        # caches as plain fl2va; txt_slider needs no caching at all.
+        # caches as plain fl2va; txt_slider and visual_slider need no dataset
+        # caching at all (their prompts/presentations come from the slider
+        # TOML) but map to fl2va here so any requested cache run stays valid.
         raw_task = str(self._get(training_strategy, "h3_training_mode", "fl2va")).strip().lower()
-        task = "fl2va" if raw_task in ("img_slider", "txt_slider") else raw_task
+        task = "fl2va" if raw_task in ("img_slider", "txt_slider", "visual_slider") else raw_task
         # Image targets have no first/last frames for FL2VA conditioning; the
         # img slider on an image-only dataset caches as plain text (t2va) and
         # trains with the fl2va flag (the DiT consumes cached hidden states as-is).

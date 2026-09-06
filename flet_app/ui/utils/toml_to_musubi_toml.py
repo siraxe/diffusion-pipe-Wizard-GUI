@@ -14,6 +14,29 @@ VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff', '.tif', '.gif'}
 
 
+def _control_subdir(directory: str) -> str:
+    """Resolve the paired control subdirectory case-insensitively.
+
+    The paired-control convention is <dataset>/control, but folders saved on
+    Windows often arrive as 'CONTROL'. Return the existing directory whose
+    name lowercases to 'control' (preferring the exact lowercase spelling),
+    falling back to the conventional path so downstream checks report it.
+    """
+    if not directory:
+        return os.path.join('control')
+    exact = os.path.join(directory, 'control')
+    if os.path.isdir(exact):
+        return exact
+    try:
+        entries = sorted(os.listdir(directory))
+    except (OSError, PermissionError):
+        return exact
+    for name in entries:
+        if name.lower() == 'control' and os.path.isdir(os.path.join(directory, name)):
+            return os.path.join(directory, name)
+    return exact
+
+
 def detect_dataset_type(directory_path: str) -> str:
     """
     Detect whether a directory contains videos or images.
@@ -74,6 +97,35 @@ def _parse_slider_prompt_items(value):
         if chunk and chunk not in items:
             items.append(chunk)
     return items
+
+
+def _parse_latent_fhw(training_strategy: dict):
+    """Parse the shared 'latent_FHW' slider geometry field.
+
+    latent_FHW = "frames,height,width" (latent space). Video VAE compresses
+    16x spatially and the DiT needs 2x2 patches, so height/width must be
+    even. Frames are rounded up to the valid 5n+2 grid (2,7,12,17,...
+    = 5,22,39,56 real frames) and H/W up to even. "2,12,20" = 5 frames
+    @ 192x320.
+    """
+    latent_fhw = [2, 12, 20]
+    raw_fhw = training_strategy.get('latent_FHW', '2,12,20')
+    try:
+        parsed_fhw = [int(x.strip()) for x in str(raw_fhw).split(',') if x.strip()]
+        if len(parsed_fhw) != 3 or any(v <= 0 for v in parsed_fhw):
+            raise ValueError('expected 3 positive integers')
+        # ceil((frames - 2) / 5) in integer arithmetic
+        grid_frames = max(2, 5 * ((parsed_fhw[0] - 2 + 4) // 5) + 2)
+        adjusted_fhw = [grid_frames, parsed_fhw[1] + parsed_fhw[1] % 2, parsed_fhw[2] + parsed_fhw[2] % 2]
+        if adjusted_fhw != parsed_fhw:
+            logger.info(
+                f"latent_FHW {raw_fhw!r} rounded up to {','.join(str(v) for v in adjusted_fhw)} "
+                f"(frames -> 5n+2 grid, H/W -> even)"
+            )
+        latent_fhw = adjusted_fhw
+    except ValueError as fhw_err:
+        logger.warning(f"Invalid latent_FHW {raw_fhw!r} ({fhw_err}), using 2,12,20")
+    return latent_fhw
 
 
 def _combine_slider_targets(pos_items, neg_items, cls_items):
@@ -261,7 +313,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         build_directories = []
         for dir_entry in directories:
             build_directories.append(dir_entry)
-            control_dir = os.path.join(dir_entry.get('path', ''), 'control')
+            control_dir = _control_subdir(dir_entry.get('path', ''))
             if control_dir and os.path.isdir(control_dir) and detect_dataset_type(control_dir) != 'empty':
                 # The H3 loader only enumerates media that has a caption file,
                 # but reference-mode sliders ignore the negative captions
@@ -306,26 +358,50 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         # Get control_args for i2v preprocessing
         dir_control_args = dir_info.get('control_args', None)
 
-        # Process resolutions (handle both flat list and list of lists)
+        # Process resolutions (one [[datasets]] entry per resolution, each with
+        # its own cache directory).
+        # Accepted forms (per-dataset or global):
+        #   [512]                      -> one square dataset [[512, 512]]
+        #   [368, 736]                 -> one square dataset per entry (multi-resolution)
+        #   [[512, 768], [1024, 576]]  -> one dataset per explicit [w, h] pair
+        #   "368,736"                  -> string recovered from hand-edited TOML
         resolution_list = []
         is_multi_resolution = False
 
-        if dir_resolutions and isinstance(dir_resolutions, list) and len(dir_resolutions) > 0:
-            if isinstance(dir_resolutions[0], list):
-                # Multiple resolutions: [[256, 256], [512, 512], [1024, 1024]]
-                is_multi_resolution = True
-                resolution_list = dir_resolutions
+        raw_resolutions = dir_resolutions
+        # Recover hand-edited unbracketed values like resolutions = 368,736
+        if isinstance(raw_resolutions, str):
+            raw_resolutions = [int(v) for v in re.findall(r'-?\d+', raw_resolutions)]
+        elif isinstance(raw_resolutions, (int, float)):
+            raw_resolutions = [int(raw_resolutions)]
+
+        if raw_resolutions and isinstance(raw_resolutions, list):
+            if isinstance(raw_resolutions[0], (list, tuple)):
+                # Explicit pairs: one dataset entry per [w, h] pair
+                for pair in raw_resolutions:
+                    if not pair:
+                        continue
+                    entry = [int(pair[0]), int(pair[1])] if len(pair) > 1 else [int(pair[0]), int(pair[0])]
+                    if entry not in resolution_list:
+                        resolution_list.append(entry)
             else:
-                # Single resolution as flat list: [512, 768] (convert to [[512, 768]])
-                # If only one element like [256], normalize to [256, 256]
-                is_multi_resolution = False
-                if len(dir_resolutions) == 1:
-                    resolution_list = [[dir_resolutions[0], dir_resolutions[0]]]
-                else:
-                    resolution_list = [dir_resolutions]
+                # Flat ints: each entry is a square resolution -> one dataset per entry
+                # ([512] -> [[512, 512]], [368, 736] -> [[368, 368], [736, 736]]);
+                # duplicates collapse so [512, 512] stays a single square dataset
+                for res in raw_resolutions:
+                    entry = [int(res), int(res)]
+                    if entry not in resolution_list:
+                        resolution_list.append(entry)
+            is_multi_resolution = len(resolution_list) > 1
         else:
             # Default resolution
             resolution_list = [[512, 512]]
+
+        if is_multi_resolution:
+            logger.info(
+                f"{dir_path or 'dataset'}: {len(resolution_list)} resolutions -> "
+                f"{['x'.join(str(v) for v in r) for r in resolution_list]} (one dataset entry each)"
+            )
 
         # Detect dataset type for this specific directory
         dir_dataset_type = detect_dataset_type(dir_path)
@@ -419,7 +495,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 # Add reference_directory for IC-LoRA mode
                 if ic_lora_enabled and dir_path:
                     # Check if control subdirectory exists
-                    potential_control = os.path.join(dir_path, 'control')
+                    potential_control = _control_subdir(dir_path)
                     if os.path.exists(potential_control) and os.path.isdir(potential_control):
                         dataset_config['reference_directory'] = potential_control
                         # Add per-dataset reference_cache_directory for proper multi-dataset support
@@ -537,7 +613,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
 
                         # Negative cache is musubi_cache_negative
                         # Check if there's a 'control' subdirectory within the dataset directory
-                        potential_control = os.path.join(pos_dir, 'control')
+                        potential_control = _control_subdir(pos_dir)
                         if os.path.exists(potential_control) and os.path.isdir(potential_control):
                             # Control exists as a subdirectory - put negative cache there
                             neg_cache_dir = os.path.join(potential_control, 'musubi_cache_negative')
@@ -594,28 +670,9 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 # values broadcast, mismatched counts cross-product.
                 target_combos = _combine_slider_targets(positive_items, negative_items, class_items)
 
-                # latent_FHW = "frames,height,width" (latent space). Video VAE
-                # compresses 16x spatially and the DiT needs 2x2 patches, so
-                # height/width must be even. Frames are rounded up to the valid
-                # 5n+2 grid (2,7,12,17,... = 5,22,39,56 real frames) and H/W up
-                # to even. "2,12,20" = 5 frames @ 192x320.
-                latent_fhw = [2, 12, 20]
-                raw_fhw = training_strategy_ts.get('latent_FHW', '2,12,20')
-                try:
-                    parsed_fhw = [int(x.strip()) for x in str(raw_fhw).split(',') if x.strip()]
-                    if len(parsed_fhw) != 3 or any(v <= 0 for v in parsed_fhw):
-                        raise ValueError('expected 3 positive integers')
-                    # ceil((frames - 2) / 5) in integer arithmetic
-                    grid_frames = max(2, 5 * ((parsed_fhw[0] - 2 + 4) // 5) + 2)
-                    adjusted_fhw = [grid_frames, parsed_fhw[1] + parsed_fhw[1] % 2, parsed_fhw[2] + parsed_fhw[2] % 2]
-                    if adjusted_fhw != parsed_fhw:
-                        logger.info(
-                            f"latent_FHW {raw_fhw!r} rounded up to {','.join(str(v) for v in adjusted_fhw)} "
-                            f"(frames -> 5n+2 grid, H/W -> even)"
-                        )
-                    latent_fhw = adjusted_fhw
-                except ValueError as fhw_err:
-                    logger.warning(f"Invalid latent_FHW {raw_fhw!r} ({fhw_err}), using 2,12,20")
+                # latent_FHW = "frames,height,width" (latent space). See
+                # _parse_latent_fhw for the grid rounding rules.
+                latent_fhw = _parse_latent_fhw(training_strategy_ts)
 
                 txt_slider_lines = [
                     'mode = "text"',
@@ -660,7 +717,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
                 raise ValueError("H3 img slider requires a selected dataset directory")
 
             positive_cache_dir = os.path.join(main_dir, 'cache_musubi')
-            negative_cache_dir = os.path.join(main_dir, 'control', 'cache_musubi')
+            negative_cache_dir = os.path.join(_control_subdir(main_dir), 'cache_musubi')
 
             # h3_target 'all' trains the combined audio-video stream
             target_modality = {'video': 'video', 'audio': 'audio'}.get(h3_target, 'av')
@@ -688,6 +745,155 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
             logger.error(f"Error creating img slider config: {e}")
             img_slider_config_path = None
 
+    # Check if H3 visual_slider mode is enabled and create the Qwen-picture
+    # slider config. The direction comes from filename-matched images in the
+    # dataset dir (positive) and its control dir (negative); no latent caches
+    # are involved — the trainer encodes the images through Qwen3-VL itself.
+    visual_slider_config_path = None
+    if last_config_path and os.path.exists(last_config_path) and h3_training_mode == 'visual_slider' and directories:
+        try:
+            with open(last_config_path, 'r') as f:
+                last_config_vs = toml.load(f)
+
+            training_strategy_vs = last_config_vs.get('training_strategy', {}) or {}
+            ws_dir = os.path.dirname(output_path)
+            visual_slider_config_path = os.path.join(ws_dir, 'last_data_musubi_visual_slider_config.toml')
+
+            main_dir = directories[0].get('path', '')
+            if not main_dir:
+                raise ValueError("H3 visual slider requires a selected dataset directory")
+            control_dir = _control_subdir(main_dir)
+
+            def _image_files(directory):
+                stems = {}
+                if directory and os.path.isdir(directory):
+                    for filename in sorted(os.listdir(directory)):
+                        if filename.startswith('.'):
+                            continue
+                        stem, ext = os.path.splitext(filename)
+                        if ext.lower() in IMAGE_EXTENSIONS and stem:
+                            stems.setdefault(stem, os.path.join(directory, filename))
+                return stems
+
+            positive_images = _image_files(main_dir)
+            negative_images = _image_files(control_dir)
+            matched = sorted(set(positive_images) & set(negative_images))
+            if not matched:
+                raise ValueError(
+                    "H3 visual slider found no filename-matched image pairs between "
+                    f"{main_dir} and {control_dir}"
+                )
+
+            # Shared instruction shown to Qwen next to each picture.
+            prompt_items = _parse_slider_prompt_items(
+                training_strategy_vs.get('target_class', 'cinematic scene')
+            ) or ['cinematic scene']
+            shared_prompt = prompt_items[0]
+
+            # Optional per-side descriptors (the UI positive/negative fields):
+            # each is appended to the shared prompt for its endpoint image only,
+            # so the slider direction spans the instruction rows as well as the
+            # image rows. Both sides must be filled together; empty = image-only.
+            # The boxes ship with the txt_slider stock prompts prefilled, and the
+            # UI clears them on switch to visual_slider; the exact stock strings
+            # still count as unset here so a hand-edited config cannot silently
+            # activate per-side text.
+            positive_descriptor = str(training_strategy_vs.get('positive', '') or '').strip()
+            negative_descriptor = str(training_strategy_vs.get('negative', '') or '').strip()
+            if positive_descriptor == 'a very sunny scene':
+                positive_descriptor = ''
+            if negative_descriptor == 'a very foggy scene':
+                negative_descriptor = ''
+            if positive_descriptor and negative_descriptor:
+                per_side_texts = (positive_descriptor, negative_descriptor)
+            elif positive_descriptor or negative_descriptor:
+                raise ValueError(
+                    "H3 visual slider positive/negative descriptor texts must be filled "
+                    "together (or both left empty for an image-only axis)"
+                )
+            else:
+                per_side_texts = None
+
+            # h3_target 'all' trains the combined audio-video stream
+            target_modality = {'video': 'video', 'audio': 'audio'}.get(h3_target, 'av')
+
+            latent_fhw = _parse_latent_fhw(training_strategy_vs)
+
+            # conditioning_extrapolation > 0 switches to the extrapolated-
+            # conditioning teacher (requires guidance_strength = 1.0); 0 keeps
+            # the endpoint mode scaled by guidance_strength.
+            conditioning_extrapolation = 0.0
+            try:
+                conditioning_extrapolation = max(0.0, float(training_strategy_vs.get('h3_conditioning_extrapolation', 0.0)))
+            except (TypeError, ValueError):
+                logger.warning("Invalid h3_conditioning_extrapolation, using 0.0")
+                conditioning_extrapolation = 0.0
+
+            # Visual-mode conditioning-axis rescale (UI img_dir_scale): one
+            # multiplier unit becomes a human-sized step instead of the raw pair
+            # difference (which is often only a few percent of the Qwen
+            # conditioning magnitude). Only valid together with
+            # conditioning_extrapolation > 0.
+            direction_scale = 4.0
+            try:
+                direction_scale = max(1.0, float(training_strategy_vs.get('h3_img_dir_scale', 4.0)))
+            except (TypeError, ValueError):
+                logger.warning("Invalid h3_img_dir_scale, using 4.0")
+                direction_scale = 4.0
+
+            guidance_strength = 2.0
+            if conditioning_extrapolation > 0:
+                guidance_strength = 1.0
+            else:
+                try:
+                    guidance_strength = max(0.0, float(training_strategy_vs.get('h3_slider_guidance_strength', 2.0)))
+                except (TypeError, ValueError):
+                    logger.warning("Invalid h3_slider_guidance_strength, using 2.0")
+                    guidance_strength = 2.0
+
+            sample_slider_range_str = str(training_strategy_vs.get('sample_slider_range', '-2.0, -1.0, 0.0, 1.0, 2.0'))
+            slider_values = [float(x.strip()) for x in sample_slider_range_str.split(',') if x.strip()] or [-2.0, -1.0, 0.0, 1.0, 2.0]
+
+            visual_slider_lines = [
+                'mode = "visual"',
+                f'target_modality = "{target_modality}"',
+                f'guidance_strength = {guidance_strength}',
+                f'conditioning_extrapolation = {conditioning_extrapolation}',
+            ]
+            if conditioning_extrapolation > 0:
+                visual_slider_lines.append(f'direction_scale = {direction_scale}')
+            visual_slider_lines += [
+                '',
+                '# Filename-matched images: positive (main dataset) vs negative (control),',
+                '# presented to Qwen3-VL only - never VAE encoded.',
+                f'latent_frames = {latent_fhw[0]}',
+                f'latent_height = {latent_fhw[1]}',
+                f'latent_width = {latent_fhw[2]}',
+                '',
+                f'sample_slider_range = [ {", ".join(str(v) for v in slider_values)} ]',
+            ]
+            for stem in matched:
+                visual_slider_lines += [
+                    '',
+                    '[[targets]]',
+                    f'prompt = "{shared_prompt}"',
+                    f'positive_image = "{positive_images[stem]}"',
+                    f'negative_image = "{negative_images[stem]}"',
+                ]
+                if per_side_texts:
+                    visual_slider_lines += [
+                        f'positive_text = "{per_side_texts[0]}"',
+                        f'negative_text = "{per_side_texts[1]}"',
+                    ]
+
+            with open(visual_slider_config_path, 'w') as f:
+                f.write('\n'.join(visual_slider_lines) + '\n')
+
+            logger.info(f"Created visual slider config with {len(matched)} target(s): {visual_slider_config_path}")
+        except Exception as e:
+            logger.error(f"Error creating visual slider config: {e}")
+            visual_slider_config_path = None
+
     # For return value, use first directory's settings (for backwards compatibility)
     first_dir_resolution = [[512, 512]]
     first_dir_frame_buckets = global_frame_buckets
@@ -708,6 +914,7 @@ def convert_toml_to_musubi_toml(last_data_config_path: str, last_config_path: st
         'slider_config_path': slider_config_path,
         'txt_slider_config_path': txt_slider_config_path,
         'img_slider_config_path': img_slider_config_path,
+        'visual_slider_config_path': visual_slider_config_path,
         'resolutions': first_dir_resolution,
         'target_frames': first_dir_frame_buckets if dataset_type != 'image' else None,
         'dataset_type': dataset_type,

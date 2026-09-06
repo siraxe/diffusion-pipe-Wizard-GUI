@@ -26,6 +26,7 @@ te1_lr_field_ref = ft.Ref[ft.TextField]()
 te2_lr_field_ref = ft.Ref[ft.TextField]()
 llm_adapter_lr_field_ref = ft.Ref[ft.TextField]()
 model_path_field_ref = ft.Ref[ft.TextField]()
+adapter_path_field_ref = ft.Ref[ft.TextField]()
 rank_field_ref = ft.Ref[ft.TextField]()
 alpha_field_ref = ft.Ref[ft.TextField]()
 factor_field_ref = ft.Ref[ft.TextField]()
@@ -61,6 +62,9 @@ h3_training_mode_dropdown_ref = ft.Ref[ft.Dropdown]()
 h3_target_dropdown_ref = ft.Ref[ft.Dropdown]()
 target_class_field_ref = ft.Ref[ft.TextField]()
 latent_fhw_field_ref = ft.Ref[ft.TextField]()
+h3_slider_g_strength_field_ref = ft.Ref[ft.TextField]()
+h3_cond_extrapolation_field_ref = ft.Ref[ft.TextField]()
+h3_img_dir_scale_field_ref = ft.Ref[ft.TextField]()
 positive_field_ref = ft.Ref[ft.TextField]()
 negative_field_ref = ft.Ref[ft.TextField]()
 target_fps_field_ref = ft.Ref[ft.TextField]()
@@ -131,6 +135,10 @@ flux2_diffusion_model_field_ref = ft.Ref[ft.TextField]()
 flux2_vae_field_ref = ft.Ref[ft.TextField]()
 flux2_text_encoders_field_ref = ft.Ref[ft.TextField]()
 flux2_shift_field_ref = ft.Ref[ft.TextField]()
+# image_shift field (MiniMax H3 diffusion-pipe: timestep shift for single-frame/image samples)
+image_shift_field_ref = ft.Ref[ft.TextField]()
+# cfg field (MiniMax H3 diffusion-pipe: CFG-augmented training)
+cfg_field_ref = ft.Ref[ft.TextField]()
 flux2_row_ref = ft.Ref[ft.ResponsiveRow]()
 
 # Optimizer fields
@@ -316,14 +324,52 @@ def sync_dependent_field_visibility():
             if sample_each_field_ref.current.page:
                 sample_each_field_ref.current.update()
 
-        # target_class / positive / negative (visible only when H3 mode is txt_slider)
+        # target_class / latent_FHW (shared prompt fields for txt+visual
+        # sliders); positive/negative texts are txt_slider prompts and, for
+        # visual_slider, per-side descriptors appended to the shared prompt
         h3_mode = h3_training_mode_dropdown_ref.current.value if h3_training_mode_dropdown_ref and h3_training_mode_dropdown_ref.current else None
-        should_show_txt_slider_fields = (h3_mode == "txt_slider") and _should_show_field("target_class", current_model)
-        for txt_slider_ref in (target_class_field_ref, latent_fhw_field_ref, positive_field_ref, negative_field_ref):
+        should_show_prompt_slider_fields = (
+            h3_mode in ("txt_slider", "visual_slider") and _should_show_field("target_class", current_model)
+        )
+        for prompt_slider_ref in (target_class_field_ref, latent_fhw_field_ref):
+            if prompt_slider_ref and prompt_slider_ref.current:
+                prompt_slider_ref.current.visible = should_show_prompt_slider_fields
+                if prompt_slider_ref.current.page:
+                    prompt_slider_ref.current.page.update()
+        # g_strength / cond_extp / img_dir_scale (visual_slider only: endpoint
+        # direction scale vs extrapolated-conditioning teacher range vs axis rescale)
+        should_show_vs_fields = (h3_mode == "visual_slider") and _should_show_field("target_class", current_model)
+        for vs_slider_ref in (h3_slider_g_strength_field_ref, h3_cond_extrapolation_field_ref, h3_img_dir_scale_field_ref):
+            if vs_slider_ref and vs_slider_ref.current:
+                vs_slider_ref.current.visible = should_show_vs_fields
+                if vs_slider_ref.current.page:
+                    vs_slider_ref.current.page.update()
+        # positive/negative: full txt_slider prompts, or visual_slider per-side
+        # descriptors that steer the image-pair axis through the instruction too
+        should_show_txt_slider_fields = (
+            h3_mode in ("txt_slider", "visual_slider") and _should_show_field("target_class", current_model)
+        )
+        for txt_slider_ref in (positive_field_ref, negative_field_ref):
             if txt_slider_ref and txt_slider_ref.current:
                 txt_slider_ref.current.visible = should_show_txt_slider_fields
                 if txt_slider_ref.current.page:
                     txt_slider_ref.current.page.update()
+        # The boxes are prefilled with the txt_slider stock prompts; in
+        # visual_slider mode an untouched box must read as "no descriptor"
+        # (image-only axis), so the stock texts are swapped for empty on
+        # switch and restored when going back to txt_slider.
+        for stock_ref, stock_value in ((positive_field_ref, "a very sunny scene"), (negative_field_ref, "a very foggy scene")):
+            if not (stock_ref and stock_ref.current):
+                continue
+            current_value = str(stock_ref.current.value or "").strip()
+            if h3_mode == "visual_slider" and current_value == stock_value:
+                stock_ref.current.value = ""
+                if stock_ref.current.page:
+                    stock_ref.current.update()
+            elif h3_mode == "txt_slider" and not current_value:
+                stock_ref.current.value = stock_value
+                if stock_ref.current.page:
+                    stock_ref.current.update()
     except Exception:
         pass
 
@@ -418,15 +464,16 @@ def get_training_config_page_content():
             except Exception:
                 pass
 
-    def _apply_field_visibility(sel_norm):
+    def _apply_field_visibility(sel_norm, trainer=None):
         """Apply visibility rules from model config to all field refs based on selected model."""
         # Get complete field visibility for this model (includes defaults for missing fields)
-        show_fields = mfc.get_complete_field_visibility(sel_norm)
+        show_fields = mfc.get_complete_field_visibility(sel_norm, trainer)
 
         # Map all field names to their field refs
         field_mapping = {
             # Path fields
             "model_path": model_path_field_ref,
+            "adapter_path": adapter_path_field_ref,
             "diffusers_path": diffusers_path_field_ref,
             "transformer_path": transformer_path_field_ref,
             "transformer_path_full": transformer_path_full_ref,
@@ -518,6 +565,8 @@ def get_training_config_page_content():
             "vae": flux2_vae_field_ref,
             "text_encoders": flux2_text_encoders_field_ref,
             "shift": flux2_shift_field_ref,
+            "image_shift": image_shift_field_ref,
+            "cfg": cfg_field_ref,
         }
 
         try:
@@ -538,6 +587,7 @@ def get_training_config_page_content():
         field_mapping = {
             # Path fields
             "model_path": model_path_field_ref,
+            "adapter_path": adapter_path_field_ref,
             "diffusers_path": diffusers_path_field_ref,
             "transformer_path": transformer_path_field_ref,
             "transformer_path_full": transformer_path_full_ref,
@@ -591,6 +641,8 @@ def get_training_config_page_content():
             "vae": flux2_vae_field_ref,
             "text_encoders": flux2_text_encoders_field_ref,
             "shift": flux2_shift_field_ref,
+            "image_shift": image_shift_field_ref,
+            "cfg": cfg_field_ref,
         }
 
         # Boolean field mapping
@@ -700,18 +752,20 @@ def get_training_config_page_content():
         if not sel:
             return
 
+        # Determine UI mode based on trainer (trainer takes precedence).
+        # Needed early: MiniMax H3 exists for both trainers (musubi "minimaxH3"
+        # vs diffusion-pipe "minimax_h3") and the trainer picks the right config.
+        trainer = trainer_dropdown_ref.current.value if trainer_dropdown_ref.current else None
+        uses_musubi_ui = (trainer == "musubi")
+
         # 1. Normalize and Prep
         sel_norm = mfc.normalize_model_name(sel)
-        model_key = mfc.get_model_key(sel_norm)
+        model_key = mfc.get_model_key(sel_norm, trainer)
         skip_defaults = _suppress_model_defaults or from_toml_load
 
         # 2. Apply Field Visibility
         # We capture the visibility dict to determine if Rows should be hidden
-        vis_config = _apply_field_visibility(sel_norm)
-
-        # 3. Determine UI mode based on trainer (trainer takes precedence)
-        trainer = trainer_dropdown_ref.current.value if trainer_dropdown_ref.current else None
-        uses_musubi_ui = (trainer == "musubi")
+        vis_config = _apply_field_visibility(sel_norm, trainer)
 
         # Update musubi custom section visibility
         if musubi_custom_section_ref and musubi_custom_section_ref.current:
@@ -724,6 +778,16 @@ def get_training_config_page_content():
             vis_config["model_path"] = True
             if model_path_field_ref and model_path_field_ref.current:
                 model_path_field_ref.current.visible = True
+
+        # adapter_path (MiniMax H3 only) shares the model_path row: widen
+        # model_path back to full width when the adapter field is hidden.
+        adapter_visible = bool(vis_config.get("adapter_path", False))
+        if adapter_path_field_ref and adapter_path_field_ref.current:
+            adapter_path_field_ref.current.visible = adapter_visible
+            if model_path_field_ref and model_path_field_ref.current:
+                model_path_field_ref.current.col = 6 if adapter_visible else 12
+            if adapter_path_field_ref.current.page:
+                adapter_path_field_ref.current.page.update()
 
         # Force load_text_encoder_in_8bit visible for _wan22 + musubi
         if sel_norm == "_wan22" and uses_musubi_ui:
@@ -819,6 +883,7 @@ def get_training_config_page_content():
                 "first_frame_conditioning_p": first_frame_conditioning_p_field_ref,
                 "t5_path": t5_path_field_ref,
                 "model_path": model_path_field_ref,
+                "adapter_path": adapter_path_field_ref,
                 "llm_adapter_lr": llm_adapter_lr_field_ref,
                 "hidream_4bit": hidream_4bit_checkbox_ref,
                 "hidream_tdtype": hidream_tdtype_checkbox_ref,
@@ -832,6 +897,8 @@ def get_training_config_page_content():
                 "vae": flux2_vae_field_ref,
                 "text_encoders": flux2_text_encoders_field_ref,
                 "shift": flux2_shift_field_ref,
+                "image_shift": image_shift_field_ref,
+                "cfg": cfg_field_ref,
                 # Z_image-specific fields
                 "z_image_diffusion_model": z_image_diffusion_model_field_ref,
                 "z_image_vae": z_image_vae_field_ref,
@@ -846,8 +913,8 @@ def get_training_config_page_content():
 
         # 6. Apply Dropdown Defaults (Timestep / Dtype)
         if not skip_defaults:
-            _safe_set_value(timestep_sm_dropdown_ref, mfc.get_timestep_sm_default(sel_norm))
-            _safe_set_value(transformer_dtype_dropdown_ref, mfc.get_transformer_dtype_default(sel_norm))
+            _safe_set_value(timestep_sm_dropdown_ref, mfc.get_timestep_sm_default(sel_norm, trainer))
+            _safe_set_value(transformer_dtype_dropdown_ref, mfc.get_transformer_dtype_default(sel_norm, trainer))
 
         # 6.5. Apply Musubi-specific precision defaults (for all musubi trainer types)
         if uses_musubi_ui and not skip_defaults:
@@ -1054,8 +1121,16 @@ def get_training_config_page_content():
                             create_textfield(
                                 "model_path",
                                 "",
-                                col=12, expand=True, ref=model_path_field_ref,
+                                col=6, expand=True, ref=model_path_field_ref,
                                 visible=_should_show_field("model_path")
+                            ),
+                            # MiniMax H3 only: optional base-weights adapter
+                            # (--base_weights); hidden for all other models.
+                            create_textfield(
+                                "adapter_path",
+                                "",
+                                col=6, expand=True, ref=adapter_path_field_ref,
+                                visible=_should_show_field("adapter_path")
                             ),
                         ],
                         ref=checkpoint_row_ref,
@@ -1209,6 +1284,18 @@ def get_training_config_page_content():
                                 create_textfield(
                                     "shift", "3",
                                     col=12, expand=True, ref=flux2_shift_field_ref
+                                ),
+                                create_textfield(
+                                    "image_shift", "",
+                                    col=12, expand=True, ref=image_shift_field_ref,
+                                    visible=_should_show_field("image_shift"),
+                                    tooltip="Timestep shift for single-frame (image) samples. Videos use 'shift' (MiniMax H3).",
+                                ),
+                                create_textfield(
+                                    "cfg", "",
+                                    col=12, expand=True, ref=cfg_field_ref,
+                                    visible=_should_show_field("cfg"),
+                                    tooltip="CFG-augmented training to preserve distillation (MiniMax H3). Use either this or a training adapter, not both.",
                                 ),
                             ], col=6, spacing=2),
                         ],
@@ -1377,7 +1464,7 @@ def get_training_config_page_content():
                         create_dropdown(
                             "H3 mode",
                             "fl2va",
-                            {"t2va": "t2va", "i2va": "i2va", "fl2va": "fl2va", "ref2va": "ref2va", "txt_slider": "txt slider", "img_slider": "img slider"},
+                            {"t2va": "t2va", "i2va": "i2va", "fl2va": "fl2va", "ref2va": "ref2va", "txt_slider": "txt slider", "img_slider": "img slider", "visual_slider": "visual slider"},
                             col=2.5, expand=True, scale=0.8, ref=h3_training_mode_dropdown_ref,
                             visible=_should_show_field("h3_training_mode"),
                             on_change=_on_h3_mode_change
@@ -1391,16 +1478,16 @@ def get_training_config_page_content():
                         ),
                         create_textfield(
                             "target_class", "cinematic scene",
-                            hint_text="Target class (txt slider mode)",
+                            hint_text="Target class / shared slider prompt",
                             expand=True, col=3.5 ,
                             ref=target_class_field_ref,
-                            visible=False  # Only visible when H3 mode is txt_slider
+                            visible=False  # Only visible when H3 mode is txt_slider or visual_slider
                         ),
                         create_textfield(
                             "latent_FHW", "2,12,20",
                             hint_text="Latent F,H,W; frames auto-round up to 5n+2 (2,7,12..), H/W to even",
                             tooltip=(
-                                "Latent grid for txt slider training: frames,height,width\n"
+                                "Latent grid for txt/visual slider training: frames,height,width\n"
                                 "Latents are synthetic zeros, so this only sets the DiT token grid size.\n"
                                 "\n"
                                 "Pixels = H/W x 16 (24x40 = 384x640)\n"
@@ -1415,7 +1502,7 @@ def get_training_config_page_content():
                             ),
                             expand=True, col=2, scale=0.8,
                             ref=latent_fhw_field_ref,
-                            visible=False  # Only visible when H3 mode is txt_slider
+                            visible=False  # Only visible when H3 mode is txt_slider or visual_slider
                         ),
                         create_textfield(
                             "target_fps", "25",
@@ -1472,24 +1559,100 @@ def get_training_config_page_content():
                             visible=False  # Only visible when ic_lora is checked
                         ),
                     ], spacing=2),
-                    # txt_slider prompts row: positive (full width)
+                    # H3 visual_slider conditioning row: endpoint scale vs extrapolated teacher
+                    ft.ResponsiveRow(controls=[
+                        create_textfield(
+                            "g_strength", "2.0",
+                            hint_text="Endpoint direction scale (forced to 1.0 when cond_extp > 0)",
+                            tooltip=(
+                                "H3 visual slider guidance_strength (endpoint mode only)\n"
+                                "Scales how far the +1 endpoint target extends past the\n"
+                                "positive image's own conditioning direction.\n"
+                                "\n"
+                                "Ignored when cond_extp > 0: extrapolation mode requires\n"
+                                "guidance_strength = 1.0 (the trainer enforces this)."
+                            ),
+                            expand=True, col=2, scale=0.8,
+                            ref=h3_slider_g_strength_field_ref,
+                            visible=False  # Only visible when H3 mode is visual_slider
+                        ),
+                        create_textfield(
+                            "cond_extp", "0.0",
+                            hint_text="0 = endpoints only; >0 trains m in [-x, +x] via teacher (needs g_strength 1.0)",
+                            tooltip=(
+                                "H3 visual slider conditioning_extrapolation\n"
+                                "0.0: distill only the two image endpoints (+1/-1).\n"
+                                "\n"
+                                "> 0: each step draws m in [-x, +x], queries the frozen\n"
+                                "teacher at the extrapolated sunny<->foggy conditioning\n"
+                                "blend for that m, and calibrates the LoRA multiplier axis\n"
+                                "continuously. Values > 1 also train beyond the endpoints\n"
+                                "(e.g. 2.0 = 'extra foggy' at weight -2). Keeps sample_slider\n"
+                                "_range within [-x, +x] for validation sampling.\n"
+                                "Requires guidance_strength = 1.0 (auto-forced on save)."
+                            ),
+                            expand=True, col=2, scale=0.8,
+                            ref=h3_cond_extrapolation_field_ref,
+                            visible=False  # Only visible when H3 mode is visual_slider
+                        ),
+                        create_textfield(
+                            "img_dir_scale", "4.0",
+                            hint_text="Conditioning-axis rescale; 1.0 = raw pair difference (needs cond_extp > 0)",
+                            tooltip=(
+                                "H3 visual slider direction_scale\n"
+                                "Same-scene image pairs sit only a few percent apart in\n"
+                                "Qwen conditioning space, so the raw pair difference needs\n"
+                                "|m| ~ 10+ for visible change. This rescales the axis so one\n"
+                                "multiplier unit is a human-sized step: the endpoint images\n"
+                                "sit at m = ±1/img_dir_scale (4.0 -> ±0.25).\n"
+                                "\n"
+                                "Applies to the whole direction: image rows AND per-side\n"
+                                "text rows when positive/negative descriptors are filled.\n"
+                                "Only used when cond_extp > 0 (musubi requires it)."
+                            ),
+                            expand=True, col=2, scale=0.8,
+                            ref=h3_img_dir_scale_field_ref,
+                            visible=False  # Only visible when H3 mode is visual_slider
+                        ),
+                    ], spacing=2),
+                    # slider prompts row: positive (full width)
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "positive", "a very sunny scene",
-                            hint_text="Positive prompt",
+                            hint_text="Positive prompt (txt) / positive-side descriptor (visual)",
+                            tooltip=(
+                                "txt_slider: the full positive prompt.\n"
+                                "\n"
+                                "visual_slider: descriptor appended to the shared class\n"
+                                "prompt for the POSITIVE image only, e.g.\n"
+                                "  target_class: 'cinematic scene'\n"
+                                "  positive:     'warm golden-hour grade'\n"
+                                "-> Qwen sees 'cinematic scene, warm golden-hour grade'\n"
+                                "next to the positive image, so the slider direction\n"
+                                "spans the instruction rows as well as the image rows.\n"
+                                "Leave empty for an image-only axis. The negative side\n"
+                                "must be filled (or emptied) together with this one."
+                            ),
                             expand=True, col=12 ,
                             ref=positive_field_ref,
-                            visible=False  # Only visible when H3 mode is txt_slider
+                            visible=False  # Only visible when H3 mode is txt_slider or visual_slider
                         ),
                     ], spacing=2),
-                    # txt_slider prompts row: negative (full width)
+                    # slider prompts row: negative (full width)
                     ft.ResponsiveRow(controls=[
                         create_textfield(
                             "negative", "a very foggy scene",
-                            hint_text="Negative prompt",
+                            hint_text="Negative prompt (txt) / negative-side descriptor (visual)",
+                            tooltip=(
+                                "txt_slider: the full negative prompt.\n"
+                                "\n"
+                                "visual_slider: descriptor appended to the shared class\n"
+                                "prompt for the NEGATIVE image only; pairs with the\n"
+                                "positive-side descriptor (both filled or both empty)."
+                            ),
                             expand=True, col=12 ,
                             ref=negative_field_ref,
-                            visible=False  # Only visible when H3 mode is txt_slider
+                            visible=False  # Only visible when H3 mode is txt_slider or visual_slider
                         ),
                     ], spacing=2),
                     ft.ResponsiveRow(controls=[
