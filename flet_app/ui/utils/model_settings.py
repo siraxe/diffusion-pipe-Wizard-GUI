@@ -572,7 +572,11 @@ def postprocess_visibility_after_apply(label_vals: dict, page: ft.Page, model_ty
     is_minimax_h3_dpipe = is_minimax_h3 and not is_musubi_trainer
 
     try:
-        if getattr(model_type_dropdown_ref, 'current', None) and getattr(model_type_dropdown_ref.current, 'value', None):
+        # Only fall back to the dropdown's CURRENT value when the TOML didn't
+        # provide a Model Type. Otherwise the stale dropdown value (the model
+        # selected before the load) gets OR-ed in and forces the OLD model's
+        # fields visible (e.g. LTX fields when loading a minimaxH3 config).
+        if 'Model Type' not in label_vals and getattr(model_type_dropdown_ref, 'current', None) and getattr(model_type_dropdown_ref.current, 'value', None):
             curv = str(model_type_dropdown_ref.current.value).strip().lower()
             is_wan22 = is_wan22 or (curv == 'wan22')
             is_auraflow = is_auraflow or (curv == 'auraflow')

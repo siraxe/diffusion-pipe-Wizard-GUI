@@ -424,39 +424,68 @@ def apply_values_recursive(control: Any, label_vals: dict, page: Any) -> None:
 
 def apply_all_values(container: Any, label_vals: dict, page: Any) -> None:
     """Apply values to main config, dataset, and monitor containers."""
-    # Handle Trainer dropdown first
-    if 'Trainer' in label_vals:
+    # Suppress model defaults for the whole load: the trainer/model-type
+    # handlers below fire on_model_type_change() with intermediate states,
+    # which would otherwise reset fields and re-apply the wrong model's
+    # defaults (e.g. LTX defaults when loading a minimaxH3 config).
+    try:
+        from flet_app.ui.pages.training_config import suppress_model_defaults
+    except Exception:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def suppress_model_defaults():
+            yield
+
+    with suppress_model_defaults():
+        # Pre-set the Model Type value WITHOUT triggering handlers, so the
+        # Trainer change below preserves it instead of falling back to the
+        # first musubi model (which left the UI stuck on LTX fields).
         try:
-            from flet_app.ui.pages.training_config import trainer_dropdown_ref
-            if trainer_dropdown_ref and trainer_dropdown_ref.current:
-                trainer_dropdown_ref.current.value = str(label_vals['Trainer'])
-                if trainer_dropdown_ref.current.page:
-                    trainer_dropdown_ref.current.update()
-                if callable(getattr(trainer_dropdown_ref.current, 'on_change', None)):
-                    class _E: pass
-                    e = _E()
-                    setattr(e, 'control', trainer_dropdown_ref.current)
-                    setattr(e, 'page', page)
-                    trainer_dropdown_ref.current.on_change(e)
+            from flet_app.ui.pages.training_config import model_type_dropdown_ref
+            if model_type_dropdown_ref and model_type_dropdown_ref.current and 'Model Type' in label_vals:
+                model_type_dropdown_ref.current.value = str(label_vals['Model Type'])
         except Exception:
             pass
 
-    # Handle Model Type dropdown (must run after Trainer since trainer affects model options)
-    if 'Model Type' in label_vals:
-        try:
-            from flet_app.ui.pages.training_config import model_type_dropdown_ref, on_model_type_change
-            if model_type_dropdown_ref and model_type_dropdown_ref.current:
-                model_type_dropdown_ref.current.value = str(label_vals['Model Type'])
-                if model_type_dropdown_ref.current.page:
-                    model_type_dropdown_ref.current.update()
-                if callable(on_model_type_change):
-                    class _E: pass
-                    e = _E()
-                    setattr(e, 'control', model_type_dropdown_ref.current)
-                    setattr(e, 'page', page)
-                    on_model_type_change(e, from_toml_load=True)
-        except Exception:
-            pass
+        # Handle Trainer dropdown first
+        if 'Trainer' in label_vals:
+            try:
+                from flet_app.ui.pages.training_config import trainer_dropdown_ref
+                if trainer_dropdown_ref and trainer_dropdown_ref.current:
+                    trainer_dropdown_ref.current.value = str(label_vals['Trainer'])
+                    if trainer_dropdown_ref.current.page:
+                        trainer_dropdown_ref.current.update()
+                    if callable(getattr(trainer_dropdown_ref.current, 'on_change', None)):
+                        class _E: pass
+                        e = _E()
+                        setattr(e, 'control', trainer_dropdown_ref.current)
+                        setattr(e, 'page', page)
+                        trainer_dropdown_ref.current.on_change(e)
+            except Exception:
+                pass
+
+        # Handle Model Type dropdown (must run after Trainer since trainer affects model options)
+        if 'Model Type' in label_vals:
+            try:
+                from flet_app.ui.pages.training_config import model_type_dropdown_ref
+                if model_type_dropdown_ref and model_type_dropdown_ref.current:
+                    model_type_dropdown_ref.current.value = str(label_vals['Model Type'])
+                    if model_type_dropdown_ref.current.page:
+                        model_type_dropdown_ref.current.update()
+                    # NOTE: on_model_type_change is a closure defined inside
+                    # get_training_config_page_content() and CANNOT be imported
+                    # at module level (the old import raised ImportError which
+                    # was silently swallowed, so visibility never updated on
+                    # first open). Call the dropdown's bound handler instead.
+                    if callable(getattr(model_type_dropdown_ref.current, 'on_change', None)):
+                        class _E: pass
+                        e = _E()
+                        setattr(e, 'control', model_type_dropdown_ref.current)
+                        setattr(e, 'page', page)
+                        model_type_dropdown_ref.current.on_change(e)
+            except Exception:
+                pass
 
     # Apply to config page
     try:
